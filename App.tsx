@@ -1,5 +1,9 @@
+
 import React, { useState, useEffect, useContext, createContext, useMemo, useCallback, useRef } from 'react';
 import { Customer, Product, OrderItem, Order, Page, AlertState, AppContextType } from './types';
+import * as XLSX from 'xlsx';
+import * as docx from 'docx';
+import * as ZXing from '@zxing/library';
 
 // --- From types.ts --- (Types are now imported from types.ts)
 
@@ -40,9 +44,6 @@ function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dispatch<R
 }
 
 // --- From services/dataService.ts ---
-declare const XLSX: any;
-declare const docx: any;
-
 const parseExcelFile = (file: File): Promise<any[]> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -180,7 +181,8 @@ const exportToDOCX = async (order: Order, isParcelDelivery: boolean) => {
             {
                 properties: {
                     type: SectionType.CONTINUOUS,
-                    column: { count: 2, space: 720, separator: true },
+                    // FIX: Changed 'separator' to 'separate' to fix typo.
+                    column: { count: 2, space: 720, separate: true },
                 },
                 children: itemParagraphs,
             }
@@ -344,7 +346,6 @@ const AlertModal: React.FC<{ isOpen: boolean; message: string; onClose: () => vo
 
 
 // --- From components/ScannerModal.tsx ---
-declare const ZXing: any;
 const ScannerModal: React.FC<{ isOpen: boolean; onClose: () => void; onScanSuccess: (barcode: string) => void; }> = ({ isOpen, onClose, onScanSuccess }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const codeReaderRef = useRef<any>(null);
