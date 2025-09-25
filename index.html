@@ -13,6 +13,8 @@
     <script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
     <!-- ZXing library for barcode scanning -->
     <script src="https://unpkg.com/@zxing/library@0.21.0/umd/index.min.js"></script>
+    <!-- Add Babel Standalone for in-browser TSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Base fonts -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -48,5 +50,7 @@
 </head>
 <body class="bg-slate-100 antialiased">
     <div id="root" class="h-full w-full max-w-lg mx-auto bg-white shadow-lg"></div>
+    <!-- Add entry point script with Babel for transformation -->
+    <script type="text/babel" data-type="module" src="./index.tsx"></script>
 </body>
 </html>
