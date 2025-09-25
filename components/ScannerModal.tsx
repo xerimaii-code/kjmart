@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useContext } from 'react';
 import { AppContext } from '../context/AppContext';
 
@@ -28,8 +29,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 ZXing.BarcodeFormat.ITF,
             ];
             hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-            // Removing TRY_HARDER might improve real-time scanning performance by not spending too long on blurry frames.
-            // hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+            hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
             // Assume GS1 format for common product barcodes to potentially speed up recognition
             hints.set(ZXing.DecodeHintType.ASSUME_GS1, true);
             codeReaderRef.current = new ZXing.BrowserMultiFormatReader(hints);
@@ -96,22 +96,15 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
     return (
         <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center">
-            <video ref={videoRef} className="absolute top-0 left-0 w-full h-full object-cover" playsInline />
-            
-            {/* Dark overlay with viewfinder cutout */}
+            <video ref={videoRef} className="absolute top-0 left-0 w-full h-full object-cover" playsInline></video>
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-[90%] max-w-md">
-                    <div className="relative aspect-[4/1.25] shadow-[0_0_0_9999px_rgba(0,0,0,0.7)] rounded-xl">
-                        {/* Corner markers for the viewfinder */}
-                        <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white/90 rounded-tl-xl" />
-                        <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-white/90 rounded-tr-xl" />
-                        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-white/90 rounded-bl-xl" />
-                        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white/90 rounded-br-xl" />
+                <div className="w-[90%] max-w-xl h-24 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.7)] rounded-lg">
+                    <div className="absolute inset-0 border-2 border-white/75 rounded-lg"></div>
+                    <div className="absolute top-0 left-0 w-full h-full overflow-hidden rounded-lg">
+                        <div className="scan-line-animation absolute top-0 w-full h-[2px] bg-red-500/90 shadow-[0_0_8px_theme(colors.red.400)]"></div>
                     </div>
-                    <p className="text-white text-center mt-4 text-lg font-medium">바코드를 영역 안에 맞춰주세요</p>
                 </div>
             </div>
-
             <button
                 onClick={onClose}
                 className="absolute bottom-10 bg-white text-gray-800 px-8 py-3 rounded-full text-lg font-bold shadow-lg"

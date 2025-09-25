@@ -37,6 +37,14 @@
             padding-bottom: 250px !important;
             transition: padding-bottom 0.2s ease-in-out;
         }
+        /* Scanner animation */
+        @keyframes scan-line {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(calc(6rem - 2px)); } /* 6rem is h-24 */
+        }
+        .scan-line-animation {
+            animation: scan-line 2s ease-in-out infinite alternate;
+        }
     </style>
 <script type="importmap">
 {
