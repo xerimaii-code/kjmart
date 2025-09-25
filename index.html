@@ -9,19 +9,17 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- SheetJS (XLSX) library for Excel reading -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- jsPDF for PDF generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <!-- jsPDF-autotable for PDF tables -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
-    <!-- zxing-js for barcode scanning -->
-    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js"></script>
-    <!-- Nanum Gothic font for PDF Korean support -->
+    <!-- docx for DOCX generation -->
+    <script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
+    <!-- ZXing library for barcode scanning -->
+    <script src="https://unpkg.com/@zxing/library@0.21.0/umd/index.min.js"></script>
+    <!-- Base fonts -->
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Nanum+Gothic:wght@400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         html, body, #root {
             height: 100%;
             overflow: hidden;
-            font-family: 'Inter', 'Nanum Gothic', sans-serif;
+            font-family: 'Inter', sans-serif;
         }
         .main-content {
             height: calc(100% - 9rem); /* Adjust based on header (5rem) and nav (4rem) height */
@@ -36,14 +34,6 @@
         .keyboard-padding {
             padding-bottom: 250px !important;
             transition: padding-bottom 0.2s ease-in-out;
-        }
-        /* Scanner animation */
-        @keyframes scan-line {
-            0% { transform: translateY(0); }
-            100% { transform: translateY(calc(6rem - 2px)); } /* 6rem is h-24 */
-        }
-        .scan-line-animation {
-            animation: scan-line 2s ease-in-out infinite alternate;
         }
     </style>
 <script type="importmap">

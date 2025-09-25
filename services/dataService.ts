@@ -3,7 +3,7 @@ import { Customer, Order, Product } from "../types";
 
 // Assuming these libraries are loaded from CDN
 declare const XLSX: any;
-declare const jspdf: any;
+declare const docx: any;
 
 // --- FILE PARSING ---
 
@@ -74,70 +74,106 @@ export const exportToXLS = (order: Order) => {
     XLSX.writeFile(workbook, `발주서_${order.customer.name}_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
 
-const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
+export const exportToDOCX = async (order: Order, isParcelDelivery: boolean) => {
+    if (typeof docx === 'undefined') {
+        alert("DOCX 라이브러리를 불러오는 데 실패했습니다. 잠시 후 다시 시도해주세요.");
+        console.error("DOCX library (from CDN) is not available.");
+        return;
     }
-    return window.btoa(binary);
-};
 
-export const exportToPDF = async (order: Order) => {
-    const { jsPDF } = jspdf;
-    const doc = new jsPDF();
-    
-    // Fetch and add Nanum Gothic font for Korean support
-    try {
-        const fontResponse = await fetch('https://fonts.gstatic.com/s/nanumgothic/v17/PN_3Rfi-oZ3f2eTy_tvA9gh-8fQ.woff');
-        if (!fontResponse.ok) throw new Error('Font not loaded');
-        const font = await fontResponse.arrayBuffer();
+    const { Document, Packer, Paragraph, TextRun, AlignmentType, SectionType } = docx;
 
-        doc.addFileToVFS('NanumGothic.ttf', arrayBufferToBase64(font));
-        doc.addFont('NanumGothic.ttf', 'NanumGothic', 'normal');
-        doc.addFont('NanumGothic.ttf', 'NanumGothic', 'bold');
-        
-        doc.setFont('NanumGothic', 'bold');
-        doc.setFontSize(20);
-        doc.text("경진마트 발주서", 105, 20, { align: 'center' });
+    const titleChildren = [
+        new Paragraph({
+            style: "titleStyle",
+            text: "경진마트 발주서",
+        }),
+    ];
 
-        doc.setFont('NanumGothic', 'normal');
-        doc.setFontSize(12);
-        doc.text(`거래처: ${order.customer.name}`, 14, 35);
-        doc.text(`발주일자: ${new Date(order.date).toLocaleDateString('ko-KR')}`, 196, 35, { align: 'right' });
+    if (isParcelDelivery) {
+        titleChildren.push(new Paragraph({
+            style: "parcelStyle",
+            text: "택배로 배송해주세요",
+        }));
+    } else {
+        // Add a blank paragraph for spacing if parcel text isn't there
+        titleChildren.push(new Paragraph({ text: "" }));
+    }
 
-        const tableColumn = ["바코드", "품명", "발주수량"];
-        const tableRows = order.items.map(item => [
-            item.barcode,
-            item.name,
-            `${item.quantity} ${item.unit}`
-        ]);
+    const itemParagraphs = order.items.map(item =>
+        new Paragraph({
+            style: "itemStyle",
+            children: [
+                new TextRun(`${item.name} `),
+                new TextRun({
+                    text: String(item.quantity),
+                    bold: true,
+                }),
+                new TextRun(item.unit),
+            ],
+        })
+    );
 
-        (doc as any).autoTable({
-            head: [tableColumn],
-            body: tableRows,
-            startY: 45,
-            theme: 'grid',
-            styles: {
-                font: 'NanumGothic',
-                fontStyle: 'normal'
+    const doc = new Document({
+        styles: {
+            paragraphStyles: [
+                {
+                    id: "titleStyle",
+                    name: "Title Style",
+                    basedOn: "Normal",
+                    next: "Normal",
+                    run: { size: 50, bold: true }, // 25pt
+                    paragraph: { alignment: AlignmentType.CENTER, spacing: { after: 240 } },
+                },
+                {
+                    id: "parcelStyle",
+                    name: "Parcel Style",
+                    basedOn: "Normal",
+                    next: "Normal",
+                    run: { size: 40 }, // 20pt
+                    paragraph: { alignment: AlignmentType.CENTER, spacing: { after: 480 } },
+                },
+                {
+                    id: "itemStyle",
+                    name: "Item Style",
+                    basedOn: "Normal",
+                    next: "Normal",
+                    run: { size: 20 }, // 10pt
+                    paragraph: { spacing: { line: 360 } }, // 1.5 line spacing for readability
+                },
+            ],
+        },
+        sections: [
+            { // Section 1: Title (single column)
+                children: titleChildren,
             },
-            headStyles: {
-                fillColor: [22, 160, 133],
-                textColor: 255,
-                fontStyle: 'bold'
-            },
-            columnStyles: {
-                0: { halign: 'center' },
-                2: { halign: 'left' }
+            { // Section 2: Items (two columns)
+                properties: {
+                    type: SectionType.CONTINUOUS,
+                    column: {
+                        count: 2,
+                        space: 720, // Corresponds to 0.5 inches
+                        separator: true,
+                    },
+                },
+                children: itemParagraphs,
             }
-        });
+        ],
+    });
 
-        doc.save(`발주서_${order.customer.name}_${new Date().toISOString().slice(0,10)}.pdf`);
-
+    try {
+        const blob = await Packer.toBlob(doc);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const today = new Date().toISOString().slice(0, 10);
+        link.download = `발주서_${order.customer.name}_${today}.docx`;
+        link.href = url;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     } catch (error) {
-        console.error("PDF Export Error:", error);
-        alert("PDF 생성에 실패했습니다. 폰트를 불러올 수 없습니다.");
+        console.error("DOCX Export Error:", error);
+        alert("DOCX 파일 생성에 실패했습니다.");
     }
 };

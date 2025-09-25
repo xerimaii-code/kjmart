@@ -24,5 +24,3 @@ export interface Order {
 }
 
 export type Page = 'new-order' | 'history' | 'settings';
-
-export type ScannerContext = 'new-order' | 'modal' | null;

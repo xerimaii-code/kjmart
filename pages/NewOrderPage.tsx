@@ -2,7 +2,8 @@
 import React, { useState, useContext, useMemo, useEffect, useCallback, useRef } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Customer, Product, OrderItem } from '../types';
-import { AddIcon, RemoveIcon } from '../components/Icons';
+import { RemoveIcon, ScanIcon } from '../components/Icons';
+import ScannerModal from '../components/ScannerModal';
 
 interface SearchDropdownProps<T> {
     items: T[];
@@ -25,7 +26,7 @@ const SearchDropdown = <T,>({ items, renderItem, onSelect, show }: SearchDropdow
 };
 
 const NewOrderPage: React.FC = () => {
-    const { customers, products, addOrder, showAlert, openScanner, setOnScanSuccess, setHasUnsavedChanges } = useContext(AppContext);
+    const { customers, products, addOrder, showAlert, setHasUnsavedChanges } = useContext(AppContext);
 
     const [currentOrderItems, setCurrentOrderItems] = useState<OrderItem[]>([]);
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -35,6 +36,7 @@ const NewOrderPage: React.FC = () => {
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
     const [isCustomerLocked, setIsCustomerLocked] = useState(false);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
     
     const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const scrollableContainerRef = useRef<HTMLDivElement>(null);
@@ -79,17 +81,18 @@ const NewOrderPage: React.FC = () => {
             }
         }
     }, [currentOrderItems, showAlert, selectedCustomer]);
+    
+    const handleScanSuccess = useCallback((barcode: string) => {
+        const product = products.find(p => p.barcode === barcode);
+        if (product) {
+            addProduct(product);
+        } else {
+            showAlert(`바코드 '${barcode}'에 해당하는 상품을 찾을 수 없습니다.`);
+        }
+    }, [products, addProduct, showAlert]);
 
-    useEffect(() => {
-        setOnScanSuccess((barcode: string) => {
-            const product = products.find(p => p.barcode === barcode);
-            if (product) {
-                addProduct(product);
-            } else {
-                showAlert("등록되지 않은 바코드입니다.");
-            }
-        });
-    }, [products, setOnScanSuccess, showAlert, addProduct]);
+    const closeScanner = useCallback(() => setIsScannerOpen(false), []);
+
 
     useEffect(() => {
         // Only scroll to bottom if a new item was added
@@ -168,6 +171,11 @@ const NewOrderPage: React.FC = () => {
 
     return (
         <div className="h-full flex flex-col bg-slate-50">
+            <ScannerModal 
+                isOpen={isScannerOpen}
+                onClose={closeScanner}
+                onScanSuccess={handleScanSuccess}
+            />
             <div className="fixed-filter p-4 bg-white border-b border-slate-200 space-y-4 flex-shrink-0">
                 <div className="flex items-center space-x-2">
                     <div className="relative flex-grow">
@@ -224,20 +232,25 @@ const NewOrderPage: React.FC = () => {
                             show={showProductDropdown}
                         />
                     </div>
-                    <button onClick={() => openScanner('new-order')} className="p-3 bg-sky-500 text-white rounded-md hover:bg-sky-600 flex-shrink-0 shadow-sm">
-                        <AddIcon />
+                    <button 
+                        onClick={() => setIsScannerOpen(true)}
+                        className="p-3 bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 flex-shrink-0"
+                        aria-label="Scan product barcode"
+                    >
+                        <ScanIcon />
                     </button>
                 </div>
             </div>
             <div ref={scrollableContainerRef} className="scrollable-content p-4 flex-grow">
                 {currentOrderItems.length === 0 ? (
                     <div className="flex items-center justify-center h-full">
-                        <p className="text-slate-500">스캔 또는 검색하여 상품을 추가하세요.</p>
+                        <p className="text-slate-500">검색 또는 스캔하여 상품을 추가하세요.</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
                         {currentOrderItems.map(item => (
-                            <div key={item.barcode} ref={el => itemRefs.current.set(item.barcode, el)} className="flex items-center p-3 bg-white rounded-lg shadow-sm space-x-3">
+                            // Fix: The ref callback for a DOM element should not return a value. `Map.set` returns the map instance, so we wrap it in curly braces to ensure the callback has a void return.
+                            <div key={item.barcode} ref={el => { itemRefs.current.set(item.barcode, el); }} className="flex items-center p-3 bg-white rounded-lg shadow-sm space-x-3">
                                 <div className="flex-1 min-w-0">
                                     <p className="font-semibold text-slate-800">{item.name}</p>
                                 </div>

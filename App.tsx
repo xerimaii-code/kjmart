@@ -8,7 +8,6 @@ import SettingsPage from './pages/SettingsPage';
 import BottomNav from './components/BottomNav';
 import AlertModal from './components/AlertModal';
 import OrderDetailModal from './components/OrderDetailModal';
-import ScannerModal from './components/ScannerModal';
 import Header from './components/Header';
 
 const AppContent: React.FC = () => {
@@ -17,10 +16,7 @@ const AppContent: React.FC = () => {
     const { 
         alert, 
         hideAlert, 
-        isDetailModalOpen, 
-        isScannerOpen,
-        onScanSuccess,
-        closeScanner,
+        isDetailModalOpen,
         hasUnsavedChanges,
         showAlert,
      } = useContext(AppContext);
@@ -100,7 +96,6 @@ const AppContent: React.FC = () => {
                 confirmButtonClass={alert.confirmButtonClass}
             />
             {isDetailModalOpen && <OrderDetailModal />}
-            <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />
         </div>
     );
 };

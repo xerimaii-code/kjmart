@@ -100,9 +100,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="w-[90%] max-w-xl h-24 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.7)] rounded-lg">
                     <div className="absolute inset-0 border-2 border-white/75 rounded-lg"></div>
-                    <div className="absolute top-0 left-0 w-full h-full overflow-hidden rounded-lg">
-                        <div className="scan-line-animation absolute top-0 w-full h-[2px] bg-red-500/90 shadow-[0_0_8px_theme(colors.red.400)]"></div>
-                    </div>
                 </div>
             </div>
             <button

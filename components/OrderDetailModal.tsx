@@ -2,8 +2,9 @@
 import React, { useState, useContext, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Order, OrderItem, Product } from '../types';
-import { AddIcon, RemoveIcon } from './Icons';
-import { exportToSMS, exportToXLS, exportToPDF } from '../services/dataService';
+import { RemoveIcon, ScanIcon } from './Icons';
+import { exportToSMS, exportToXLS, exportToDOCX } from '../services/dataService';
+import ScannerModal from './ScannerModal';
 
 const OrderDetailModal: React.FC = () => {
     const { 
@@ -14,8 +15,6 @@ const OrderDetailModal: React.FC = () => {
         deleteOrder,
         products, 
         showAlert,
-        openScanner,
-        setOnScanSuccess,
     } = useContext(AppContext);
     
     const order = useMemo(() => orders.find(o => o.id === editingOrderId), [orders, editingOrderId]);
@@ -24,6 +23,8 @@ const OrderDetailModal: React.FC = () => {
     const [productSearch, setProductSearch] = useState('');
     const [showDropdown, setShowDropdown] = useState(false);
     const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+    const [isParcelDelivery, setIsParcelDelivery] = useState(false);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
 
     const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const scrollableContainerRef = useRef<HTMLDivElement>(null);
@@ -34,6 +35,7 @@ const OrderDetailModal: React.FC = () => {
             const initialItems = JSON.parse(JSON.stringify(order.items));
             setEditedItems(initialItems);
             lastItemCount.current = initialItems.length;
+            setIsParcelDelivery(false); // Reset checkbox on new modal open
         }
     }, [order]);
     
@@ -63,16 +65,16 @@ const OrderDetailModal: React.FC = () => {
         }
     }, [editedItems, showAlert]);
 
-    useEffect(() => {
-        setOnScanSuccess((barcode: string) => {
-            const product = products.find(p => p.barcode === barcode);
-            if (product) {
-                addProduct(product);
-            } else {
-                showAlert("등록되지 않은 바코드입니다.");
-            }
-        });
-    }, [products, setOnScanSuccess, showAlert, addProduct]);
+    const handleScanSuccess = useCallback((barcode: string) => {
+        const product = products.find(p => p.barcode === barcode);
+        if (product) {
+            addProduct(product);
+        } else {
+            showAlert(`바코드 '${barcode}'에 해당하는 상품을 찾을 수 없습니다.`);
+        }
+    }, [products, addProduct, showAlert]);
+
+    const closeScanner = useCallback(() => setIsScannerOpen(false), []);
 
     useEffect(() => {
         if (scrollableContainerRef.current && editedItems.length > lastItemCount.current) {
@@ -149,6 +151,11 @@ const OrderDetailModal: React.FC = () => {
 
     return (
         <div className={`fixed inset-0 bg-black bg-opacity-60 z-40 flex justify-center p-4 transition-all duration-300 ${isKeyboardVisible ? 'items-start pt-8' : 'items-center'}`}>
+            <ScannerModal 
+                isOpen={isScannerOpen}
+                onClose={closeScanner}
+                onScanSuccess={handleScanSuccess}
+            />
             <div className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col h-[90vh] overflow-hidden">
                 <div className="flex justify-between items-center p-4 border-b border-slate-200 flex-shrink-0">
                     <div>
@@ -185,8 +192,12 @@ const OrderDetailModal: React.FC = () => {
                                 </div>
                             )}
                         </div>
-                        <button onClick={() => openScanner('modal')} className="p-2 bg-sky-500 text-white rounded-md flex-shrink-0 hover:bg-sky-600 shadow-sm">
-                            <AddIcon />
+                         <button 
+                            onClick={() => setIsScannerOpen(true)}
+                            className="p-2 bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 flex-shrink-0"
+                            aria-label="Scan product barcode"
+                        >
+                            <ScanIcon />
                         </button>
                     </div>
                 </div>
@@ -194,7 +205,8 @@ const OrderDetailModal: React.FC = () => {
                 <div ref={scrollableContainerRef} className="flex-grow p-4 overflow-y-auto bg-slate-50">
                     <div className="space-y-3">
                         {editedItems.map(item => (
-                             <div key={item.barcode} ref={el => itemRefs.current.set(item.barcode, el)} className="flex items-center p-3 bg-white rounded-lg shadow-sm space-x-3">
+                             // Fix: The ref callback for a DOM element should not return a value. `Map.set` returns the map instance, so we wrap it in curly braces to ensure the callback has a void return.
+                             <div key={item.barcode} ref={el => { itemRefs.current.set(item.barcode, el); }} className="flex items-center p-3 bg-white rounded-lg shadow-sm space-x-3">
                                 <div className="flex-1 min-w-0">
                                     <p className="font-semibold text-slate-800">{item.name}</p>
                                 </div>
@@ -232,6 +244,18 @@ const OrderDetailModal: React.FC = () => {
                         <span className="text-lg text-slate-600">총 합계:</span>
                         <span className="text-xl text-slate-800">{totalAmount.toLocaleString()} 원</span>
                     </div>
+                    <div className="flex items-center justify-end mb-4">
+                        <input
+                            type="checkbox"
+                            id="parcel-delivery-checkbox"
+                            checked={isParcelDelivery}
+                            onChange={(e) => setIsParcelDelivery(e.target.checked)}
+                            className="h-4 w-4 text-sky-600 border-slate-300 rounded focus:ring-sky-500"
+                        />
+                        <label htmlFor="parcel-delivery-checkbox" className="ml-2 block text-sm font-medium text-slate-700">
+                            택배배송
+                        </label>
+                    </div>
                     <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
                              <button onClick={handleUpdateOrder} className="w-full bg-emerald-500 text-white p-3 rounded-md font-bold hover:bg-emerald-600 transition shadow-sm">
@@ -244,7 +268,7 @@ const OrderDetailModal: React.FC = () => {
                         <div className="grid grid-cols-3 gap-2">
                             <button onClick={() => exportToSMS(getUpdatedOrderForExport())} className="bg-slate-600 text-white p-2 rounded-md text-sm font-semibold hover:bg-slate-700 transition">SMS</button>
                             <button onClick={() => exportToXLS(getUpdatedOrderForExport())} className="bg-slate-600 text-white p-2 rounded-md text-sm font-semibold hover:bg-slate-700 transition">XLS</button>
-                            <button onClick={() => exportToPDF(getUpdatedOrderForExport())} className="bg-slate-600 text-white p-2 rounded-md text-sm font-semibold hover:bg-slate-700 transition">PDF</button>
+                            <button onClick={() => exportToDOCX(getUpdatedOrderForExport(), isParcelDelivery)} className="bg-slate-600 text-white p-2 rounded-md text-sm font-semibold hover:bg-slate-700 transition">DOCX</button>
                         </div>
                     </div>
                 </div>

@@ -1,7 +1,7 @@
 
 import React, { createContext, useState, useCallback } from 'react';
 import useLocalStorage from '../hooks/useLocalStorage';
-import { Customer, Product, Order, ScannerContext } from '../types';
+import { Customer, Product, Order } from '../types';
 
 interface AlertState {
     isOpen: boolean;
@@ -21,8 +21,6 @@ interface AppContextType {
     addOrder: (order: Omit<Order, 'id' | 'date'>) => void;
     updateOrder: (updatedOrder: Order) => void;
     deleteOrder: (orderId: number) => void;
-    selectedCameraId: string | null;
-    setSelectedCameraId: (id: string | null) => void;
     alert: AlertState;
     showAlert: (message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string) => void;
     hideAlert: () => void;
@@ -30,14 +28,11 @@ interface AppContextType {
     editingOrderId: number | null;
     openDetailModal: (orderId: number) => void;
     closeDetailModal: () => void;
-    isScannerOpen: boolean;
-    scannerContext: ScannerContext;
-    openScanner: (context: ScannerContext) => void;
-    closeScanner: () => void;
-    onScanSuccess: (barcode: string) => void;
-    setOnScanSuccess: (callback: (barcode: string) => void) => void;
     hasUnsavedChanges: boolean;
     setHasUnsavedChanges: (hasChanges: boolean) => void;
+    // Fix: Add selectedCameraId and its setter to the context type to resolve usage in ScannerModal.
+    selectedCameraId: string | null;
+    setSelectedCameraId: (id: string | null) => void;
 }
 
 export const AppContext = createContext<AppContextType>({} as AppContextType);
@@ -46,15 +41,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const [customers, setCustomers] = useLocalStorage<Customer[]>('customers', []);
     const [products, setProducts] = useLocalStorage<Product[]>('products', []);
     const [orders, setOrders] = useLocalStorage<Order[]>('orders', []);
-    const [selectedCameraId, setSelectedCameraId] = useLocalStorage<string | null>('selectedCameraId', null);
 
     const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
-    const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const [scannerContext, setScannerContext] = useState<ScannerContext>(null);
-    const [scanSuccessCallback, setScanSuccessCallback] = useState<(barcode: string) => void>(() => () => {});
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    // Fix: Add state for the selected camera ID, persisted in local storage.
+    const [selectedCameraId, setSelectedCameraId] = useLocalStorage<string | null>('selectedCameraId', null);
 
 
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string) => {
@@ -92,27 +85,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setEditingOrderId(null);
     }, []);
 
-    const openScanner = useCallback((context: ScannerContext) => {
-        setScannerContext(context);
-        setIsScannerOpen(true);
-    }, []);
-
-    const closeScanner = useCallback(() => {
-        setIsScannerOpen(false);
-        setScannerContext(null);
-    }, []);
-
-    const onScanSuccess = useCallback((barcode: string) => {
-        if(scanSuccessCallback) {
-            scanSuccessCallback(barcode);
-        }
-    },[scanSuccessCallback]);
-
-    const setOnScanSuccess = useCallback((callback: (barcode: string) => void) => {
-        setScanSuccessCallback(() => callback);
-    }, []);
-
-
     return (
         <AppContext.Provider value={{
             customers,
@@ -124,8 +96,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             addOrder,
             updateOrder,
             deleteOrder,
-            selectedCameraId,
-            setSelectedCameraId,
             alert,
             showAlert,
             hideAlert,
@@ -133,14 +103,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             editingOrderId,
             openDetailModal,
             closeDetailModal,
-            isScannerOpen,
-            scannerContext,
-            openScanner,
-            closeScanner,
-            onScanSuccess,
-            setOnScanSuccess,
             hasUnsavedChanges,
             setHasUnsavedChanges,
+            // Fix: Provide selectedCameraId and its setter to context consumers.
+            selectedCameraId,
+            setSelectedCameraId,
         }}>
             {children}
         </AppContext.Provider>
