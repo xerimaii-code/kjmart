@@ -1,126 +1,82 @@
-
 import React, { useEffect, useRef, useContext } from 'react';
-import { AppContext } from '../context/AppContext.tsx';
+import { AppContext } from '../context/AppContext';
 
-// Assuming ZXing is loaded from a CDN and available on the window object
+// CDN에서 전역으로 로드된 ZXing을 가정합니다.
 declare const ZXing: any;
 
 interface ScannerModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    onScanSuccess: (barcode: string) => void;
+  onScan: (result: string) => void;
+  onClose: () => void;
 }
 
-const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSuccess }) => {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const codeReaderRef = useRef<any>(null);
-    const { selectedCameraId, showAlert } = useContext(AppContext);
+const ScannerModal: React.FC<ScannerModalProps> = ({ onScan, onClose }) => {
+  const { cameraSettings, showAlert } = useContext(AppContext);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const codeReaderRef = useRef<any>(null);
 
-    useEffect(() => {
-        if (isOpen && videoRef.current) {
-            const hints = new Map();
-            // Optimize for 1D barcodes to improve scanning speed and accuracy for industrial products.
-            const formats = [
-                ZXing.BarcodeFormat.EAN_13,
-                ZXing.BarcodeFormat.CODE_128,
-                ZXing.BarcodeFormat.UPC_A,
-                ZXing.BarcodeFormat.UPC_E,
-                ZXing.BarcodeFormat.CODE_39,
-                ZXing.BarcodeFormat.ITF,
-            ];
-            hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-            // Removing TRY_HARDER might improve real-time scanning performance by not spending too long on blurry frames.
-            // hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-            // Assume GS1 format for common product barcodes to potentially speed up recognition
-            hints.set(ZXing.DecodeHintType.ASSUME_GS1, true);
-            codeReaderRef.current = new ZXing.BrowserMultiFormatReader(hints);
-            
-            const startScanning = async () => {
-                const baseVideoConstraints: MediaTrackConstraints = {
-                    deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
-                };
-                
-                // A list of constraints to try, from most desirable to least.
-                // This provides graceful degradation on devices that don't support advanced features.
-                // Prioritize HD (720p) for a balance of speed and quality. FullHD can be slow on some devices.
-                const constraintsToTry: MediaStreamConstraints[] = [
-                    // 1. Ideal: Rear camera, continuous autofocus, HD resolution. (Best balance)
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any },
-                    // 2. Ideal+: Rear camera, continuous autofocus, FullHD resolution for high-res scanning.
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
-                    // 3. Fallback: No resolution hints.
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous' } as any },
-                    // 4. Fallback: No autofocus.
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment' } },
-                    // 5. Last resort: Any video device, no special features.
-                    { audio: false, video: { ...baseVideoConstraints } },
-                ];
+  useEffect(() => {
+    if (typeof ZXing === 'undefined') {
+        console.error('ZXing library not loaded');
+        showAlert('스캐너 라이브러리를 로드하는데 실패했습니다.');
+        return;
+    }
 
-                for (const constraints of constraintsToTry) {
-                    try {
-                        // The promise resolves if the stream is acquired successfully.
-                        await codeReaderRef.current.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
-                            if (result) {
-                                if (navigator.vibrate) navigator.vibrate(100);
-                                onScanSuccess(result.getText());
-                                onClose();
-                            }
-                            if (err && !(err instanceof ZXing.NotFoundException)) {
-                                console.error('Scan Error:', err);
-                            }
-                        });
-                        console.log('Successfully started camera with constraints:', constraints);
-                        return; // Success, exit the loop.
-                    } catch (e) {
-                        console.warn(`Failed to start camera with constraints: ${JSON.stringify(constraints)}`, e);
-                        // Try next set of constraints.
-                    }
-                }
-                
-                // If all attempts fail.
-                showAlert('카메라를 시작할 수 없습니다. 권한을 확인해 주세요.');
-                onClose();
-            };
-
-            startScanning();
+    codeReaderRef.current = new ZXing.BrowserMultiFormatReader();
+    const codeReader = codeReaderRef.current;
+    
+    const startScanner = async () => {
+      try {
+        const videoInputDevices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+        if (videoInputDevices.length === 0) {
+          showAlert('사용 가능한 카메라가 없습니다.');
+          return;
         }
 
-        return () => {
-            if (codeReaderRef.current) {
-                codeReaderRef.current.reset();
+        const selectedDeviceId = cameraSettings.deviceId || videoInputDevices[0].deviceId;
+        
+        if (videoRef.current) {
+          codeReader.decodeFromVideoDevice(selectedDeviceId, videoRef.current, (result: any, err: any) => {
+            if (result) {
+              navigator.vibrate(200); // 성공 시 진동
+              onScan(result.getText());
             }
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, selectedCameraId]);
+            if (err && !(err instanceof ZXing.NotFoundException)) {
+              console.error(err);
+            }
+          });
+        }
+      } catch (err) {
+        console.error('카메라 접근 오류:', err);
+        showAlert('카메라에 접근할 수 없습니다. 권한을 확인해주세요.');
+      }
+    };
 
-    if (!isOpen) return null;
+    startScanner();
 
-    return (
-        <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center">
-            <video ref={videoRef} className="absolute top-0 left-0 w-full h-full object-cover" playsInline />
-            
-            {/* Dark overlay with viewfinder cutout */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-[90%] max-w-md">
-                    <div className="relative aspect-[4/1.25] shadow-[0_0_0_9999px_rgba(0,0,0,0.7)] rounded-xl">
-                        {/* Corner markers for the viewfinder */}
-                        <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white/90 rounded-tl-xl" />
-                        <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-white/90 rounded-tr-xl" />
-                        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-white/90 rounded-bl-xl" />
-                        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white/90 rounded-br-xl" />
-                    </div>
-                    <p className="text-white text-center mt-4 text-lg font-medium">바코드를 영역 안에 맞춰주세요</p>
-                </div>
-            </div>
+    return () => {
+      if (codeReaderRef.current) {
+        codeReaderRef.current.reset();
+      }
+    };
+  }, [cameraSettings.deviceId, onScan, showAlert]);
 
-            <button
-                onClick={onClose}
-                className="absolute bottom-10 bg-white text-gray-800 px-8 py-3 rounded-full text-lg font-bold shadow-lg"
-            >
-                스캔 종료
-            </button>
-        </div>
-    );
+  return (
+    <div className="fixed inset-0 bg-black z-40 flex flex-col items-center justify-center">
+      <video ref={videoRef} className="w-full h-full object-cover" />
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="w-3/4 max-w-md h-1/3 border-4 border-dashed border-green-400 rounded-lg shadow-lg"></div>
+      </div>
+       <div className="absolute top-4 text-white bg-black bg-opacity-50 px-4 py-2 rounded-lg">
+        바코드를 사각형 안에 맞춰주세요.
+      </div>
+      <button
+        onClick={onClose}
+        className="absolute bottom-8 bg-white bg-opacity-80 text-black font-bold py-3 px-6 rounded-lg shadow-lg"
+      >
+        스캔 종료
+      </button>
+    </div>
+  );
 };
 
 export default ScannerModal;

@@ -1,56 +1,47 @@
-
 <!DOCTYPE html>
 <html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>발주 관리 앱</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS (XLSX) library for Excel reading -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- zxing-js for barcode scanning -->
-    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js"></script>
-    <!-- jsPDF for PDF generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-    <!-- Babel Standalone for in-browser JSX/TSX transpilation -->
-    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+    <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        html, body, #root {
-            height: 100%;
-            overflow: hidden;
-            font-family: 'Inter', sans-serif;
-        }
-        .main-content {
-            height: calc(100% - 9rem); /* Adjust based on header (5rem) and nav (4rem) height */
-        }
-        /* Custom scrollbar for better mobile experience */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
-        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
-        .fixed-filter { flex-shrink: 0; }
-        .scrollable-content { flex-grow: 1; overflow-y: auto; }
-        .keyboard-padding {
-            padding-bottom: 250px !important;
-            transition: padding-bottom 0.2s ease-in-out;
-        }
+      body {
+        font-family: 'Nanum Gothic', sans-serif;
+      }
+      /* For smooth transitions */
+      .modal-enter {
+        transform: translateY(100%);
+      }
+      .modal-enter-active {
+        transform: translateY(0);
+        transition: transform 300ms ease-in-out;
+      }
+      .modal-exit {
+        transform: translateY(0);
+      }
+      .modal-exit-active {
+        transform: translateY(100%);
+        transition: transform 300ms ease-in-out;
+      }
     </style>
-<script type="importmap">
+  <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
-    "react/": "https://aistudiocdn.com/react@^19.1.1/"
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react": "https://aistudiocdn.com/react@^19.1.1"
   }
 }
 </script>
 </head>
-<body class="bg-slate-200 antialiased">
-    <div id="root" class="h-full w-full max-w-lg mx-auto bg-white shadow-lg"></div>
-    <script type="text/babel" data-type="module" src="./index.tsx"></script>
-</body>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
 </html>
