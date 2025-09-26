@@ -25,7 +25,9 @@ const OrderHistoryPage: React.FC = () => {
   }, [orders, startDate, endDate]);
 
   const groupedOrders = useMemo(() => {
-    // Fix: Explicitly type the accumulator to fix type inference issue.
+    // FIX: The initial value for `reduce` must be explicitly typed. Without this,
+    // TypeScript infers the result as a generic object, causing `ordersInGroup`
+    // to be of type `unknown` later in the component.
     return filteredOrders.reduce((acc: Record<string, Order[]>, order) => {
       const date = new Date(order.date).toLocaleDateString('ko-KR');
       if (!acc[date]) {
@@ -33,7 +35,7 @@ const OrderHistoryPage: React.FC = () => {
       }
       acc[date].push(order);
       return acc;
-    }, {});
+    }, {} as Record<string, Order[]>);
   }, [filteredOrders]);
 
   const totalAmount = useMemo(() => {
