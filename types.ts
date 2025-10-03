@@ -22,6 +22,7 @@ export interface Order {
     customer: Customer;
     items: OrderItem[];
     total: number;
+    memo?: string;
     completedAt?: string | null; // For backward compatibility
     completionDetails?: {
         type: 'sms' | 'xls';

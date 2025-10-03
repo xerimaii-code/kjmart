@@ -50,6 +50,15 @@
         #app-header button, #app-header a, #app-header input, #app-header select {
             -webkit-app-region: no-drag;
         }
+        
+        /* Custom animation */
+        @keyframes fadeInDown {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-down {
+          animation: fadeInDown 0.3s ease-out forwards;
+        }
     </style>
 <script type="importmap">
 {

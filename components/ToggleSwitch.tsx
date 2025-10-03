@@ -8,15 +8,25 @@ interface ToggleSwitchProps {
     disabled?: boolean;
     color?: 'red' | 'blue';
     className?: string;
+    size?: 'normal' | 'small';
 }
 
-const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ id, checked, onChange, label, disabled = false, color = 'blue', className }) => {
+const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ id, checked, onChange, label, disabled = false, color = 'blue', className, size = 'normal' }) => {
+    const isSmall = size === 'small';
+
     const bgColor = checked ? (color === 'red' ? 'bg-red-500' : 'bg-blue-600') : 'bg-gray-300';
-    const dotPosition = checked ? 'translate-x-5' : 'translate-x-0';
+    
+    // Adjust dimensions based on size
+    const switchHeight = isSmall ? 'h-5' : 'h-6';
+    const switchWidth = isSmall ? 'w-9' : 'w-11';
+    const dotSize = isSmall ? 'h-4 w-4' : 'h-5 w-5';
+    const dotPosition = checked ? (isSmall ? 'translate-x-4' : 'translate-x-5') : 'translate-x-0';
+    const labelClasses = isSmall ? 'text-xs mr-1.5' : 'text-sm mr-2';
+
 
     return (
         <div className={`flex items-center ${className || ''}`}>
-            <label htmlFor={id} className={`mr-2 text-sm font-medium ${disabled ? 'text-gray-400' : 'text-gray-700'} select-none cursor-pointer`}>
+            <label htmlFor={id} className={`${labelClasses} font-medium ${disabled ? 'text-gray-400' : 'text-gray-700'} select-none cursor-pointer`}>
                 {label}
             </label>
             <button
@@ -25,11 +35,11 @@ const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ id, checked, onChange, labe
                 aria-checked={checked}
                 onClick={() => !disabled && onChange(!checked)}
                 disabled={disabled}
-                className={`relative inline-flex items-center h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${color === 'red' ? 'focus:ring-red-500' : 'focus:ring-blue-500'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${bgColor}`}
+                className={`relative inline-flex items-center ${switchHeight} ${switchWidth} flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${color === 'red' ? 'focus:ring-red-500' : 'focus:ring-blue-500'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${bgColor}`}
             >
                 <span
                     aria-hidden="true"
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${dotPosition}`}
+                    className={`inline-block ${dotSize} transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${dotPosition}`}
                 />
             </button>
         </div>

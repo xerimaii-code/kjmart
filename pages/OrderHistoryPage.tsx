@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useData, useUI } from '../context/AppContext';
 import { Order } from '../types';
-import { ChevronRightIcon, SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon } from '../components/Icons';
+import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon } from '../components/Icons';
 import { exportToSMS, exportToXLS } from '../services/dataService';
 import DeliveryTypeModal from '../components/DeliveryTypeModal';
 
@@ -288,6 +288,7 @@ const OrderHistoryPage: React.FC = () => {
                                                             <p className="font-bold text-gray-800 text-lg flex items-center" title={order.customer.name}>
                                                                 {getStatusIcon(order)}
                                                                 <span className="truncate">{order.customer.name}</span>
+                                                                {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
                                                             </p>
                                                             <p className="font-bold text-gray-700 text-lg tabular-nums">
                                                                 {order.total.toLocaleString()} 원
