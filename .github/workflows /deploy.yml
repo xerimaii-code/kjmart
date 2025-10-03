@@ -1,0 +1,19 @@
+name: Deploy to Firebase Hosting
+on:
+  push:
+    branches:
+      - main # 'main' 브랜치에 코드가 푸시될 때마다 실행됩니다.
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. GitHub 저장소의 코드를 가져옵니다.
+      - uses: actions/checkout@v4
+      
+      # 2. Firebase에 배포합니다. (빌드 과정이 없으므로 바로 배포)
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KJMART_8FF85 }}' # GitHub 저장소 설정에 추가한 시크릿 이름
+          channelId: live
+          projectId: 'kjmart-8ff85' # Firebase 프로젝트 ID
