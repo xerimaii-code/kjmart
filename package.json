@@ -1,5 +1,5 @@
 {
-  "name": "copy-of-발주-관리-앱",
+  "name": "kjmart",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,8 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "18.2.0",
+    "react": "18.2.0",
+    "firebase": "^12.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

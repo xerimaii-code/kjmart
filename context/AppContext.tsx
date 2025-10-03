@@ -1,102 +1,251 @@
-import React, { createContext, useState, ReactNode } from 'react';
-import useLocalStorage from '../hooks/useLocalStorage';
-import { Customer, Product, Order, CameraSettings } from '../types';
+import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext } from 'react';
+import { Customer, Product, Order, ScannerContext } from '../types';
+import * as db from '../services/dbService';
+import AlertModal from '../components/AlertModal';
+import LoadingOverlay from '../components/LoadingOverlay';
 
-type Page = 'new-order' | 'order-history' | 'settings';
+// --- TYPE DEFINITIONS ---
+interface DataState {
+    customers: Customer[];
+    products: Product[];
+    orders: Order[];
+    selectedCameraId: string | null;
+}
+
+interface DataActions {
+    setCustomers: (customers: Customer[]) => Promise<void>;
+    setProducts: (products: Product[]) => Promise<void>;
+    setOrders: (orders: Order[]) => Promise<void>;
+    addOrder: (order: Omit<Order, 'id' | 'date'>) => Promise<void>;
+    updateOrder: (updatedOrder: Order) => Promise<void>;
+    deleteOrder: (orderId: number) => Promise<void>;
+    setSelectedCameraId: (id: string | null) => Promise<void>;
+}
 
 interface AlertState {
-  isOpen: boolean;
-  message: string;
-  isConfirm?: boolean;
-  onConfirm?: () => void;
+    isOpen: boolean;
+    message: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+    confirmText?: string;
+    confirmButtonClass?: string;
 }
 
-interface AppContextType {
-  customers: Customer[];
-  setCustomers: (customers: Customer[]) => void;
-  products: Product[];
-  setProducts: (products: Product[]) => void;
-  orders: Order[];
-  setOrders: (orders: Order[]) => void;
-  addOrder: (order: Order) => void;
-  updateOrder: (order: Order) => void;
-  deleteOrder: (orderId: number) => void;
-  cameraSettings: CameraSettings;
-  setCameraSettings: (settings: CameraSettings) => void;
-  activePage: Page;
-  setActivePage: (page: Page) => void;
-  isDirty: boolean;
-  setIsDirty: (dirty: boolean) => void;
-  alert: AlertState;
-  showAlert: (message: string, isConfirm?: boolean, onConfirm?: () => void) => void;
-  hideAlert: () => void;
+interface UIState {
+    alert: AlertState;
+    isDetailModalOpen: boolean;
+    editingOrderId: number | null;
+    isScannerOpen: boolean;
+    scannerContext: ScannerContext;
+    isContinuousScan: boolean;
+    onScanSuccess: (barcode: string) => void;
 }
 
-export const AppContext = createContext<AppContextType>({} as AppContextType);
+interface UIActions {
+    showAlert: (message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => void;
+    hideAlert: () => void;
+    openDetailModal: (orderId: number) => void;
+    closeDetailModal: () => void;
+    openScanner: (context: ScannerContext, onScan: (barcode: string) => void, continuous?: boolean) => void;
+    closeScanner: () => void;
+}
 
+// --- CONTEXT CREATION ---
+export const DataContext = createContext<DataState & DataActions>({} as DataState & DataActions);
+export const UIContext = createContext<UIState & UIActions>({} as UIState & UIActions);
+
+
+// --- HOOKS for easier context consumption ---
+export const useData = () => useContext(DataContext);
+export const useUI = () => useContext(UIContext);
+
+
+// --- MAIN PROVIDER ---
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [customers, setCustomers] = useLocalStorage<Customer[]>('customers', []);
-  const [products, setProducts] = useLocalStorage<Product[]>('products', []);
-  const [orders, setOrders] = useLocalStorage<Order[]>('orders', []);
-  const [cameraSettings, setCameraSettings] = useLocalStorage<CameraSettings>('cameraSettings', { deviceId: null });
-  const [activePage, setActivePage] = useState<Page>('new-order');
-  const [isDirty, setIsDirty] = useState(false);
-  const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '', isConfirm: false });
+    const [dataState, setDataState] = useState<DataState>({
+        customers: [],
+        products: [],
+        orders: [],
+        selectedCameraId: null,
+    });
+    const [loadingState, setLoadingState] = useState({
+        connecting: false,
+        customers: false,
+        products: false,
+        orders: false,
+        settings: false,
+    });
+    const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
+    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+    const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scannerContext, setScannerContext] = useState<ScannerContext>(null);
+    const [isContinuousScan, setIsContinuousScan] = useState(false);
+    const [scanSuccessCallback, setScanSuccessCallback] = useState<(barcode: string) => void>(() => () => {});
+    
+    const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
+        setAlert({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
+    }, []);
+    
+    // Initial Data Load from Firebase
+    useEffect(() => {
+        let isMounted = true;
+        const unsubscribers: (() => void)[] = [];
 
-  const addOrder = (order: Order) => {
-    setOrders(prevOrders => [...prevOrders, order]);
-  };
-  
-  const updateOrder = (updatedOrder: Order) => {
-    setOrders(prevOrders => prevOrders.map(order => order.id === updatedOrder.id ? updatedOrder : order));
-  }
+        const initialize = async () => {
+            // 1. Initialize DB and handle unconfigured state
+            await db.initDB();
+            if (!isMounted) return;
+            setLoadingState(prev => ({ ...prev, connecting: true }));
 
-  const deleteOrder = (orderId: number) => {
-    setOrders(prevOrders => prevOrders.filter(order => order.id !== orderId));
-  }
-  
-  const showAlert = (message: string, isConfirm = false, onConfirm = () => {}) => {
-    setAlert({ isOpen: true, message, isConfirm, onConfirm });
-  };
-  
-  const hideAlert = () => {
-    setAlert({ isOpen: false, message: '', isConfirm: false });
-  };
+            if (!db.isInitialized()) {
+                console.warn("Database not initialized. Proceeding without realtime data.");
+                if (isMounted) {
+                    setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                }
+                return;
+            }
 
-  const contextValue = {
-    customers,
-    setCustomers,
-    products,
-    setProducts,
-    orders,
-    setOrders,
-    addOrder,
-    updateOrder,
-    deleteOrder,
-    cameraSettings,
-    setCameraSettings,
-    activePage,
-    setActivePage: (page: Page) => {
-      if (isDirty) {
-        showAlert('저장하지 않은 변경사항이 있습니다. 정말 이동하시겠습니까?', true, () => {
-          setIsDirty(false);
-          setActivePage(page);
-          hideAlert();
-        });
-      } else {
-        setActivePage(page);
-      }
-    },
-    isDirty,
-    setIsDirty,
-    alert,
-    showAlert,
-    hideAlert
-  };
+            // 2. Perform initial data fetch using get() to explicitly handle loading state
+            try {
+                // Fetch customers
+                const customers = await db.getAll<Customer>('customers');
+                if (!isMounted) return;
+                setDataState(prev => ({ ...prev, customers }));
+                setLoadingState(prev => ({ ...prev, customers: true }));
 
-  return (
-    <AppContext.Provider value={contextValue}>
-      {children}
-    </AppContext.Provider>
-  );
+                // Fetch products
+                const products = await db.getAll<Product>('products');
+                if (!isMounted) return;
+                setDataState(prev => ({ ...prev, products }));
+                setLoadingState(prev => ({ ...prev, products: true }));
+
+                // Fetch orders
+                const orders = await db.getAll<Order>('orders');
+                if (!isMounted) return;
+                setDataState(prev => ({ ...prev, orders }));
+                setLoadingState(prev => ({ ...prev, orders: true }));
+                
+                // Fetch settings
+                const selectedCameraId = await db.getSetting<string | null>('selectedCameraId', null);
+                
+                if (!isMounted) return;
+                setDataState(prev => ({ ...prev, selectedCameraId }));
+                setLoadingState(prev => ({ ...prev, settings: true }));
+
+                // 3. Attach realtime listeners for subsequent updates
+                unsubscribers.push(db.listenToStore<Customer>('customers', (updatedCustomers) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, customers: updatedCustomers }));
+                }));
+                unsubscribers.push(db.listenToStore<Product>('products', (updatedProducts) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, products: updatedProducts }));
+                }));
+                unsubscribers.push(db.listenToStore<Order>('orders', (updatedOrders) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, orders: updatedOrders }));
+                }));
+                unsubscribers.push(db.listenToSetting<string | null>('selectedCameraId', (id) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, selectedCameraId: id }));
+                }));
+
+            } catch (error) {
+                console.error("Failed to fetch initial data from Firebase:", error);
+                if (isMounted) {
+                     showAlert("데이터를 불러오는 데 실패했습니다. 네트워크 연결을 확인하고 앱을 새로고침하세요.");
+                     // Mark loading as done to prevent getting stuck
+                     setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                }
+            }
+        };
+
+        initialize();
+        
+        return () => {
+            isMounted = false;
+            unsubscribers.forEach(unsub => unsub());
+        };
+    }, [showAlert]);
+    
+    const isLoading = Object.values(loadingState).some(status => !status);
+
+    // --- DATA ACTIONS (now simpler, they just write to Firebase) ---
+    const setCustomers = (customers: Customer[]) => db.replaceAll('customers', customers);
+    const setProducts = (products: Product[]) => db.replaceAll('products', products);
+    const setOrders = (orders: Order[]) => db.replaceAll('orders', orders);
+    const addOrder = async (order: Omit<Order, 'id' | 'date'>) => {
+        const now = new Date().toISOString();
+        const newOrder: Order = { ...order, id: Date.now(), date: now, createdAt: now, completedAt: null };
+        await db.put('orders', newOrder);
+    };
+    const updateOrder = (updatedOrder: Order) => db.put('orders', updatedOrder);
+    const deleteOrder = (orderId: number) => db.deleteByKey('orders', orderId);
+    const setSelectedCameraId = (id: string | null) => db.setSetting('selectedCameraId', id);
+
+    // --- UI ACTIONS ---
+    const hideAlert = useCallback(() => setAlert(prev => ({ ...prev, isOpen: false })), []);
+    const openDetailModal = useCallback((orderId: number) => {
+        setEditingOrderId(orderId);
+        setIsDetailModalOpen(true);
+    }, []);
+    const closeDetailModal = useCallback(() => {
+        setIsDetailModalOpen(false);
+        setEditingOrderId(null);
+    }, []);
+    const openScanner = useCallback((context: ScannerContext, onScan: (barcode: string) => void, continuous = false) => {
+        setScannerContext(context);
+        setScanSuccessCallback(() => onScan);
+        setIsContinuousScan(continuous);
+        setIsScannerOpen(true);
+    }, []);
+    const closeScanner = useCallback(() => {
+        setIsScannerOpen(false);
+        setIsContinuousScan(false);
+        setScannerContext(null);
+    }, []);
+    const onScanSuccess = useCallback((barcode: string) => {
+        if (scanSuccessCallback) scanSuccessCallback(barcode);
+    }, [scanSuccessCallback]);
+
+    return (
+        <DataContext.Provider value={{
+            ...dataState,
+            setCustomers,
+            setProducts,
+            setOrders,
+            addOrder,
+            updateOrder,
+            deleteOrder,
+            setSelectedCameraId,
+        }}>
+            <UIContext.Provider value={{
+                alert,
+                isDetailModalOpen,
+                editingOrderId,
+                isScannerOpen,
+                scannerContext,
+                isContinuousScan,
+                onScanSuccess,
+                showAlert,
+                hideAlert,
+                openDetailModal,
+                closeDetailModal,
+                openScanner,
+                closeScanner,
+            }}>
+                <AlertModal
+                    isOpen={alert.isOpen}
+                    message={alert.message}
+                    onClose={hideAlert}
+                    onConfirm={alert.onConfirm}
+                    onCancel={alert.onCancel}
+                    confirmText={alert.confirmText}
+                    confirmButtonClass={alert.confirmButtonClass}
+                />
+                {isLoading ? (
+                    <LoadingOverlay status={loadingState} />
+                ) : (
+                    children
+                )}
+            </UIContext.Provider>
+        </DataContext.Provider>
+    );
 };

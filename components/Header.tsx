@@ -1,42 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import { GithubIcon } from './Icons';
 
 const Header: React.FC = () => {
-  const [currentTime, setCurrentTime] = useState(new Date());
+    const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setCurrentDateTime(new Date());
+        }, 1000);
 
-  const formatDate = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const week = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
-    return `${year}년 ${month}월 ${day}일 (${week})`;
-  };
+        return () => {
+            clearInterval(timer);
+        };
+    }, []);
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
-  };
+    const formatDate = (date: Date) => {
+        return date.toLocaleString('ko-KR', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            weekday: 'long',
+        });
+    };
+    
+    const formatTime = (date: Date) => {
+        return date.toLocaleTimeString('ko-KR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        });
+    };
 
-  return (
-    <header className="bg-white shadow-md p-4 flex justify-between items-center text-gray-700 w-full z-10">
-      <div className="flex items-center">
-        <h1 className="text-xl font-bold text-blue-600">발주 관리</h1>
-        <a href="https://github.com/xerimaii-code/kjmart.git" target="_blank" rel="noopener noreferrer" className="ml-3 text-gray-500 hover:text-gray-800">
-            <GithubIcon className="w-6 h-6" />
-        </a>
-      </div>
-      <div className="text-right text-sm">
-        <div>{formatDate(currentTime)}</div>
-        <div className="font-semibold">{formatTime(currentTime)}</div>
-      </div>
-    </header>
-  );
+    return (
+        <header id="app-header" className="bg-gradient-to-b from-white to-gray-100 px-1 flex justify-center items-center h-6 flex-shrink-0 shadow-lg">
+            <div className="flex items-baseline space-x-2">
+                <p className="text-xs font-semibold text-gray-700">{formatDate(currentDateTime)}</p>
+                <p className="text-base font-bold text-gray-900 tabular-nums">{formatTime(currentDateTime)}</p>
+            </div>
+        </header>
+    );
 };
 
 export default Header;

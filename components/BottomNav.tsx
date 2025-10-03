@@ -1,34 +1,57 @@
-import React, { useContext } from 'react';
-import { AppContext } from '../context/AppContext';
-import { OrderIcon, HistoryIcon, SettingsIcon } from './Icons';
+import React from 'react';
+import { Page } from '../types';
+import { HistoryIcon, NewOrderIcon, SettingsIcon } from './Icons';
 
-const BottomNav: React.FC = () => {
-  const { activePage, setActivePage } = useContext(AppContext);
+interface BottomNavProps {
+    activePage: Page;
+    setActivePage: (page: Page) => void;
+}
 
-  const navItems = [
-    { id: 'new-order', label: '신규발주', icon: OrderIcon },
-    { id: 'order-history', label: '발주내역', icon: HistoryIcon },
-    { id: 'settings', label: '설정', icon: SettingsIcon },
-  ];
+const NavButton: React.FC<{
+    page: Page;
+    label: string;
+    Icon: React.FC;
+    isActive: boolean;
+    onClick: (page: Page) => void;
+}> = ({ page, label, Icon, isActive, onClick }) => (
+    <button
+        onClick={() => onClick(page)}
+        className={`flex flex-col items-center justify-center h-full w-full mx-1 rounded-lg transition-colors duration-200 ${isActive ? 'text-blue-600 bg-blue-100' : 'text-gray-500 hover:bg-gray-100'}`}
+        aria-current={isActive ? 'page' : undefined}
+    >
+        <Icon />
+        <span className={`text-xs mt-1 transition-all ${isActive ? 'font-bold' : 'font-medium'}`}>{label}</span>
+    </button>
+);
 
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 flex justify-around">
-      {navItems.map(item => (
-        <button
-          key={item.id}
-          onClick={() => setActivePage(item.id as any)}
-          className={`flex flex-col items-center justify-center w-full pt-2 pb-1 text-sm transition-colors duration-200 ${
-            activePage === item.id ? 'text-blue-600' : 'text-gray-500 hover:text-blue-500'
-          }`}
-          aria-current={activePage === item.id ? 'page' : undefined}
-        >
-          <item.icon className="w-6 h-6 mb-1" />
-          <span>{item.label}</span>
-          {activePage === item.id && <div className="w-8 h-1 bg-blue-600 rounded-full mt-1"></div>}
-        </button>
-      ))}
-    </nav>
-  );
+const BottomNav: React.FC<BottomNavProps> = ({ activePage, setActivePage }) => {
+    return (
+        <nav className="w-full bg-white/80 backdrop-blur-xl border-t border-gray-200/60 flex justify-around h-16 items-center flex-shrink-0 shadow-[0_-5px_25px_rgba(0,0,0,0.08)]">
+            <div className="flex w-full justify-around items-center h-full px-2 py-2 gap-2">
+                <NavButton
+                    page="new-order"
+                    label="신규발주"
+                    Icon={NewOrderIcon}
+                    isActive={activePage === 'new-order'}
+                    onClick={setActivePage}
+                />
+                <NavButton
+                    page="history"
+                    label="발주내역"
+                    Icon={HistoryIcon}
+                    isActive={activePage === 'history'}
+                    onClick={setActivePage}
+                />
+                <NavButton
+                    page="settings"
+                    label="설정"
+                    Icon={SettingsIcon}
+                    isActive={activePage === 'settings'}
+                    onClick={setActivePage}
+                />
+            </div>
+        </nav>
+    );
 };
 
 export default BottomNav;

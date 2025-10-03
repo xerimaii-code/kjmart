@@ -1,48 +1,71 @@
 <!DOCTYPE html>
 <html lang="ko">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>발주 관리 앱</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>발주 관리</title>
+    <link rel="manifest" href="/metadata.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="발주 관리">
+    <!-- es-module-shims polyfill to support import maps in more browsers -->
+    <script async src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      body {
-        font-family: 'Nanum Gothic', sans-serif;
-      }
-      /* For smooth transitions */
-      .modal-enter {
-        transform: translateY(100%);
-      }
-      .modal-enter-active {
-        transform: translateY(0);
-        transition: transform 300ms ease-in-out;
-      }
-      .modal-exit {
-        transform: translateY(0);
-      }
-      .modal-exit-active {
-        transform: translateY(100%);
-        transition: transform 300ms ease-in-out;
-      }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        html, body, #root {
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            /* Disable text selection globally for a more native app-like feel */
+            -webkit-user-select: none; /* Safari */
+            -ms-user-select: none; /* IE 10+ and Edge */
+            user-select: none; /* Standard syntax */
+            -webkit-touch-callout: none; /* iOS Safari */
+        }
+        /* Re-enable text selection for input fields where it's expected */
+        input, textarea, [contenteditable="true"] {
+            -webkit-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+        }
+        .main-content {
+            /* height property removed to allow flexbox to correctly size the element */
+            scrollbar-gutter: stable;
+        }
+        /* Custom scrollbar for better mobile experience */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+        .fixed-filter { flex-shrink: 0; }
+        .scrollable-content { flex-grow: 1; overflow-y: auto; }
+
+        /* Style for Window Controls Overlay */
+        #app-header {
+            -webkit-app-region: drag; /* Make the header draggable */
+        }
+        /* Make sure any interactive elements inside the header are NOT draggable */
+        #app-header button, #app-header a, #app-header input, #app-header select {
+            -webkit-app-region: no-drag;
+        }
     </style>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
-    "react/": "https://aistudiocdn.com/react@^19.1.1/"
+    "react-dom/": "https://aistudiocdn.com/react-dom@18.2.0/",
+    "react/": "https://aistudiocdn.com/react@18.2.0/",
+    "react": "https://aistudiocdn.com/react@18.2.0",
+    "firebase/app": "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js",
+    "firebase/database": "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.3.0/"
   }
 }
 </script>
 </head>
-  <body>
-    <div id="root"></div>
+<body class="bg-gray-200 antialiased">
+    <div id="root" class="h-full w-full bg-gray-50"></div>
     <script type="module" src="/index.tsx"></script>
-  </body>
+</body>
 </html>
