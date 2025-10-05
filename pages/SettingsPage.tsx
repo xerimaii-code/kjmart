@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useData, useUI } from '../context/AppContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon } from '../components/Icons';
 
 const LoadingSpinner: React.FC = () => (
     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
@@ -20,11 +20,12 @@ const SettingsPage: React.FC = () => {
         setCustomers,
         setProducts,
     } = useData();
-    const { showAlert } = useUI();
+    const { showAlert, triggerInstallPrompt, isInstallPromptAvailable } = useUI();
     
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [currentCameraSelection, setCurrentCameraSelection] = useState<string>(selectedCameraId || '');
     const [isLoading, setIsLoading] = useState(false);
+    const [isStandalone, setIsStandalone] = useState(false);
     
     const restoreInputRef = useRef<HTMLInputElement>(null);
     const customerInputRef = useRef<HTMLInputElement>(null);
@@ -33,6 +34,13 @@ const SettingsPage: React.FC = () => {
     useEffect(() => {
         setCurrentCameraSelection(selectedCameraId || '');
     }, [selectedCameraId]);
+    
+    useEffect(() => {
+        setIsStandalone(
+            window.matchMedia('(display-mode: standalone)').matches ||
+            (window.navigator as any).standalone === true
+        );
+    }, []);
 
     useEffect(() => {
         const loadCameras = async () => {
@@ -316,6 +324,29 @@ const SettingsPage: React.FC = () => {
                         </div>
                     </div>
                 </div>
+                
+                {/* --- Application Settings Section --- */}
+                <div>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">애플리케이션</h2>
+                    <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4">
+                        <h3 className="font-semibold text-slate-800">앱 설치</h3>
+                        <p className="text-sm text-slate-500 mt-1 mb-3">
+                            {isStandalone
+                                ? '앱이 기기에 설치되어 있습니다.'
+                                : '홈 화면에 앱을 설치하여 주소창 없이 더 빠른 경험을 즐기세요.'}
+                        </p>
+                        {!isStandalone && isInstallPromptAvailable && (
+                            <button
+                                onClick={triggerInstallPrompt}
+                                className="w-full mt-2 flex items-center justify-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white p-3 rounded-md font-bold transition shadow-sm"
+                            >
+                                <ArrowDownTrayIcon className="w-5 h-5" />
+                                <span>앱 설치하기</span>
+                            </button>
+                        )}
+                    </div>
+                </div>
+
             </div>
         </div>
     );

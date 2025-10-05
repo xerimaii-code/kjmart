@@ -39,6 +39,7 @@ interface UIState {
     scannerContext: ScannerContext;
     isContinuousScan: boolean;
     onScanSuccess: (barcode: string) => void;
+    isInstallPromptAvailable: boolean;
 }
 
 interface UIActions {
@@ -48,6 +49,7 @@ interface UIActions {
     closeDetailModal: () => void;
     openScanner: (context: ScannerContext, onScan: (barcode: string) => void, continuous?: boolean) => void;
     closeScanner: () => void;
+    triggerInstallPrompt: () => void;
 }
 
 // --- CONTEXT CREATION ---
@@ -82,9 +84,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [scannerContext, setScannerContext] = useState<ScannerContext>(null);
     const [isContinuousScan, setIsContinuousScan] = useState(false);
     const [scanSuccessCallback, setScanSuccessCallback] = useState<(barcode: string) => void>(() => () => {});
+    const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
     
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
         setAlert({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
+    }, []);
+
+    useEffect(() => {
+        const handleBeforeInstallPrompt = (e: Event) => {
+            e.preventDefault();
+            setInstallPromptEvent(e);
+        };
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        return () => {
+            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        };
     }, []);
     
     // Initial Data Load from Firebase
@@ -204,6 +218,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const onScanSuccess = useCallback((barcode: string) => {
         if (scanSuccessCallback) scanSuccessCallback(barcode);
     }, [scanSuccessCallback]);
+    const triggerInstallPrompt = () => {
+        if (!installPromptEvent) {
+            showAlert('앱을 설치할 수 없습니다. 브라우저가 이 기능을 지원하는지 확인해주세요.');
+            return;
+        }
+        (installPromptEvent as any).prompt();
+        setInstallPromptEvent(null);
+    };
+
 
     return (
         <DataContext.Provider value={{
@@ -224,12 +247,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 scannerContext,
                 isContinuousScan,
                 onScanSuccess,
+                isInstallPromptAvailable: !!installPromptEvent,
                 showAlert,
                 hideAlert,
                 openDetailModal,
                 closeDetailModal,
                 openScanner,
                 closeScanner,
+                triggerInstallPrompt,
             }}>
                 <AlertModal
                     isOpen={alert.isOpen}

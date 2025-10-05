@@ -256,7 +256,7 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
         return;
     }
 
-    const fileName = `발주서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fileName = `발주서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.xls`;
 
     // --- Default Export Logic ---
     const workbook = XLSX.utils.book_new();
