@@ -17,10 +17,10 @@ const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ id, checked, onChange, labe
     const bgColor = checked ? (color === 'red' ? 'bg-red-500' : 'bg-blue-600') : 'bg-gray-300';
     
     // Adjust dimensions based on size
-    const switchHeight = isSmall ? 'h-5' : 'h-6';
-    const switchWidth = isSmall ? 'w-9' : 'w-11';
-    const dotSize = isSmall ? 'h-4 w-4' : 'h-5 w-5';
-    const dotPosition = checked ? (isSmall ? 'translate-x-4' : 'translate-x-5') : 'translate-x-0';
+    const switchHeight = isSmall ? 'h-4' : 'h-6';
+    const switchWidth = isSmall ? 'w-7' : 'w-11';
+    const dotSize = isSmall ? 'h-3 w-3' : 'h-5 w-5';
+    const dotPosition = checked ? (isSmall ? 'translate-x-3' : 'translate-x-5') : 'translate-x-0';
     const labelClasses = isSmall ? 'text-xs mr-1.5' : 'text-sm mr-2';
 
 

@@ -19,10 +19,12 @@ export const validateProduct = (item: any): item is Product => {
 
 // FIX: Cast `item` to `OrderItem` to access properties not present on the `Product` type, which `item` is narrowed to by `validateProduct`.
 export const validateOrderItem = (item: any): item is OrderItem => {
+    const typedItem = item as OrderItem;
     return validateProduct(item) &&
-           typeof (item as OrderItem).quantity === 'number' &&
-           ((item as OrderItem).unit === '개' || (item as OrderItem).unit === '박스') &&
-           (typeof (item as OrderItem).isPromotion === 'boolean' || typeof (item as OrderItem).isPromotion === 'undefined');
+           typeof typedItem.quantity === 'number' &&
+           (typedItem.unit === '개' || typedItem.unit === '박스') &&
+           (typeof typedItem.isPromotion === 'boolean' || typeof typedItem.isPromotion === 'undefined') &&
+           (typeof typedItem.status === 'undefined' || typedItem.status === 'new' || typedItem.status === 'modified' || typedItem.status === null);
 };
 
 // FIX: Cast `item` to access properties, as `isObject` narrows its type to `object`.

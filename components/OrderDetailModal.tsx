@@ -89,6 +89,16 @@ const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>)
     );
 };
 
+type ItemChangeStatus = {
+    status: 'new' | 'modified' | 'unchanged';
+    changes: {
+        quantity: boolean;
+        unit: boolean;
+        isPromotion: boolean;
+    };
+};
+
+
 const OrderDetailModal: React.FC = () => {
     const { 
         orders, 
@@ -139,8 +149,47 @@ const OrderDetailModal: React.FC = () => {
         resetItems,
         totalAmount,
     } = useOrderManager({
-        initialItems: useMemo(() => order?.items || STABLE_EMPTY_ARRAY, [order])
+        initialItems: useMemo(() => order?.items.map(i => ({...i})) || STABLE_EMPTY_ARRAY, [order])
     });
+
+    const itemStatuses = useMemo(() => {
+        if (!order) return new Map<string, ItemChangeStatus>();
+    
+        const originalItemsMap = new Map<string, OrderItem>(order.items.map(item => [item.barcode, item]));
+        const statuses = new Map<string, ItemChangeStatus>();
+    
+        editedItems.forEach(editedItem => {
+            const originalItem = originalItemsMap.get(editedItem.barcode);
+    
+            if (!originalItem) {
+                statuses.set(editedItem.barcode, {
+                    status: 'new',
+                    changes: { quantity: false, unit: false, isPromotion: false }
+                });
+            } else {
+                const quantityChanged = originalItem.quantity !== editedItem.quantity;
+                const unitChanged = originalItem.unit !== editedItem.unit;
+                const promotionChanged = (originalItem.isPromotion || false) !== (editedItem.isPromotion || false);
+    
+                if (quantityChanged || unitChanged || promotionChanged) {
+                    statuses.set(editedItem.barcode, {
+                        status: 'modified',
+                        changes: {
+                            quantity: quantityChanged,
+                            unit: unitChanged,
+                            isPromotion: promotionChanged,
+                        }
+                    });
+                } else {
+                    statuses.set(editedItem.barcode, {
+                        status: 'unchanged',
+                        changes: { quantity: false, unit: false, isPromotion: false }
+                    });
+                }
+            }
+        });
+        return statuses;
+    }, [editedItems, order]);
 
     useEffect(() => {
         if (order) {
@@ -155,7 +204,6 @@ const OrderDetailModal: React.FC = () => {
             return;
         }
 
-        // Use slice() to create a shallow copy before sorting, preventing mutation of the original array.
         const originalItemsString = JSON.stringify(order.items.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
         const editedItemsString = JSON.stringify(editedItems.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
         const memoChanged = (order.memo || '') !== memo;
@@ -211,9 +259,31 @@ const OrderDetailModal: React.FC = () => {
             return;
         }
 
+        const itemsToSave = editedItems.map(item => {
+            const sessionStatus = itemStatuses.get(item.barcode);
+            const newItem = { ...item };
+
+            let finalStatus: 'new' | 'modified' | undefined = undefined;
+
+            if (sessionStatus?.status === 'new') {
+                finalStatus = 'new';
+            } else if (sessionStatus?.status === 'modified') {
+                finalStatus = 'modified';
+            } else if (item.status) {
+                finalStatus = item.status;
+            }
+
+            if (finalStatus) {
+                newItem.status = finalStatus;
+            } else {
+                delete newItem.status;
+            }
+            return newItem;
+        });
+
         const updatedOrder: Order = { 
             ...order, 
-            items: editedItems, 
+            items: itemsToSave, 
             total: totalAmount,
             memo: memo.trim(),
             date: new Date().toISOString(), // Update modification date
@@ -399,6 +469,7 @@ const OrderDetailModal: React.FC = () => {
                                             checked={isPromotionMode}
                                             onChange={setIsPromotionMode}
                                             color="red"
+                                            size="small"
                                         />
                                         <ToggleSwitch
                                             id="modal-box-unit"
@@ -406,6 +477,7 @@ const OrderDetailModal: React.FC = () => {
                                             checked={isBoxUnitDefault}
                                             onChange={setIsBoxUnitDefault}
                                             color="blue"
+                                            size="small"
                                         />
                                     </div>
                                 </div>
@@ -430,41 +502,55 @@ const OrderDetailModal: React.FC = () => {
                     ) : (
                         <div className="bg-white rounded-lg shadow-md border border-gray-200/80 overflow-hidden">
                             <div className="divide-y divide-gray-200">
-                                {editedItems.map((item) => (
-                                    <div
-                                        key={item.barcode}
-                                        ref={el => { itemRefs.current.set(item.barcode, el); }}
-                                        className={`flex items-center p-3 space-x-2 transition-all duration-200 ${highlightedItem === item.barcode ? 'bg-blue-50' : ''} ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                                        onClick={() => !isCompleted && setEditingItem(item)}
-                                    >
-                                        <div className="flex-grow min-w-0 pr-1">
-                                            <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-1.5">
-                                                {item.isPromotion && <span className="text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5">행사</span>}
-                                                {item.name}
-                                            </p>
-                                            <p className="text-xs text-gray-500">{item.price.toLocaleString()}원</p>
+                                {editedItems.map((item) => {
+                                    const sessionStatus = itemStatuses.get(item.barcode);
+
+                                    const isNew = item.status === 'new' || sessionStatus?.status === 'new';
+                                    const isModified = !isNew && (item.status === 'modified' || sessionStatus?.status === 'modified');
+                                
+                                    const rowBgClass = isNew ? 'bg-green-50' : isModified ? 'bg-amber-50' : '';
+                                    const quantityClass = (sessionStatus?.status === 'modified' && sessionStatus?.changes.quantity) ? 'text-blue-600 font-bold' : '';
+                                    const unitClass = (sessionStatus?.status === 'modified' && sessionStatus?.changes.unit) ? 'text-blue-600 font-bold' : '';
+                                    const promotionRingClass = (sessionStatus?.status === 'modified' && sessionStatus?.changes.isPromotion) ? 'ring-2 ring-amber-400' : '';
+
+                                    return (
+                                        <div
+                                            key={item.barcode}
+                                            ref={el => { itemRefs.current.set(item.barcode, el); }}
+                                            className={`flex items-center p-3 space-x-2 transition-all duration-200 ${rowBgClass} ${highlightedItem === item.barcode ? 'bg-blue-50' : ''} ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                                            onClick={() => !isCompleted && setEditingItem(item)}
+                                        >
+                                            <div className="flex-grow min-w-0 pr-1">
+                                                <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
+                                                    {item.isPromotion && <span className={`text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5 ${promotionRingClass}`}>행사</span>}
+                                                    <span>{item.name}</span>
+                                                    {isNew && <span className="text-xs font-bold text-white bg-green-600 rounded-full px-2 py-0.5">추가</span>}
+                                                    {isModified && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5">수정</span>}
+                                                </p>
+                                                <p className="text-xs text-gray-500">{item.price.toLocaleString()}원</p>
+                                            </div>
+                                            <div className="flex items-center space-x-1.5 flex-shrink-0">
+                                                <span
+                                                    className={`w-12 text-center text-gray-600 font-medium select-none text-sm transition-colors ${quantityClass}`}
+                                                    aria-label={`수량: ${item.name}, 현재 수량: ${item.quantity}`}
+                                                >
+                                                    {item.quantity}
+                                                </span>
+                                                <span
+                                                    className={`w-8 text-center text-gray-600 font-medium select-none text-sm transition-colors ${unitClass}`}
+                                                    aria-label={`단위: ${item.name}, 현재 단위: ${item.unit}.`}
+                                                >
+                                                    {item.unit}
+                                                </span>
+                                                {!isCompleted && (
+                                                    <button onClick={(e) => handleRemoveItem(e, item)} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+                                                        <RemoveIcon className="w-5 h-5"/>
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="flex items-center space-x-1.5 flex-shrink-0">
-                                            <span
-                                                className="w-12 text-center text-gray-600 font-medium select-none text-sm"
-                                                aria-label={`수량: ${item.name}, 현재 수량: ${item.quantity}`}
-                                            >
-                                                {item.quantity}
-                                            </span>
-                                            <span
-                                                className="w-8 text-center text-gray-600 font-medium select-none text-sm"
-                                                aria-label={`단위: ${item.name}, 현재 단위: ${item.unit}.`}
-                                            >
-                                                {item.unit}
-                                            </span>
-                                            {!isCompleted && (
-                                                <button onClick={(e) => handleRemoveItem(e, item)} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
-                                                    <RemoveIcon className="w-5 h-5"/>
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     )}

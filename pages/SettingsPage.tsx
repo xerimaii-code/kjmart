@@ -224,9 +224,9 @@ const SettingsPage: React.FC = () => {
             />
             <div className="max-w-3xl mx-auto w-full p-4 md:p-6 space-y-8">
                 
-                {/* --- Master Data Section --- */}
+                {/* --- 초기 데이터 설정 (Initial Data Setup) --- */}
                 <div>
-                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">마스터 데이터 관리</h2>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">초기 데이터 설정</h2>
                     <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4 divide-y divide-slate-200">
                         {/* Customer */}
                         <div className="py-4 first:pt-0 last:pb-0">
@@ -249,9 +249,9 @@ const SettingsPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* --- Data Backup & Restore Section --- */}
+                {/* --- 데이터 백업 및 복원 (Data Backup & Restore) --- */}
                 <div>
-                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">전체 데이터 관리</h2>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">데이터 백업 및 복원</h2>
                     <div className="grid md:grid-cols-2 gap-4">
                          <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4 flex flex-col justify-between">
                             <div>
@@ -286,64 +286,62 @@ const SettingsPage: React.FC = () => {
                     </div>
                 </div>
                 
-                {/* --- Device Settings Section --- */}
+                {/* --- 앱 및 기기 설정 (App & Device Settings) --- */}
                 <div>
-                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">기기 설정</h2>
-                    <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50">
-                        <div className="p-4 flex items-center">
-                            <div className="flex-shrink-0 w-10 h-10 bg-slate-200 text-slate-600 rounded-lg flex items-center justify-center">
-                                <CameraIcon className="w-6 h-6"/>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">앱 및 기기 설정</h2>
+                    <div className="space-y-4">
+                        <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50">
+                            <div className="p-4 flex items-center">
+                                <div className="flex-shrink-0 w-10 h-10 bg-slate-200 text-slate-600 rounded-lg flex items-center justify-center">
+                                    <CameraIcon className="w-6 h-6"/>
+                                </div>
+                                <div className="flex-grow ml-4">
+                                    <h3 className="font-semibold text-slate-800">바코드 스캔 카메라</h3>
+                                    <p className="text-sm text-slate-500">스캔에 사용할 카메라를 선택하세요.</p>
+                                </div>
                             </div>
-                            <div className="flex-grow ml-4">
-                                <h3 className="font-semibold text-slate-800">바코드 스캔 카메라</h3>
-                                <p className="text-sm text-slate-500">스캔에 사용할 카메라를 선택하세요.</p>
+                            <div className="px-4 pb-4 space-y-3">
+                                <select 
+                                    id="camera-select" 
+                                    value={currentCameraSelection} 
+                                    onChange={e => setCurrentCameraSelection(e.target.value)} 
+                                    className="block w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-sky-500 bg-slate-50 shadow-inner shadow-gray-200/80"
+                                    aria-label="사용할 카메라를 선택하세요"
+                                >
+                                    {cameras.length === 0 && <option value="">사용 가능한 카메라 없음</option>}
+                                    {cameras.map((camera, index) => (
+                                        <option key={camera.deviceId} value={camera.deviceId}>
+                                            {camera.label || `카메라 ${index + 1}`}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button 
+                                    onClick={handleSaveCamera} 
+                                    className="w-full bg-gradient-to-b from-sky-400 to-sky-500 text-white p-3 rounded-md font-bold hover:from-sky-500 hover:to-sky-600 transition shadow-sm disabled:bg-slate-300 disabled:from-slate-300 disabled:to-slate-300"
+                                    disabled={!currentCameraSelection}
+                                >
+                                    선택 카메라로 저장
+                                </button>
                             </div>
                         </div>
-                        <div className="px-4 pb-4 space-y-3">
-                            <select 
-                                id="camera-select" 
-                                value={currentCameraSelection} 
-                                onChange={e => setCurrentCameraSelection(e.target.value)} 
-                                className="block w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-sky-500 bg-slate-50 shadow-inner shadow-gray-200/80"
-                                aria-label="사용할 카메라를 선택하세요"
-                            >
-                                {cameras.length === 0 && <option value="">사용 가능한 카메라 없음</option>}
-                                {cameras.map((camera, index) => (
-                                    <option key={camera.deviceId} value={camera.deviceId}>
-                                        {camera.label || `카메라 ${index + 1}`}
-                                    </option>
-                                ))}
-                            </select>
-                            <button 
-                                onClick={handleSaveCamera} 
-                                className="w-full bg-gradient-to-b from-sky-400 to-sky-500 text-white p-3 rounded-md font-bold hover:from-sky-500 hover:to-sky-600 transition shadow-sm disabled:bg-slate-300 disabled:from-slate-300 disabled:to-slate-300"
-                                disabled={!currentCameraSelection}
-                            >
-                                선택 카메라로 저장
-                            </button>
+                        
+                        <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4">
+                            <h3 className="font-semibold text-slate-800">앱 설치</h3>
+                            <p className="text-sm text-slate-500 mt-1 mb-3">
+                                {isStandalone
+                                    ? '앱이 기기에 설치되어 있습니다.'
+                                    : '홈 화면에 앱을 설치하여 주소창 없이 더 빠른 경험을 즐기세요.'}
+                            </p>
+                            {!isStandalone && isInstallPromptAvailable && (
+                                <button
+                                    onClick={triggerInstallPrompt}
+                                    className="w-full mt-2 flex items-center justify-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white p-3 rounded-md font-bold transition shadow-sm"
+                                >
+                                    <ArrowDownTrayIcon className="w-5 h-5" />
+                                    <span>앱 설치하기</span>
+                                </button>
+                            )}
                         </div>
-                    </div>
-                </div>
-                
-                {/* --- Application Settings Section --- */}
-                <div>
-                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">애플리케이션</h2>
-                    <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4">
-                        <h3 className="font-semibold text-slate-800">앱 설치</h3>
-                        <p className="text-sm text-slate-500 mt-1 mb-3">
-                            {isStandalone
-                                ? '앱이 기기에 설치되어 있습니다.'
-                                : '홈 화면에 앱을 설치하여 주소창 없이 더 빠른 경험을 즐기세요.'}
-                        </p>
-                        {!isStandalone && isInstallPromptAvailable && (
-                            <button
-                                onClick={triggerInstallPrompt}
-                                className="w-full mt-2 flex items-center justify-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white p-3 rounded-md font-bold transition shadow-sm"
-                            >
-                                <ArrowDownTrayIcon className="w-5 h-5" />
-                                <span>앱 설치하기</span>
-                            </button>
-                        )}
                     </div>
                 </div>
 

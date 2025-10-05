@@ -13,6 +13,7 @@ export interface OrderItem extends Product {
     quantity: number;
     unit: '개' | '박스';
     isPromotion?: boolean;
+    status?: 'new' | 'modified';
 }
 
 export interface Order {

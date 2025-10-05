@@ -1,11 +1,18 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useData, useUI } from '../context/AppContext';
 import { Customer, Product, OrderItem } from '../types';
-import { RemoveIcon, DocumentTextIcon } from '../components/Icons';
+import { RemoveIcon, DocumentTextIcon, SpinnerIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+
+type OrderDraft = {
+  customer: Customer | null;
+  items: OrderItem[];
+  memo: string;
+};
 
 const MemoModal: React.FC<{
     isOpen: boolean;
@@ -91,15 +98,17 @@ const NewOrderPage: React.FC = () => {
     const { customers, products, addOrder } = useData();
     const { showAlert, openScanner, closeScanner } = useUI();
 
-    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-    const [customerSearch, setCustomerSearch] = useState('');
+    const [draft, setDraft] = useLocalStorage<OrderDraft | null>('newOrderDraft', null);
+
+    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => draft?.customer || null);
+    const [customerSearch, setCustomerSearch] = useState(() => draft?.customer?.name || '');
     const [productSearch, setProductSearch] = useState('');
-    const [memo, setMemo] = useState('');
+    const [memo, setMemo] = useState(() => draft?.memo || '');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
-    const [isCustomerLocked, setIsCustomerLocked] = useState(false);
+    const [isCustomerLocked, setIsCustomerLocked] = useState(() => !!draft?.customer);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     const [isPromotionMode, setIsPromotionMode] = useState(false);
     
@@ -108,6 +117,7 @@ const NewOrderPage: React.FC = () => {
     const [addItemTrigger, setAddItemTrigger] = useState<'scan' | 'search'>('search');
     const [scanSettings, setScanSettings] = useState<{ unit: '개' | '박스'; isPromotion: boolean }>({ unit: '개', isPromotion: false });
     const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     const customerSearchBlurTimeout = useRef<number | null>(null);
     const productSearchBlurTimeout = useRef<number | null>(null);
@@ -120,7 +130,7 @@ const NewOrderPage: React.FC = () => {
     const [highlightedItem, setHighlightedItem] = useState<string | null>(null);
     const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
 
-    const [initialItems] = useState<OrderItem[]>([]); // FIX: Create a stable initial array
+    const [initialItems] = useState<OrderItem[]>(draft?.items || []); 
 
     const {
         items,
@@ -130,8 +140,23 @@ const NewOrderPage: React.FC = () => {
         resetItems,
         totalAmount,
     } = useOrderManager({
-        initialItems, // FIX: Pass stable array to prevent resets
+        initialItems,
     });
+    
+    // Sync state back to localStorage draft
+    useEffect(() => {
+        if (selectedCustomer || items.length > 0 || memo.trim() !== '') {
+            setDraft({
+                customer: selectedCustomer,
+                items: items,
+                memo: memo,
+            });
+        } else if (draft !== null) {
+            // Clear draft if all fields are empty and draft exists
+            setDraft(null);
+        }
+    }, [selectedCustomer, items, memo, draft, setDraft]);
+
 
     const filteredCustomers = useMemo(() => {
         const searchTerm = customerSearch.trim().toLowerCase();
@@ -187,7 +212,7 @@ const NewOrderPage: React.FC = () => {
         setShowProductDropdown(false);
     };
 
-    const handleCompleteOrder = () => {
+    const handleCompleteOrder = async () => {
         if (!selectedCustomer) {
             showAlert("거래처를 선택해주세요.");
             return;
@@ -199,19 +224,31 @@ const NewOrderPage: React.FC = () => {
 
         showAlert(
             `'${selectedCustomer.name}'으로 발주를 저장하시겠습니까?`,
-            () => {
-                addOrder({
-                    customer: selectedCustomer,
-                    items,
-                    total: totalAmount,
-                    memo: memo.trim(),
-                });
-                resetItems();
-                setSelectedCustomer(null);
-                setCustomerSearch('');
-                setIsCustomerLocked(false);
-                setMemo('');
-                showAlert("신규 발주가 추가되었습니다.");
+            async () => {
+                setIsSaving(true);
+                try {
+                    await addOrder({
+                        customer: selectedCustomer,
+                        items,
+                        total: totalAmount,
+                        memo: memo.trim(),
+                    });
+                    
+                    // Clear draft before resetting UI state
+                    setDraft(null);
+                    
+                    resetItems();
+                    setSelectedCustomer(null);
+                    setCustomerSearch('');
+                    setIsCustomerLocked(false);
+                    setMemo('');
+                    showAlert("신규 발주가 추가되었습니다.");
+                } catch (error) {
+                    console.error("Order save failed:", error);
+                    showAlert("발주 저장에 실패했습니다. 네트워크 연결을 확인하고 다시 시도하세요.");
+                } finally {
+                    setIsSaving(false);
+                }
             },
             "발주 저장"
         );
@@ -222,6 +259,7 @@ const NewOrderPage: React.FC = () => {
             showAlert(
                 '작성 중인 발주를 취소하시겠습니까? 모든 내용이 삭제됩니다.',
                 () => {
+                    setDraft(null); // Clear draft first
                     resetItems();
                     setSelectedCustomer(null);
                     setCustomerSearch('');
@@ -229,11 +267,11 @@ const NewOrderPage: React.FC = () => {
                     setMemo('');
                     setProductSearch('');
                 },
-                '모두 지우기', // Clearer confirm text
+                '모두 지우기',
                 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
             );
         }
-    }, [items, selectedCustomer, memo, showAlert, resetItems]);
+    }, [items, selectedCustomer, memo, showAlert, resetItems, setDraft]);
 
     const handleRemoveItem = (e: React.MouseEvent, itemToRemove: OrderItem) => {
         e.stopPropagation();
@@ -414,10 +452,10 @@ const NewOrderPage: React.FC = () => {
                     </button>
                     <button 
                         onClick={handleCompleteOrder} 
-                        className="w-[80%] bg-gradient-to-b from-blue-500 to-blue-600 text-white p-2 rounded-lg font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed" 
-                        disabled={!selectedCustomer || items.length === 0}
+                        className="w-[80%] bg-gradient-to-b from-blue-500 to-blue-600 text-white p-2 rounded-lg font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center" 
+                        disabled={!selectedCustomer || items.length === 0 || isSaving}
                     >
-                        발주 저장
+                        {isSaving ? <SpinnerIcon className="w-6 h-6" /> : '발주 저장'}
                     </button>
                 </div>
             </footer>
