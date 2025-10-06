@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { useData, useUI } from '../context/AppContext';
+import { useData, useUI, useDraft } from '../context/AppContext';
 import { Order, OrderItem, Product } from '../types';
 import { PlusCircleIcon, RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon } from './Icons';
 import ToggleSwitch from './ToggleSwitch';
@@ -113,6 +113,12 @@ const OrderDetailModal: React.FC = () => {
         openScanner,
         closeScanner,
     } = useUI();
+
+    const { 
+        getOrderDetailDraft, 
+        saveOrderDetailDraft, 
+        clearOrderDetailDraft 
+    } = useDraft();
     
     const [STABLE_EMPTY_ARRAY] = useState([]); // Create a stable empty array reference
     const order = useMemo(() => orders.find(o => o.id === editingOrderId), [orders, editingOrderId]);
@@ -141,16 +147,28 @@ const OrderDetailModal: React.FC = () => {
     const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
     const lastItemCount = useRef(0);
     
+    const initialData = useMemo(() => {
+        if (!order) return { items: STABLE_EMPTY_ARRAY, memo: '' };
+        const draft = getOrderDetailDraft(order.id);
+        return {
+            items: draft ? draft.items : order.items.map(i => ({...i})),
+            memo: draft ? draft.memo : (order.memo || ''),
+        };
+    }, [order, getOrderDetailDraft, STABLE_EMPTY_ARRAY]);
+
     const {
         items: editedItems,
         addItem,
         updateItem,
         removeItem,
-        resetItems,
         totalAmount,
     } = useOrderManager({
-        initialItems: useMemo(() => order?.items.map(i => ({...i})) || STABLE_EMPTY_ARRAY, [order])
+        initialItems: initialData.items
     });
+    
+    useEffect(() => {
+        setMemo(initialData.memo);
+    }, [initialData.memo]);
 
     const itemStatuses = useMemo(() => {
         if (!order) return new Map<string, ItemChangeStatus>();
@@ -191,30 +209,35 @@ const OrderDetailModal: React.FC = () => {
         return statuses;
     }, [editedItems, order]);
 
+    // Auto-save changes to draft
     useEffect(() => {
-        if (order) {
-            setMemo(order.memo || '');
-            setIsMemoSectionOpen(false); // Collapse memo when a new order is opened
-        }
-    }, [order]);
-
-    useEffect(() => {
-        if (!order) {
-            setHasChanges(false);
-            return;
-        }
-
+        if (!order || isCompleted) return;
+        
         const normalizedOriginalItems = order.items.map(item => ({
             ...item,
             isPromotion: !!item.isPromotion,
         }));
-
         const originalItemsString = JSON.stringify(normalizedOriginalItems.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
         const editedItemsString = JSON.stringify(editedItems.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
         const memoChanged = (order.memo || '') !== memo;
 
-        setHasChanges(originalItemsString !== editedItemsString || memoChanged);
-    }, [editedItems, order, memo]);
+        const currentChangesExist = originalItemsString !== editedItemsString || memoChanged;
+        setHasChanges(currentChangesExist);
+
+        if (currentChangesExist) {
+            saveOrderDetailDraft(order.id, { items: editedItems, memo });
+        } else {
+            // If the user reverts all changes, the draft is automatically cleared.
+            clearOrderDetailDraft(order.id);
+        }
+
+    }, [editedItems, memo, order, isCompleted, saveOrderDetailDraft, clearOrderDetailDraft]);
+    
+    useEffect(() => {
+        if (order) {
+            setIsMemoSectionOpen(false); // Collapse memo when a new order is opened
+        }
+    }, [order]);
 
     useEffect(() => {
         setScanSettings({ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode });
@@ -222,21 +245,20 @@ const OrderDetailModal: React.FC = () => {
     
     const handleClose = useCallback(() => {
         if (hasChanges) {
-             showAlert(
-                "수정된 내용이 있습니다. 저장하지 않고 닫으시겠습니까?",
-                closeDetailModal,
-                "변경사항 폐기",
-                "bg-red-500 hover:bg-red-600 focus:ring-red-500",
+            showAlert(
+                "저장되지 않은 변경사항이 있습니다. 초안을 삭제하고 창을 닫으시겠습니까?",
                 () => {
-                    // User cancelled the close action, so re-push the history state
-                    // to re-capture the back button.
-                    window.history.pushState({ modal: 'open' }, '');
-                }
-             );
+                    if (order) {
+                        clearOrderDetailDraft(order.id);
+                    }
+                    closeDetailModal();
+                },
+                "초안 삭제"
+            );
         } else {
             closeDetailModal();
         }
-    }, [hasChanges, showAlert, closeDetailModal]);
+    }, [hasChanges, showAlert, closeDetailModal, order, clearOrderDetailDraft]);
 
     useEffect(() => {
         const handlePopState = (event: PopStateEvent) => {
@@ -332,6 +354,7 @@ const OrderDetailModal: React.FC = () => {
             createdAt: order.createdAt || order.date, // Preserve original date as createdAt
         };
         updateOrder(updatedOrder);
+        clearOrderDetailDraft(order.id);
         closeDetailModal();
         showAlert("발주 내역이 수정되었습니다.");
     };

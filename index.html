@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>발주 관리</title>
     <link rel="manifest" href="/metadata.json">
     <meta name="theme-color" content="#f9fafb">
@@ -10,6 +10,21 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="발주 관리">
+    
+    <!-- iOS Splash Screen Support -->
+    <!-- The following links provide startup images for various iOS devices. -->
+    <!-- You will need to create and place these image files in a /splash/ directory. -->
+    <link href="/splash/iphone5_splash.png" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
+    <link href="/splash/iphone6_splash.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
+    <link href="/splash/iphoneplus_splash.png" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3)" rel="apple-touch-startup-image" />
+    <link href="/splash/iphonex_splash.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)" rel="apple-touch-startup-image" />
+    <link href="/splash/iphonexr_splash.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
+    <link href="/splash/iphonexsmax_splash.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3)" rel="apple-touch-startup-image" />
+    <link href="/splash/ipad_splash.png" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
+    <link href="/splash/ipadpro1_splash.png" media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
+    <link href="/splash/ipadpro3_splash.png" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
+    <link href="/splash/ipadpro2_splash.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
+
     <!-- es-module-shims polyfill to support import maps in more browsers -->
     <script async src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
     <!-- Tailwind CSS CDN -->
@@ -44,10 +59,19 @@
         .fixed-filter { flex-shrink: 0; }
         .scrollable-content { flex-grow: 1; overflow-y: auto; }
 
-        /* Style for Window Controls Overlay */
+        /* Style for Window Controls Overlay & iOS Safe Area */
         #app-header {
             -webkit-app-region: drag; /* Make the header draggable */
+             /* Add padding for the iOS notch area */
+            padding-top: env(safe-area-inset-top);
+            height: calc(3rem + env(safe-area-inset-top)); /* 3rem is h-12 from Tailwind */
         }
+        body nav {
+            /* Add padding for the iOS home indicator area */
+            padding-bottom: env(safe-area-inset-bottom);
+            height: calc(4rem + env(safe-area-inset-bottom)); /* 4rem is h-16 from Tailwind */
+        }
+
         /* Make sure any interactive elements inside the header are NOT draggable */
         #app-header button, #app-header a, #app-header input, #app-header select {
             -webkit-app-region: no-drag;

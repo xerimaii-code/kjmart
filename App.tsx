@@ -1,5 +1,5 @@
 import React, { useState, lazy, Suspense } from 'react';
-import { AppProvider, DataProvider, useUI } from './context/AppContext';
+import { AppProvider, DataProvider, useUI, useDraft } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import BottomNav from './components/BottomNav';
@@ -28,11 +28,28 @@ const AppContent: React.FC = () => {
         isScannerOpen,
         onScanSuccess,
         closeScanner,
+        showAlert,
      } = useUI();
+    const { hasNewOrderDraft, hasOrderDetailDrafts } = useDraft();
 
     const handleNavigation = (targetPage: Page) => {
-        setActivePage(targetPage);
+        if (targetPage === activePage) return;
+
+        const unsavedChangesExist = 
+            (activePage === 'new-order' && hasNewOrderDraft()) ||
+            (activePage === 'history' && hasOrderDetailDrafts());
+
+        if (unsavedChangesExist) {
+            showAlert(
+                "저장되지 않은 초안이 있습니다. 다른 메뉴로 이동하시겠습니까? (초안은 유지됩니다)",
+                () => setActivePage(targetPage),
+                "이동하기"
+            );
+        } else {
+            setActivePage(targetPage);
+        }
     };
+
 
     const renderPage = () => {
         switch (activePage) {

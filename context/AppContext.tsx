@@ -1,8 +1,9 @@
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext } from 'react';
-import { Customer, Product, Order, ScannerContext } from '../types';
+import { Customer, Product, Order, OrderItem, ScannerContext } from '../types';
 import * as db from '../services/dbService';
 import AlertModal from '../components/AlertModal';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 // --- TYPE DEFINITIONS ---
 interface DataState {
@@ -52,14 +53,47 @@ interface UIActions {
     triggerInstallPrompt: () => void;
 }
 
+// Draft-related types
+type NewOrderDraft = {
+    customer: Customer | null;
+    items: OrderItem[];
+    memo: string;
+};
+
+type OrderDetailDraft = {
+    items: OrderItem[];
+    memo: string;
+};
+
+type AppDrafts = {
+    newOrder?: NewOrderDraft;
+    orderDetails?: { [orderId: number]: OrderDetailDraft };
+};
+
+interface DraftState {
+    newOrderDraft: NewOrderDraft | null;
+    getOrderDetailDraft: (orderId: number) => OrderDetailDraft | null;
+    hasOrderDetailDrafts: () => boolean;
+    hasNewOrderDraft: () => boolean;
+}
+
+interface DraftActions {
+    saveNewOrderDraft: (draft: NewOrderDraft) => void;
+    clearNewOrderDraft: () => void;
+    saveOrderDetailDraft: (orderId: number, draft: OrderDetailDraft) => void;
+    clearOrderDetailDraft: (orderId: number) => void;
+}
+
 // --- CONTEXT CREATION ---
 export const DataContext = createContext<DataState & DataActions>({} as DataState & DataActions);
 export const UIContext = createContext<UIState & UIActions>({} as UIState & UIActions);
+export const DraftContext = createContext<DraftState & DraftActions>({} as DraftState & DraftActions);
 
 
 // --- HOOKS for easier context consumption ---
 export const useData = () => useContext(DataContext);
 export const useUI = () => useContext(UIContext);
+export const useDraft = () => useContext(DraftContext);
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [dataState, setDataState] = useState<DataState>({
@@ -164,6 +198,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [isContinuousScan, setIsContinuousScan] = useState(false);
     const [scanSuccessCallback, setScanSuccessCallback] = useState<(barcode: string) => void>(() => () => {});
     const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
+    const [drafts, setDrafts] = useLocalStorage<AppDrafts>('appDrafts', {});
     
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
         setAlert({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
@@ -178,6 +213,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return () => {
             window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
         };
+    }, []);
+
+    // Show alert on initial load if drafts exist
+    useEffect(() => {
+        const hasNewOrder = drafts?.newOrder && (drafts.newOrder.customer || drafts.newOrder.items.length > 0);
+        const hasOrderDetails = drafts?.orderDetails && Object.keys(drafts.orderDetails).length > 0;
+        
+        if (hasNewOrder || hasOrderDetails) {
+            let message = '';
+            if (hasNewOrder) message += '작성 중인 신규 발주가 있습니다.\n';
+            if (hasOrderDetails) message += '수정 중인 발주 내역이 있습니다.';
+            
+            setTimeout(() => showAlert(message.trim()), 500); // Delay slightly to not clash with loading screen
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     
     const uiActions: UIActions = {
@@ -227,18 +277,73 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isInstallPromptAvailable: !!installPromptEvent,
     };
 
+    const draftContextValue: DraftState & DraftActions = {
+        newOrderDraft: drafts?.newOrder || null,
+        getOrderDetailDraft: (orderId: number) => drafts?.orderDetails?.[orderId] || null,
+        saveNewOrderDraft: (draft: NewOrderDraft) => {
+            // FIX: The `setDrafts` function from `useLocalStorage` does not accept a callback.
+            // Retrieve the current value from `drafts` and then set the new state.
+            setDrafts({ ...(drafts || {}), newOrder: draft });
+        },
+        clearNewOrderDraft: () => {
+            // FIX: The `setDrafts` function from `useLocalStorage` does not accept a callback.
+            // Retrieve the current value from `drafts` and then set the new state.
+            const { newOrder, ...rest } = drafts || {};
+            if (Object.keys(rest).length === 0) {
+                setDrafts(null);
+            } else {
+                setDrafts(rest);
+            }
+        },
+        saveOrderDetailDraft: (orderId: number, draft: OrderDetailDraft) => {
+            // FIX: The `setDrafts` function from `useLocalStorage` does not accept a callback.
+            // Retrieve the current value from `drafts` and then set the new state.
+            setDrafts({
+                ...(drafts || {}),
+                orderDetails: { ...(drafts?.orderDetails || {}), [orderId]: draft }
+            });
+        },
+        clearOrderDetailDraft: (orderId: number) => {
+            // FIX: The `setDrafts` function from `useLocalStorage` does not accept a callback.
+            // Retrieve the current value from `drafts` and then set the new state.
+            const prev = drafts || {};
+            if (!prev.orderDetails?.[orderId]) {
+                return;
+            }
+
+            const newDetails = { ...prev.orderDetails };
+            delete newDetails[orderId];
+
+            if (Object.keys(newDetails).length === 0) {
+                const { orderDetails, ...rest } = prev;
+                if (Object.keys(rest).length === 0) {
+                    setDrafts(null);
+                } else {
+                    setDrafts(rest);
+                }
+            } else {
+                setDrafts({ ...prev, orderDetails: newDetails });
+            }
+        },
+        hasOrderDetailDrafts: () => !!drafts?.orderDetails && Object.keys(drafts.orderDetails).length > 0,
+        hasNewOrderDraft: () => !!drafts?.newOrder && (!!drafts.newOrder.customer || drafts.newOrder.items.length > 0),
+    };
+
+
     return (
         <UIContext.Provider value={{...uiState, ...uiActions}}>
-            <AlertModal
-                isOpen={alert.isOpen}
-                message={alert.message}
-                onClose={uiActions.hideAlert}
-                onConfirm={alert.onConfirm}
-                onCancel={alert.onCancel}
-                confirmText={alert.confirmText}
-                confirmButtonClass={alert.confirmButtonClass}
-            />
-            {children}
+            <DraftContext.Provider value={draftContextValue}>
+                <AlertModal
+                    isOpen={alert.isOpen}
+                    message={alert.message}
+                    onClose={uiActions.hideAlert}
+                    onConfirm={alert.onConfirm}
+                    onCancel={alert.onCancel}
+                    confirmText={alert.confirmText}
+                    confirmButtonClass={alert.confirmButtonClass}
+                />
+                {children}
+            </DraftContext.Provider>
         </UIContext.Provider>
     );
 };

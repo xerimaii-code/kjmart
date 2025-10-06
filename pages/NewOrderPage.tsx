@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useData, useUI } from '../context/AppContext';
+import { useData, useUI, useDraft } from '../context/AppContext';
 import { Customer, Product, OrderItem } from '../types';
 import { RemoveIcon, DocumentTextIcon, SpinnerIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 
 type OrderDraft = {
   customer: Customer | null;
@@ -97,18 +96,17 @@ const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>)
 const NewOrderPage: React.FC = () => {
     const { customers, products, addOrder } = useData();
     const { showAlert, openScanner, closeScanner } = useUI();
+    const { newOrderDraft, saveNewOrderDraft, clearNewOrderDraft } = useDraft();
 
-    const [draft, setDraft] = useLocalStorage<OrderDraft | null>('newOrderDraft', null);
-
-    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => draft?.customer || null);
-    const [customerSearch, setCustomerSearch] = useState(() => draft?.customer?.name || '');
+    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => newOrderDraft?.customer || null);
+    const [customerSearch, setCustomerSearch] = useState(() => newOrderDraft?.customer?.name || '');
     const [productSearch, setProductSearch] = useState('');
-    const [memo, setMemo] = useState(() => draft?.memo || '');
+    const [memo, setMemo] = useState(() => newOrderDraft?.memo || '');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
-    const [isCustomerLocked, setIsCustomerLocked] = useState(() => !!draft?.customer);
+    const [isCustomerLocked, setIsCustomerLocked] = useState(() => !!newOrderDraft?.customer);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     const [isPromotionMode, setIsPromotionMode] = useState(false);
     
@@ -130,7 +128,7 @@ const NewOrderPage: React.FC = () => {
     const [highlightedItem, setHighlightedItem] = useState<string | null>(null);
     const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
 
-    const [initialItems] = useState<OrderItem[]>(draft?.items || []); 
+    const [initialItems] = useState<OrderItem[]>(newOrderDraft?.items || []); 
 
     const {
         items,
@@ -143,19 +141,19 @@ const NewOrderPage: React.FC = () => {
         initialItems,
     });
     
-    // Sync state back to localStorage draft
+    // Sync state back to draft context
     useEffect(() => {
         if (selectedCustomer || items.length > 0 || memo.trim() !== '') {
-            setDraft({
+            saveNewOrderDraft({
                 customer: selectedCustomer,
                 items: items,
                 memo: memo,
             });
-        } else if (draft !== null) {
+        } else if (newOrderDraft !== null) {
             // Clear draft if all fields are empty and draft exists
-            setDraft(null);
+            clearNewOrderDraft();
         }
-    }, [selectedCustomer, items, memo, draft, setDraft]);
+    }, [selectedCustomer, items, memo, newOrderDraft, saveNewOrderDraft, clearNewOrderDraft]);
 
 
     const filteredCustomers = useMemo(() => {
@@ -235,7 +233,7 @@ const NewOrderPage: React.FC = () => {
                     });
                     
                     // Clear draft before resetting UI state
-                    setDraft(null);
+                    clearNewOrderDraft();
                     
                     resetItems();
                     setSelectedCustomer(null);
@@ -259,7 +257,7 @@ const NewOrderPage: React.FC = () => {
             showAlert(
                 '작성 중인 발주를 취소하시겠습니까? 모든 내용이 삭제됩니다.',
                 () => {
-                    setDraft(null); // Clear draft first
+                    clearNewOrderDraft(); // Clear draft first
                     resetItems();
                     setSelectedCustomer(null);
                     setCustomerSearch('');
@@ -271,7 +269,7 @@ const NewOrderPage: React.FC = () => {
                 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
             );
         }
-    }, [items, selectedCustomer, memo, showAlert, resetItems, setDraft]);
+    }, [items, selectedCustomer, memo, showAlert, resetItems, clearNewOrderDraft]);
 
     const handleRemoveItem = (e: React.MouseEvent, itemToRemove: OrderItem) => {
         e.stopPropagation();
