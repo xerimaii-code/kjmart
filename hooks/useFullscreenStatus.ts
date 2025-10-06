@@ -28,32 +28,3 @@ export const useFullscreenStatus = (): boolean => {
 
     return isFullscreen;
 };
-
-/**
- * Custom hook to track the PWA's standalone status.
- * @returns {boolean} A boolean indicating if the app is running in standalone mode.
- */
-export const useStandaloneStatus = (): boolean => {
-    const [isStandalone, setIsStandalone] = useState(false);
-
-    useEffect(() => {
-        const checkStandalone = () => {
-            const isMatch = window.matchMedia('(display-mode: standalone)').matches;
-            // For iOS Safari PWA
-            const isNavigatorStandalone = (window.navigator as any).standalone === true;
-            setIsStandalone(isMatch || isNavigatorStandalone);
-        };
-        
-        checkStandalone();
-        
-        // Listen for changes
-        const mediaQuery = window.matchMedia('(display-mode: standalone)');
-        mediaQuery.addEventListener('change', checkStandalone);
-        
-        return () => {
-             mediaQuery.removeEventListener('change', checkStandalone);
-        };
-    }, []);
-
-    return isStandalone;
-};
