@@ -359,18 +359,21 @@ const SettingsPage: React.FC = () => {
                 <div>
                     <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">계정</h2>
                     <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-4">
                             <div>
                                 <h3 className="font-semibold text-slate-800">로그인된 계정</h3>
                                 <p className="text-sm text-slate-500">{user?.email}</p>
                             </div>
-                            <button
-                                onClick={handleLogout}
-                                className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md font-bold transition shadow-sm"
-                            >
-                                <LogoutIcon className="w-5 h-5"/>
-                                <span>로그아웃</span>
-                            </button>
+                            <div className="flex items-center flex-shrink-0 gap-2">
+                                <button
+                                    onClick={handleLogout}
+                                    className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md font-bold transition shadow-sm"
+                                    title="로그아웃"
+                                >
+                                    <LogoutIcon className="w-5 h-5"/>
+                                    <span className="hidden sm:inline">로그아웃</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

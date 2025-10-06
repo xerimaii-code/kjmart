@@ -214,6 +214,43 @@ const OrderDetailModal: React.FC = () => {
     useEffect(() => {
         setScanSettings({ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode });
     }, [isBoxUnitDefault, isPromotionMode]);
+    
+    const handleClose = useCallback(() => {
+        if (hasChanges) {
+             showAlert(
+                "수정된 내용이 있습니다. 저장하지 않고 닫으시겠습니까?",
+                closeDetailModal,
+                "변경사항 폐기",
+                "bg-red-500 hover:bg-red-600 focus:ring-red-500",
+                () => {
+                    // User cancelled the close action, so re-push the history state
+                    // to re-capture the back button.
+                    window.history.pushState({ modal: 'open' }, '');
+                }
+             );
+        } else {
+            closeDetailModal();
+        }
+    }, [hasChanges, showAlert, closeDetailModal]);
+
+    useEffect(() => {
+        const handlePopState = (event: PopStateEvent) => {
+            if (editingOrderId !== null) {
+                event.preventDefault();
+                handleClose();
+            }
+        };
+
+        window.history.pushState({ modal: 'open' }, '');
+        window.addEventListener('popstate', handlePopState);
+
+        return () => {
+            window.removeEventListener('popstate', handlePopState);
+            if (window.history.state && window.history.state.modal === 'open') {
+                window.history.back();
+            }
+        };
+    }, [editingOrderId, handleClose]);
 
     const handleAddProduct = useCallback((product: Product) => {
         const existingItem = editedItems.find(item => item.barcode === product.barcode);
@@ -294,18 +331,6 @@ const OrderDetailModal: React.FC = () => {
         showAlert("발주 내역이 수정되었습니다.");
     };
     
-    const handleClose = () => {
-        if (hasChanges) {
-             showAlert(
-                "수정된 내용이 있습니다. 저장하지 않고 닫으시겠습니까?",
-                closeDetailModal,
-                "변경사항 폐기",
-                "bg-red-500 hover:bg-red-600 focus:ring-red-500"
-             );
-        } else {
-            closeDetailModal();
-        }
-    };
 
     useEffect(() => {
         if (scrollableContainerRef.current && quickAddedBarcode) {
@@ -431,7 +456,7 @@ const OrderDetailModal: React.FC = () => {
                     <div className="p-2 bg-white shadow-md flex-shrink-0 z-30">
                         <div className="flex items-stretch space-x-2">
                             <div className="flex-grow rounded-lg shadow-inner border border-gray-300 flex flex-col">
-                                <div className="p-1.5 space-y-1.5 bg-gray-50/50">
+                                <div className="p-1.5 bg-gray-50/50">
                                     <div className="relative">
                                         <input
                                             ref={productSearchInputRef}
@@ -446,9 +471,27 @@ const OrderDetailModal: React.FC = () => {
                                                 productSearchBlurTimeout.current = window.setTimeout(() => setShowDropdown(false), 200);
                                             }}
                                             placeholder="품목명 또는 바코드 검색"
-                                            className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400"
+                                            className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-32"
                                             autoComplete="off"
                                         />
+                                        <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
+                                            <ToggleSwitch
+                                                id="modal-promotion-mode"
+                                                label="행사"
+                                                checked={isPromotionMode}
+                                                onChange={setIsPromotionMode}
+                                                color="red"
+                                                size="small"
+                                            />
+                                            <ToggleSwitch
+                                                id="modal-box-unit"
+                                                label="박스"
+                                                checked={isBoxUnitDefault}
+                                                onChange={setIsBoxUnitDefault}
+                                                color="blue"
+                                                size="small"
+                                            />
+                                        </div>
                                         <SearchDropdown<Product>
                                             items={filteredProducts}
                                             renderItem={(p) => (
@@ -462,32 +505,14 @@ const OrderDetailModal: React.FC = () => {
                                             show={showDropdown}
                                         />
                                     </div>
-                                    <div className="flex items-center justify-end space-x-3">
-                                        <ToggleSwitch
-                                            id="modal-promotion-mode"
-                                            label="행사"
-                                            checked={isPromotionMode}
-                                            onChange={setIsPromotionMode}
-                                            color="red"
-                                            size="small"
-                                        />
-                                        <ToggleSwitch
-                                            id="modal-box-unit"
-                                            label="박스"
-                                            checked={isBoxUnitDefault}
-                                            onChange={setIsBoxUnitDefault}
-                                            color="blue"
-                                            size="small"
-                                        />
-                                    </div>
                                 </div>
                             </div>
                             <button
                                 onClick={() => openScanner('modal', handleScanSuccess, true)}
-                                className="w-28 bg-blue-600 text-white rounded-lg flex-shrink-0 hover:bg-blue-700 shadow-md transition-all flex flex-col items-center justify-center gap-2 font-semibold"
+                                className="w-16 bg-blue-600 text-white rounded-lg flex-shrink-0 hover:bg-blue-700 shadow-md transition-all flex flex-col items-center justify-center gap-1 font-semibold"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M12 11v2"/></svg>
-                                <span className="text-lg">스캔</span>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M12 11v2"/></svg>
+                                <span className="text-sm">스캔</span>
                             </button>
                         </div>
                     </div>
