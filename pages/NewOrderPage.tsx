@@ -1,17 +1,11 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useData, useUI, useDraft } from '../context/AppContext';
+import { useData, useUI } from '../context/AppContext';
 import { Customer, Product, OrderItem } from '../types';
 import { RemoveIcon, DocumentTextIcon, SpinnerIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
-
-type OrderDraft = {
-  customer: Customer | null;
-  items: OrderItem[];
-  memo: string;
-};
 
 const MemoModal: React.FC<{
     isOpen: boolean;
@@ -96,17 +90,16 @@ const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>)
 const NewOrderPage: React.FC = () => {
     const { customers, products, addOrder } = useData();
     const { showAlert, openScanner, closeScanner } = useUI();
-    const { newOrderDraft, saveNewOrderDraft, clearNewOrderDraft } = useDraft();
 
-    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => newOrderDraft?.customer || null);
-    const [customerSearch, setCustomerSearch] = useState(() => newOrderDraft?.customer?.name || '');
+    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+    const [customerSearch, setCustomerSearch] = useState('');
     const [productSearch, setProductSearch] = useState('');
-    const [memo, setMemo] = useState(() => newOrderDraft?.memo || '');
+    const [memo, setMemo] = useState('');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
-    const [isCustomerLocked, setIsCustomerLocked] = useState(() => !!newOrderDraft?.customer);
+    const [isCustomerLocked, setIsCustomerLocked] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     const [isPromotionMode, setIsPromotionMode] = useState(false);
     
@@ -128,7 +121,7 @@ const NewOrderPage: React.FC = () => {
     const [highlightedItem, setHighlightedItem] = useState<string | null>(null);
     const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
 
-    const [initialItems] = useState<OrderItem[]>(newOrderDraft?.items || []); 
+    const [initialItems] = useState<OrderItem[]>([]); 
 
     const {
         items,
@@ -141,21 +134,6 @@ const NewOrderPage: React.FC = () => {
         initialItems,
     });
     
-    // Sync state back to draft context
-    useEffect(() => {
-        if (selectedCustomer || items.length > 0 || memo.trim() !== '') {
-            saveNewOrderDraft({
-                customer: selectedCustomer,
-                items: items,
-                memo: memo,
-            });
-        } else if (newOrderDraft !== null) {
-            // Clear draft if all fields are empty and draft exists
-            clearNewOrderDraft();
-        }
-    }, [selectedCustomer, items, memo, newOrderDraft, saveNewOrderDraft, clearNewOrderDraft]);
-
-
     const filteredCustomers = useMemo(() => {
         const searchTerm = customerSearch.trim().toLowerCase();
         if (!searchTerm) return [];
@@ -232,9 +210,6 @@ const NewOrderPage: React.FC = () => {
                         memo: memo.trim(),
                     });
                     
-                    // Clear draft before resetting UI state
-                    clearNewOrderDraft();
-                    
                     resetItems();
                     setSelectedCustomer(null);
                     setCustomerSearch('');
@@ -253,23 +228,13 @@ const NewOrderPage: React.FC = () => {
     };
 
     const handleCancelOrder = useCallback(() => {
-        if (items.length > 0 || selectedCustomer || memo.trim() !== '') {
-            showAlert(
-                '작성 중인 발주를 취소하시겠습니까? 모든 내용이 삭제됩니다.',
-                () => {
-                    clearNewOrderDraft(); // Clear draft first
-                    resetItems();
-                    setSelectedCustomer(null);
-                    setCustomerSearch('');
-                    setIsCustomerLocked(false);
-                    setMemo('');
-                    setProductSearch('');
-                },
-                '모두 지우기',
-                'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
-            );
-        }
-    }, [items, selectedCustomer, memo, showAlert, resetItems, clearNewOrderDraft]);
+        resetItems();
+        setSelectedCustomer(null);
+        setCustomerSearch('');
+        setIsCustomerLocked(false);
+        setMemo('');
+        setProductSearch('');
+    }, [resetItems]);
 
     const handleRemoveItem = (e: React.MouseEvent, itemToRemove: OrderItem) => {
         e.stopPropagation();

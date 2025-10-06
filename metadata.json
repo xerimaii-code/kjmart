@@ -5,10 +5,6 @@
   "scope": "/",
   "start_url": "/",
   "display": "standalone",
-  "display_override": [
-    "fullscreen",
-    "window-controls-overlay"
-  ],
   "background_color": "#ffffff",
   "theme_color": "#f9fafb",
   "icons": [

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { useData, useUI, useDraft } from '../context/AppContext';
+import { useData, useUI } from '../context/AppContext';
 import { Order, OrderItem, Product } from '../types';
 import { PlusCircleIcon, RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon } from './Icons';
 import ToggleSwitch from './ToggleSwitch';
@@ -113,12 +113,6 @@ const OrderDetailModal: React.FC = () => {
         openScanner,
         closeScanner,
     } = useUI();
-
-    const { 
-        getOrderDetailDraft, 
-        saveOrderDetailDraft, 
-        clearOrderDetailDraft 
-    } = useDraft();
     
     const [STABLE_EMPTY_ARRAY] = useState([]); // Create a stable empty array reference
     const order = useMemo(() => orders.find(o => o.id === editingOrderId), [orders, editingOrderId]);
@@ -136,7 +130,6 @@ const OrderDetailModal: React.FC = () => {
     const [highlightedItem, setHighlightedItem] = useState<string | null>(null);
     const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
     const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
-    const [hasChanges, setHasChanges] = useState(false);
     const [memo, setMemo] = useState('');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     const [isMemoSectionOpen, setIsMemoSectionOpen] = useState(false);
@@ -149,12 +142,11 @@ const OrderDetailModal: React.FC = () => {
     
     const initialData = useMemo(() => {
         if (!order) return { items: STABLE_EMPTY_ARRAY, memo: '' };
-        const draft = getOrderDetailDraft(order.id);
         return {
-            items: draft ? draft.items : order.items.map(i => ({...i})),
-            memo: draft ? draft.memo : (order.memo || ''),
+            items: order.items.map(i => ({...i})),
+            memo: (order.memo || ''),
         };
-    }, [order, getOrderDetailDraft, STABLE_EMPTY_ARRAY]);
+    }, [order, STABLE_EMPTY_ARRAY]);
 
     const {
         items: editedItems,
@@ -208,30 +200,6 @@ const OrderDetailModal: React.FC = () => {
         });
         return statuses;
     }, [editedItems, order]);
-
-    // Auto-save changes to draft
-    useEffect(() => {
-        if (!order || isCompleted) return;
-        
-        const normalizedOriginalItems = order.items.map(item => ({
-            ...item,
-            isPromotion: !!item.isPromotion,
-        }));
-        const originalItemsString = JSON.stringify(normalizedOriginalItems.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
-        const editedItemsString = JSON.stringify(editedItems.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
-        const memoChanged = (order.memo || '') !== memo;
-
-        const currentChangesExist = originalItemsString !== editedItemsString || memoChanged;
-        setHasChanges(currentChangesExist);
-
-        if (currentChangesExist) {
-            saveOrderDetailDraft(order.id, { items: editedItems, memo });
-        } else {
-            // If the user reverts all changes, the draft is automatically cleared.
-            clearOrderDetailDraft(order.id);
-        }
-
-    }, [editedItems, memo, order, isCompleted, saveOrderDetailDraft, clearOrderDetailDraft]);
     
     useEffect(() => {
         if (order) {
@@ -244,21 +212,8 @@ const OrderDetailModal: React.FC = () => {
     }, [isBoxUnitDefault, isPromotionMode]);
     
     const handleClose = useCallback(() => {
-        if (hasChanges) {
-            showAlert(
-                "저장되지 않은 변경사항이 있습니다. 초안을 삭제하고 창을 닫으시겠습니까?",
-                () => {
-                    if (order) {
-                        clearOrderDetailDraft(order.id);
-                    }
-                    closeDetailModal();
-                },
-                "초안 삭제"
-            );
-        } else {
-            closeDetailModal();
-        }
-    }, [hasChanges, showAlert, closeDetailModal, order, clearOrderDetailDraft]);
+        closeDetailModal();
+    }, [closeDetailModal]);
 
     useEffect(() => {
         const handlePopState = (event: PopStateEvent) => {
@@ -354,7 +309,6 @@ const OrderDetailModal: React.FC = () => {
             createdAt: order.createdAt || order.date, // Preserve original date as createdAt
         };
         updateOrder(updatedOrder);
-        clearOrderDetailDraft(order.id);
         closeDetailModal();
         showAlert("발주 내역이 수정되었습니다.");
     };
@@ -569,7 +523,7 @@ const OrderDetailModal: React.FC = () => {
                                     return (
                                         <div
                                             key={item.barcode}
-                                            ref={el => { itemRefs.current.set(item.barcode, el); }}
+                                            ref={el => { if (el) itemRefs.current.set(item.barcode, el); }}
                                             className={`flex items-center p-3 space-x-2 transition-all duration-200 ${rowBgClass} ${highlightedItem === item.barcode ? 'bg-blue-50' : ''} ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
                                             onClick={() => !isCompleted && setEditingItem(item)}
                                         >
@@ -617,7 +571,6 @@ const OrderDetailModal: React.FC = () => {
                     </div>
                     <button 
                         onClick={handleSave} 
-                        disabled={!hasChanges}
                         className="w-full bg-gradient-to-b from-blue-500 to-blue-600 text-white p-3 rounded-xl font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed"
                     >
                         수정사항 저장

@@ -34,7 +34,6 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
         const newQuantity = Number(quantity);
         if (newQuantity > 0) {
             onSave({ quantity: newQuantity, unit, isPromotion });
-            onClose();
         }
     };
 
