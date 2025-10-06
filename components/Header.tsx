@@ -3,18 +3,36 @@ import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
 import { ExitFullscreenIcon } from './Icons';
 
 const Header: React.FC = () => {
-    const [currentDateTime, setCurrentDateTime] = useState(new Date());
     const isFullscreen = useFullscreenStatus();
+    const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
     useEffect(() => {
-        const timer = setInterval(() => {
+        const timerId = setInterval(() => {
             setCurrentDateTime(new Date());
         }, 1000);
 
         return () => {
-            clearInterval(timer);
+            clearInterval(timerId);
         };
     }, []);
+
+    const formatDate = (date: Date) => {
+        return date.toLocaleDateString('ko-KR', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            weekday: 'short',
+        });
+    };
+    
+    const formatTime = (date: Date) => {
+        return date.toLocaleTimeString('ko-KR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true,
+        });
+    };
 
     const handleExitFullscreen = async () => {
         // Add vendor prefixes for cross-browser compatibility
@@ -34,34 +52,15 @@ const Header: React.FC = () => {
         }
     };
 
-    const formatDate = (date: Date) => {
-        return date.toLocaleString('ko-KR', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            weekday: 'long',
-        });
-    };
-    
-    const formatTime = (date: Date) => {
-        return date.toLocaleTimeString('ko-KR', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-        });
-    };
-
     return (
-        <header id="app-header" className="bg-gradient-to-b from-white to-gray-100 px-4 flex justify-between items-center h-8 flex-shrink-0 shadow-lg">
-            {/* Placeholder for centering */}
-            <div className="w-6"></div>
-
-            <div className="flex items-baseline space-x-2">
-                <p className="text-xs font-semibold text-gray-700">{formatDate(currentDateTime)}</p>
-                <p className="text-base font-bold text-gray-900 tabular-nums">{formatTime(currentDateTime)}</p>
-            </div>
+        <header id="app-header" className="bg-gradient-to-b from-white to-gray-100 px-4 flex justify-between items-center h-12 flex-shrink-0 shadow-sm border-b border-gray-200">
+            <h1 className="text-lg font-bold text-gray-800">경진마트 발주관리</h1>
             
-            <div className="w-6 flex items-center justify-center">
+            <div className="flex items-center space-x-3">
+                <div className="text-right">
+                    <div className="text-xs font-semibold text-gray-700">{formatDate(currentDateTime)}</div>
+                    <div className="text-sm font-bold text-gray-800 tabular-nums">{formatTime(currentDateTime)}</div>
+                </div>
                 {isFullscreen && (
                     <button 
                         onClick={handleExitFullscreen}
@@ -69,7 +68,7 @@ const Header: React.FC = () => {
                         aria-label="전체화면 종료"
                         title="전체화면 종료"
                     >
-                        <ExitFullscreenIcon className="w-4 h-4" />
+                        <ExitFullscreenIcon className="w-5 h-5" />
                     </button>
                 )}
             </div>

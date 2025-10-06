@@ -233,17 +233,14 @@ const base64ToArrayBuffer = (base64: string) => {
 
 export const exportToSMS = (order: Order): string => {
     const title = '경진마트';
-    const customerName = `거래처: ${order.customer.name}`;
-    const orderDate = `발주일: ${new Date(order.date).toLocaleDateString('ko-KR')}`;
+    const header = '품명/수량단위';
 
     const itemsBody = order.items.map(item => {
         const promotionText = item.isPromotion ? '(행사)' : '';
         return `${promotionText}${item.name}/${item.quantity}${item.unit}`;
     }).join('\n');
 
-    const totalAmount = `총액: ${order.total.toLocaleString()}원`;
-
-    const fullMessage = `${title}\n${customerName}\n${orderDate}\n\n${itemsBody}\n\n${totalAmount}`;
+    const fullMessage = `${title}\n${header}\n${itemsBody}`;
     return fullMessage;
 };
 
