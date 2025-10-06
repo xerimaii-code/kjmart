@@ -334,24 +334,6 @@ const SettingsPage: React.FC = () => {
                                 </button>
                             </div>
                         </div>
-                        
-                        <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4">
-                            <h3 className="font-semibold text-slate-800">앱 설치</h3>
-                            <p className="text-sm text-slate-500 mt-1 mb-3">
-                                {isStandalone
-                                    ? '앱이 기기에 설치되어 있습니다.'
-                                    : '홈 화면에 앱을 설치하여 주소창 없이 더 빠른 경험을 즐기세요.'}
-                            </p>
-                            {!isStandalone && isInstallPromptAvailable && (
-                                <button
-                                    onClick={triggerInstallPrompt}
-                                    className="w-full mt-2 flex items-center justify-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white p-3 rounded-md font-bold transition shadow-sm"
-                                >
-                                    <ArrowDownTrayIcon className="w-5 h-5" />
-                                    <span>앱 설치하기</span>
-                                </button>
-                            )}
-                        </div>
                     </div>
                 </div>
                 

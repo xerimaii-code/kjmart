@@ -6,18 +6,26 @@ interface UseOrderManagerProps {
     onItemsChange?: (items: OrderItem[]) => void;
 }
 
+// Helper to ensure item properties are consistent, preventing false change detection.
+const normalizeItems = (items: OrderItem[]): OrderItem[] => {
+    return items.map(item => ({
+        ...item,
+        isPromotion: !!item.isPromotion, // Coerce undefined/null to false, keep true as true.
+    }));
+};
+
 export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderManagerProps) => {
-    const [items, setItems] = useState<OrderItem[]>(initialItems);
+    // FIX: Normalize initial items to ensure `isPromotion` is always a boolean.
+    // This prevents false positives in change detection where `undefined` is compared to `false`.
+    const [items, setItems] = useState<OrderItem[]>(() => normalizeItems(initialItems));
 
     useEffect(() => {
-        // initialItems가 명시적으로 변경될 때만 내부 상태를 동기화합니다.
-        // (예: 모달이 다른 주문으로 열릴 때)
-        // 이 로직은 부모 컴포넌트에서 안정적인 참조를 제공하는 것을 전제로 합니다.
-        setItems(initialItems);
+        // When initialItems prop changes (e.g., opening a new order), reset and normalize the state.
+        setItems(normalizeItems(initialItems));
     }, [initialItems]);
     
     useEffect(() => {
-        // 아이템 목록이 변경될 때마다 부모 컴포넌트에 알립니다.
+        // Notify parent component of any changes to the managed items.
         if(onItemsChange) {
             onItemsChange(items);
         }
@@ -28,12 +36,14 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         options: { isBoxUnit: boolean; isPromotion: boolean; quantity?: number; }
     ) => {
         const newUnit = options.isBoxUnit ? '박스' : '개';
+        // New items are already normalized by their creation process.
         const newItem: OrderItem = { ...product, quantity: options.quantity ?? 1, unit: newUnit, isPromotion: options.isPromotion };
         
         setItems(prevItems => [...prevItems, newItem]);
     }, []);
     
     const updateItem = useCallback((barcode: string, newValues: Partial<OrderItem>) => {
+        // Updated items from modals will have a boolean `isPromotion`, so they are also normalized.
         setItems(prev => prev.map(item => item.barcode === barcode ? { ...item, ...newValues } : item));
     }, []);
 
@@ -46,7 +56,7 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
     }, [items]);
 
     const resetItems = useCallback((newItems: OrderItem[] = []) => {
-        setItems(newItems);
+        setItems(normalizeItems(newItems));
     }, []);
 
     return {

@@ -204,7 +204,12 @@ const OrderDetailModal: React.FC = () => {
             return;
         }
 
-        const originalItemsString = JSON.stringify(order.items.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
+        const normalizedOriginalItems = order.items.map(item => ({
+            ...item,
+            isPromotion: !!item.isPromotion,
+        }));
+
+        const originalItemsString = JSON.stringify(normalizedOriginalItems.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
         const editedItemsString = JSON.stringify(editedItems.slice().sort((a, b) => a.barcode.localeCompare(b.barcode)));
         const memoChanged = (order.memo || '') !== memo;
 
