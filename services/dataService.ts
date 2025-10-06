@@ -236,8 +236,8 @@ export const exportToSMS = (order: Order): string => {
     const header = '품명/수량단위';
 
     const itemsBody = order.items.map(item => {
-        const promotionText = item.isPromotion ? '(행사)' : '';
-        return `${promotionText}${item.name}/${item.quantity}${item.unit}`;
+        const prefix = item.isPromotion ? '(행사)' : '';
+        return `${prefix}${item.name}/${item.quantity}${item.unit}`;
     }).join('\n');
 
     const fullMessage = `${title}\n${header}\n${itemsBody}`;

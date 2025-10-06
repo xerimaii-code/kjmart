@@ -16,19 +16,19 @@ export const firebaseConfig = {
 };
 
 /**
- * Firebase 실시간 데이터베이스 보안 규칙 예시
+ * [운영용] Firebase 실시간 데이터베이스 보안 규칙 (관리자 전용)
  * 
- * Firebase 콘솔 -> Realtime Database -> 규칙 탭에서 아래 규칙을 설정하여
- * 앱이 데이터베이스에 자유롭게 읽고 쓸 수 있도록 허용할 수 있습니다.
+ * 아래 규칙은 'xerimaii@gmail.com' 이메일로 로그인한 사용자만 데이터베이스를 읽고 쓸 수 있도록 제한합니다.
+ * Firebase 콘솔 -> Realtime Database -> 규칙 탭에서 아래 규칙 전체를 복사하여 붙여넣으세요.
  * 
- * {
- *   "rules": {
- *     ".read": "true",
- *     ".write": "true"
- *   }
- * }
+ * 중요: 
+ * 1. Firebase 콘솔의 Authentication 메뉴에서 'xerimaii@gmail.com' 사용자를 미리 생성해야 합니다.
+ * 2. 다른 관리자 이메일을 사용하려면 규칙 내의 이메일 주소를 변경해야 합니다.
  * 
- * 경고: 위 규칙은 인증 없이 누구나 데이터베이스에 접근할 수 있게 하므로
- * 개발 및 테스트용으로만 사용해야 합니다. 프로덕션 환경에서는
- * Firebase 인증을 구현하고 보안 규칙을 더 강화해야 합니다.
+{
+  "rules": {
+    ".read": "auth != null && auth.token.email === 'xerimaii@gmail.com'",
+    ".write": "auth != null && auth.token.email === 'xerimaii@gmail.com'"
+  }
+}
  */

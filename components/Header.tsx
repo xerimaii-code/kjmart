@@ -29,7 +29,6 @@ const Header: React.FC = () => {
         return date.toLocaleTimeString('ko-KR', {
             hour: '2-digit',
             minute: '2-digit',
-            second: '2-digit',
             hour12: true,
         });
     };

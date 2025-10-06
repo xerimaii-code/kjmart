@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, onValue, get, set, remove } from 'firebase/database';
 import { firebaseConfig } from '../firebaseConfig';
-import { Customer, Order, Product } from "../types";
 
 let app;
 let db;
@@ -68,6 +67,18 @@ export const listenToSetting = <T>(key: string, callback: (data: T | null) => vo
     });
 };
 
+export const listenToValue = <T>(path: string, callback: (data: T | null) => void): (() => void) => {
+     if (!dbInitialized) return () => {};
+    const dataRef = ref(db, path);
+    return onValue(dataRef, (snapshot) => {
+        const data = snapshot.val();
+        callback(data);
+    }, (error) => {
+        console.error(`Error listening to ${path}:`, error);
+        callback(null);
+    });
+};
+
 // --- Functions matching the old dbService API ---
 export const getAll = async <T>(storeName: string): Promise<T[]> => {
     if (!dbInitialized) return [];
@@ -117,6 +128,7 @@ export const getSetting = async <T>(key: string, defaultValue: T): Promise<T> =>
 export const setSetting = (key: string, value: any): Promise<void> => {
     return put('settings', { key, value });
 };
+
 
 // --- Backup & Restore & Data Management ---
 

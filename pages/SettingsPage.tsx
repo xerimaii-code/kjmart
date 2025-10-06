@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useData, useUI } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon } from '../components/Icons';
 
 const LoadingSpinner: React.FC = () => (
     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
@@ -21,6 +22,7 @@ const SettingsPage: React.FC = () => {
         setProducts,
     } = useData();
     const { showAlert, triggerInstallPrompt, isInstallPromptAvailable } = useUI();
+    const { user, logout } = useAuth();
     
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [currentCameraSelection, setCurrentCameraSelection] = useState<string>(selectedCameraId || '');
@@ -197,6 +199,14 @@ const SettingsPage: React.FC = () => {
         );
     };
 
+    const handleLogout = () => {
+        showAlert(
+            '로그아웃 하시겠습니까?',
+            logout,
+            '로그아웃',
+            'bg-red-500 hover:bg-red-600 focus:ring-red-500'
+        );
+    };
 
     return (
         <div className="h-full overflow-y-auto bg-gray-200 relative pb-10">
@@ -341,6 +351,26 @@ const SettingsPage: React.FC = () => {
                                     <span>앱 설치하기</span>
                                 </button>
                             )}
+                        </div>
+                    </div>
+                </div>
+                
+                {/* --- 계정 (Account) --- */}
+                <div>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">계정</h2>
+                    <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="font-semibold text-slate-800">로그인된 계정</h3>
+                                <p className="text-sm text-slate-500">{user?.email}</p>
+                            </div>
+                            <button
+                                onClick={handleLogout}
+                                className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md font-bold transition shadow-sm"
+                            >
+                                <LogoutIcon className="w-5 h-5"/>
+                                <span>로그아웃</span>
+                            </button>
                         </div>
                     </div>
                 </div>

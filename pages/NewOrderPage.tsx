@@ -345,8 +345,8 @@ const NewOrderPage: React.FC = () => {
 
                         {/* Product Search Part */}
                         <div className={`relative z-20 transition-opacity duration-300 ${!selectedCustomer ? 'opacity-50 pointer-events-none' : ''}`}>
-                            <div className="p-1.5 bg-gray-50/50 flex items-center space-x-2">
-                                <div className="relative flex-grow">
+                            <div className="p-1.5 bg-gray-50/50">
+                                <div className="relative">
                                     <input
                                         ref={productSearchInputRef}
                                         id="product-search"
@@ -361,9 +361,13 @@ const NewOrderPage: React.FC = () => {
                                             productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
                                         }}
                                         placeholder="품목명 또는 바코드 검색"
-                                        className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500"
+                                        className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 pr-32"
                                         autoComplete="off"
                                     />
+                                    <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
+                                        <ToggleSwitch size="small" id="new-order-promotion" label="행사" checked={isPromotionMode} onChange={setIsPromotionMode} color="red" />
+                                        <ToggleSwitch size="small" id="new-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
+                                    </div>
                                     <SearchDropdown<Product>
                                         items={filteredProducts}
                                         renderItem={(p) => (
@@ -373,10 +377,6 @@ const NewOrderPage: React.FC = () => {
                                         )}
                                         show={showProductDropdown}
                                     />
-                                </div>
-                                <div className="flex items-center justify-end space-x-2">
-                                    <ToggleSwitch size="small" id="new-order-promotion" label="행사" checked={isPromotionMode} onChange={setIsPromotionMode} color="red" />
-                                    <ToggleSwitch size="small" id="new-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
                                 </div>
                             </div>
                         </div>
