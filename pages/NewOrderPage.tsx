@@ -6,6 +6,7 @@ import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 const MemoModal: React.FC<{
     isOpen: boolean;
@@ -87,6 +88,16 @@ const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>)
     );
 };
 
+interface NewOrderDraft {
+    customer: Customer | null;
+    items: OrderItem[];
+    memo: string;
+    isBoxUnitDefault: boolean;
+    isPromotionMode: boolean;
+    isCustomerLocked: boolean;
+    customerSearch: string;
+}
+
 const NewOrderPage: React.FC = () => {
     const { customers, products, addOrder } = useData();
     const { showAlert, openScanner, closeScanner } = useUI();
@@ -109,6 +120,10 @@ const NewOrderPage: React.FC = () => {
     const [scanSettings, setScanSettings] = useState<{ unit: '개' | '박스'; isPromotion: boolean }>({ unit: '개', isPromotion: false });
     const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+
+    const [draft, setDraft] = useLocalStorage<NewOrderDraft | null>('newOrderDraft', null);
+    const saveTimeoutRef = useRef<number | null>(null);
+    const isRestoredRef = useRef(false);
 
     const customerSearchBlurTimeout = useRef<number | null>(null);
     const productSearchBlurTimeout = useRef<number | null>(null);
@@ -133,6 +148,61 @@ const NewOrderPage: React.FC = () => {
     } = useOrderManager({
         initialItems,
     });
+    
+    // Effect to load draft on initial mount
+    useEffect(() => {
+        if (draft && !isRestoredRef.current) {
+            isRestoredRef.current = true; // Set flag immediately to prevent re-running
+            setSelectedCustomer(draft.customer);
+            resetItems(draft.items);
+            setMemo(draft.memo);
+            setIsBoxUnitDefault(draft.isBoxUnitDefault);
+            setIsPromotionMode(draft.isPromotionMode);
+            setIsCustomerLocked(draft.isCustomerLocked);
+            setCustomerSearch(draft.customerSearch);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Run only on mount
+
+    // Effect to save draft automatically on any change
+    useEffect(() => {
+        // Don't save until the initial restoration attempt is complete
+        if (!isRestoredRef.current && draft) {
+            return;
+        }
+
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
+
+        saveTimeoutRef.current = window.setTimeout(() => {
+            const hasContent = selectedCustomer || items.length > 0 || memo.trim() !== '';
+
+            if (hasContent) {
+                const draftData: NewOrderDraft = {
+                    customer: selectedCustomer,
+                    items,
+                    memo,
+                    isBoxUnitDefault,
+                    isPromotionMode,
+                    isCustomerLocked,
+                    customerSearch,
+                };
+                setDraft(draftData);
+            } else {
+                // If the form is completely empty, clear any existing draft
+                if (draft !== null) {
+                    setDraft(null);
+                }
+            }
+        }, 500); // Debounce saving by 500ms
+
+        return () => {
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current);
+            }
+        };
+    }, [selectedCustomer, items, memo, isBoxUnitDefault, isPromotionMode, isCustomerLocked, customerSearch, setDraft, draft]);
     
     const filteredCustomers = useMemo(() => {
         const searchTerm = customerSearch.trim().toLowerCase();
@@ -215,6 +285,7 @@ const NewOrderPage: React.FC = () => {
                     setCustomerSearch('');
                     setIsCustomerLocked(false);
                     setMemo('');
+                    setDraft(null); // Clear the draft on successful save
                     showAlert("신규 발주가 추가되었습니다.");
                 } catch (error) {
                     console.error("Order save failed:", error);
@@ -234,7 +305,8 @@ const NewOrderPage: React.FC = () => {
         setIsCustomerLocked(false);
         setMemo('');
         setProductSearch('');
-    }, [resetItems]);
+        setDraft(null); // Clear the draft on cancel
+    }, [resetItems, setDraft]);
 
     const handleRemoveItem = (e: React.MouseEvent, itemToRemove: OrderItem) => {
         e.stopPropagation();
