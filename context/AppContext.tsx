@@ -16,7 +16,7 @@ interface DataActions {
     setCustomers: (customers: Customer[]) => Promise<void>;
     setProducts: (products: Product[]) => Promise<void>;
     setOrders: (orders: Order[]) => Promise<void>;
-    addOrder: (order: Omit<Order, 'id' | 'date'>) => Promise<void>;
+    addOrder: (order: Omit<Order, 'id' | 'date'>) => Promise<number>;
     updateOrder: (updatedOrder: Order) => Promise<void>;
     deleteOrder: (orderId: number) => Promise<void>;
     setSelectedCameraId: (id: string | null) => Promise<void>;
@@ -40,6 +40,7 @@ interface UIState {
     isContinuousScan: boolean;
     onScanSuccess: (barcode: string) => void;
     isInstallPromptAvailable: boolean;
+    lastModifiedOrderId: number | null;
 }
 
 interface UIActions {
@@ -50,6 +51,7 @@ interface UIActions {
     openScanner: (context: ScannerContext, onScan: (barcode: string) => void, continuous?: boolean) => void;
     closeScanner: () => void;
     triggerInstallPrompt: () => void;
+    setLastModifiedOrderId: (id: number | null) => void;
 }
 
 // --- CONTEXT CREATION ---
@@ -140,6 +142,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const now = new Date().toISOString();
             const newOrder: Order = { ...order, id: Date.now(), date: now, createdAt: now, completedAt: null };
             await db.put('orders', newOrder);
+            return newOrder.id;
         },
         updateOrder: (updatedOrder) => db.put('orders', updatedOrder),
         deleteOrder: (orderId) => db.deleteByKey('orders', orderId),
@@ -164,6 +167,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [isContinuousScan, setIsContinuousScan] = useState(false);
     const [scanSuccessCallback, setScanSuccessCallback] = useState<(barcode: string) => void>(() => () => {});
     const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
+    const [lastModifiedOrderId, setLastModifiedOrderId] = useState<number | null>(null);
     
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
         setAlert({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
@@ -210,6 +214,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             (installPromptEvent as any).prompt();
             setInstallPromptEvent(null);
         },
+        setLastModifiedOrderId: useCallback((id: number | null) => {
+            setLastModifiedOrderId(id);
+        }, []),
     };
     
     const onScanSuccess = useCallback((barcode: string) => {
@@ -225,6 +232,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isContinuousScan,
         onScanSuccess,
         isInstallPromptAvailable: !!installPromptEvent,
+        lastModifiedOrderId,
     };
 
 
@@ -240,6 +248,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     confirmButtonClass={alert.confirmButtonClass}
                 />
                 {children}
+        {/* FIX: Corrected typo in closing tag from UI-Context to UIContext */}
         </UIContext.Provider>
     );
 };

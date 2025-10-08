@@ -4,7 +4,7 @@ import App from './App';
 
 const registerServiceWorker = () => {
   if ('serviceWorker' in navigator) {
-    // FIX: Use an absolute URL based on the current origin to prevent cross-origin errors.
+    // Use an absolute URL based on the current origin to prevent cross-origin errors.
     const swUrl = `${window.location.origin}/service-worker.js`;
     navigator.serviceWorker.register(swUrl)
       .then(registration => {
@@ -18,13 +18,12 @@ const registerServiceWorker = () => {
 
 // --- PWA Service Worker Registration ---
 // This enables the app to be installable and provides offline capabilities.
-// To robustly handle "invalid state" errors, we check if the document is still loading.
-// If it is, we wait for the 'load' event. Otherwise, we register immediately,
-// as the document is either 'interactive' or 'complete'.
-if (document.readyState === 'loading') {
-  window.addEventListener('load', registerServiceWorker);
-} else {
+// To robustly handle "invalid state" errors, registration is deferred
+// until the document is fully loaded.
+if (document.readyState === 'complete') {
   registerServiceWorker();
+} else {
+  window.addEventListener('load', registerServiceWorker);
 }
 // --- End of Service Worker Registration ---
 

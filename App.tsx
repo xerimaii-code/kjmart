@@ -28,10 +28,12 @@ const AppContent: React.FC = () => {
         isScannerOpen,
         onScanSuccess,
         closeScanner,
+        hideAlert,
      } = useUI();
 
     const handleNavigation = (targetPage: Page) => {
         if (targetPage === activePage) return;
+        hideAlert(); // Dismiss any open alerts on main navigation
         setActivePage(targetPage);
     };
 

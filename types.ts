@@ -1,4 +1,5 @@
 
+
 export interface Customer {
     comcode: string;
     name: string;
@@ -14,7 +15,6 @@ export interface OrderItem extends Product {
     quantity: number;
     unit: '개' | '박스';
     isPromotion?: boolean;
-    status?: 'new' | 'modified';
 }
 
 export interface Order {
@@ -35,3 +35,17 @@ export interface Order {
 export type Page = 'new-order' | 'history' | 'settings';
 
 export type ScannerContext = 'new-order' | 'modal' | null;
+
+// --- Draft Types for IndexedDB ---
+export interface NewOrderDraft {
+    selectedCustomer: Customer | null;
+    items: OrderItem[];
+    memo: string;
+    isBoxUnitDefault: boolean;
+    isPromotionMode: boolean;
+}
+
+export interface EditedOrderDraft {
+    items: OrderItem[];
+    memo: string;
+}

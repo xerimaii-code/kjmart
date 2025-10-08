@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useData, useUI } from '../context/AppContext';
-import { Order, OrderItem, Product } from '../types';
-import { PlusCircleIcon, RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon } from './Icons';
+import { Order, OrderItem, Product, EditedOrderDraft } from '../types';
+import { PlusCircleIcon, RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon } from './Icons';
 import ToggleSwitch from './ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from './AddItemModal';
 import EditItemModal from './EditItemModal';
+import { useDebounce } from '../hooks/useDebounce';
+import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 
 const MemoModal: React.FC<{
     isOpen: boolean;
@@ -89,15 +91,6 @@ const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>)
     );
 };
 
-type ItemChangeStatus = {
-    status: 'new' | 'modified' | 'unchanged';
-    changes: {
-        quantity: boolean;
-        unit: boolean;
-        isPromotion: boolean;
-    };
-};
-
 
 const OrderDetailModal: React.FC = () => {
     const { 
@@ -112,9 +105,9 @@ const OrderDetailModal: React.FC = () => {
         showAlert,
         openScanner,
         closeScanner,
+        setLastModifiedOrderId,
     } = useUI();
     
-    const [STABLE_EMPTY_ARRAY] = useState([]); // Create a stable empty array reference
     const order = useMemo(() => orders.find(o => o.id === editingOrderId), [orders, editingOrderId]);
     const isCompleted = useMemo(() => !!order?.completedAt || !!order?.completionDetails, [order]);
     
@@ -134,20 +127,39 @@ const OrderDetailModal: React.FC = () => {
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     const [isMemoSectionOpen, setIsMemoSectionOpen] = useState(false);
     const productSearchBlurTimeout = useRef<number | null>(null);
-    const productSearchInputRef = useRef<HTMLInputElement | null>(null); // 품목 검색 입력을 위한 ref 추가
+    const productSearchInputRef = useRef<HTMLInputElement | null>(null);
+
+    const [isDraftLoading, setIsDraftLoading] = useState(true);
+    const [draft, setDraft] = useState<EditedOrderDraft | null>(null);
 
     const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
     const lastItemCount = useRef(0);
-    
-    const initialData = useMemo(() => {
-        if (!order) return { items: STABLE_EMPTY_ARRAY, memo: '' };
-        return {
-            items: order.items.map(i => ({...i})),
-            memo: (order.memo || ''),
-        };
-    }, [order, STABLE_EMPTY_ARRAY]);
 
+    // --- State and Draft Logic ---
+    useEffect(() => {
+        if (order) {
+            setIsDraftLoading(true);
+            getDraft<EditedOrderDraft>(order.id)
+                .then(setDraft)
+                .catch(err => {
+                    console.error(`Failed to load draft for order ${order.id}:`, err);
+                    setDraft(null);
+                })
+                .finally(() => {
+                    setIsDraftLoading(false);
+                });
+        }
+    }, [order]);
+
+    const initialData = useMemo(() => {
+        if (!order) return { items: [], memo: '' };
+        // Wait until draft loading is complete to prevent flashing original content
+        if (isDraftLoading) return { items: [], memo: '' }; 
+        if (draft) return { items: draft.items, memo: draft.memo };
+        return { items: order.items, memo: order.memo || '' };
+    }, [order, draft, isDraftLoading]);
+    
     const {
         items: editedItems,
         addItem,
@@ -155,55 +167,61 @@ const OrderDetailModal: React.FC = () => {
         removeItem,
         totalAmount,
     } = useOrderManager({
-        initialItems: initialData.items
+        initialItems: initialData.items,
     });
     
     useEffect(() => {
         setMemo(initialData.memo);
     }, [initialData.memo]);
 
-    const itemStatuses = useMemo(() => {
-        if (!order) return new Map<string, ItemChangeStatus>();
+    const serverStateJSON = useMemo(() => {
+        if (!order) return '';
+        return JSON.stringify({ items: order.items, memo: order.memo || '' });
+    }, [order]);
     
-        const originalItemsMap = new Map<string, OrderItem>(order.items.map(item => [item.barcode, item]));
-        const statuses = new Map<string, ItemChangeStatus>();
+    const hasChanges = useMemo(() => {
+        if (isDraftLoading || !serverStateJSON) return false;
+        return JSON.stringify({ items: editedItems, memo }) !== serverStateJSON;
+    }, [editedItems, memo, serverStateJSON, isDraftLoading]);
+
+    const debouncedDraftData = useDebounce({ items: editedItems, memo }, 500);
+
+    useEffect(() => {
+        if (isDraftLoading || !order) return;
+
+        if (JSON.stringify(debouncedDraftData) !== serverStateJSON) {
+            saveDraft(order.id, debouncedDraftData as EditedOrderDraft);
+        } else {
+            // If user reverts changes, draft is same as server state, so delete it.
+            deleteDraft(order.id);
+        }
+    }, [debouncedDraftData, serverStateJSON, order, isDraftLoading]);
     
-        editedItems.forEach(editedItem => {
-            const originalItem = originalItemsMap.get(editedItem.barcode);
+    const handleCloseAndKeepDraft = useCallback(() => {
+        closeDetailModal();
+    }, [closeDetailModal]);
     
-            if (!originalItem) {
-                statuses.set(editedItem.barcode, {
-                    status: 'new',
-                    changes: { quantity: false, unit: false, isPromotion: false }
-                });
-            } else {
-                const quantityChanged = originalItem.quantity !== editedItem.quantity;
-                const unitChanged = originalItem.unit !== editedItem.unit;
-                const promotionChanged = (originalItem.isPromotion || false) !== (editedItem.isPromotion || false);
-    
-                if (quantityChanged || unitChanged || promotionChanged) {
-                    statuses.set(editedItem.barcode, {
-                        status: 'modified',
-                        changes: {
-                            quantity: quantityChanged,
-                            unit: unitChanged,
-                            isPromotion: promotionChanged,
-                        }
-                    });
-                } else {
-                    statuses.set(editedItem.barcode, {
-                        status: 'unchanged',
-                        changes: { quantity: false, unit: false, isPromotion: false }
-                    });
-                }
-            }
-        });
-        return statuses;
-    }, [editedItems, order]);
-    
+    const handleCancelAndDiscard = () => {
+        if (hasChanges) {
+             showAlert(
+                "수정사항을 저장하지 않고 취소하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
+                () => {
+                    if (order) {
+                        deleteDraft(order.id);
+                    }
+                    closeDetailModal();
+                },
+                '변경사항 폐기',
+                'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+            );
+        } else {
+            closeDetailModal();
+        }
+    };
+
     useEffect(() => {
         if (order) {
-            setIsMemoSectionOpen(false); // Collapse memo when a new order is opened
+            setIsMemoSectionOpen(false);
         }
     }, [order]);
 
@@ -211,15 +229,12 @@ const OrderDetailModal: React.FC = () => {
         setScanSettings({ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode });
     }, [isBoxUnitDefault, isPromotionMode]);
     
-    const handleClose = useCallback(() => {
-        closeDetailModal();
-    }, [closeDetailModal]);
 
     useEffect(() => {
         const handlePopState = (event: PopStateEvent) => {
             if (editingOrderId !== null) {
                 event.preventDefault();
-                handleClose();
+                handleCloseAndKeepDraft();
             }
         };
 
@@ -232,7 +247,7 @@ const OrderDetailModal: React.FC = () => {
                 window.history.back();
             }
         };
-    }, [editingOrderId, handleClose]);
+    }, [editingOrderId, handleCloseAndKeepDraft]);
 
     const handleAddProduct = useCallback((product: Product) => {
         const existingItem = editedItems.find(item => item.barcode === product.barcode);
@@ -268,7 +283,7 @@ const OrderDetailModal: React.FC = () => {
         handleAddProduct(product);
         setProductSearch('');
         setShowDropdown(false);
-        productSearchInputRef.current?.blur(); // 선택 후 키보드 숨김
+        productSearchInputRef.current?.blur();
     };
 
     const handleSave = () => {
@@ -279,36 +294,22 @@ const OrderDetailModal: React.FC = () => {
         }
 
         const itemsToSave = editedItems.map(item => {
-            const sessionStatus = itemStatuses.get(item.barcode);
-            const newItem = { ...item };
-
-            let finalStatus: 'new' | 'modified' | undefined = undefined;
-
-            if (sessionStatus?.status === 'new') {
-                finalStatus = 'new';
-            } else if (sessionStatus?.status === 'modified') {
-                finalStatus = 'modified';
-            } else if (item.status) {
-                finalStatus = item.status;
-            }
-
-            if (finalStatus) {
-                newItem.status = finalStatus;
-            } else {
-                delete newItem.status;
-            }
-            return newItem;
+            const { barcode, name, price, quantity, unit, isPromotion } = item;
+            const cleanItem: OrderItem = { barcode, name, price, quantity, unit, isPromotion: !!isPromotion };
+            return cleanItem;
         });
 
         const updatedOrder: Order = { 
             ...order, 
-            items: itemsToSave, 
+            items: itemsToSave,
             total: totalAmount,
             memo: memo.trim(),
-            date: new Date().toISOString(), // Update modification date
-            createdAt: order.createdAt || order.date, // Preserve original date as createdAt
+            date: new Date().toISOString(),
+            createdAt: order.createdAt || order.date,
         };
         updateOrder(updatedOrder);
+        setLastModifiedOrderId(order.id);
+        deleteDraft(order.id);
         closeDetailModal();
         showAlert("발주 내역이 수정되었습니다.");
     };
@@ -328,7 +329,7 @@ const OrderDetailModal: React.FC = () => {
     }, [editedItems, quickAddedBarcode]);
     
     const handleRemoveItem = (e: React.MouseEvent, itemToRemove: OrderItem) => {
-        e.stopPropagation(); // Stop event from bubbling to the parent div's onClick
+        e.stopPropagation();
         showAlert(
             `'${itemToRemove.name}' 품목을 삭제하시겠습니까?`,
             () => removeItem(itemToRemove.barcode),
@@ -356,7 +357,7 @@ const OrderDetailModal: React.FC = () => {
             textClass = 'text-blue-800';
             bgClass = 'bg-blue-50';
             iconClass = 'text-blue-600';
-        } else if (order.completedAt) { // Fallback for old data
+        } else if (order.completedAt) {
             icon = <CheckCircleIcon className="w-5 h-5 mr-2" />;
             textClass = 'text-gray-800';
             bgClass = 'bg-gray-100';
@@ -372,6 +373,14 @@ const OrderDetailModal: React.FC = () => {
             </div>
         );
     };
+
+    // FIX: Add this memoized set of original item barcodes to track newly added items.
+    const originalItemBarcodes = useMemo(() => {
+        if (!order) {
+            return new Set<string>();
+        }
+        return new Set(order.items.map(item => item.barcode));
+    }, [order]);
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-30 flex items-end justify-center">
@@ -408,7 +417,7 @@ const OrderDetailModal: React.FC = () => {
                                 )}
                             </div>
                         </div>
-                        <button onClick={handleClose} className="text-gray-500 hover:text-gray-800 transition-colors">
+                        <button onClick={handleCloseAndKeepDraft} className="text-gray-500 hover:text-gray-800 transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                     </div>
@@ -500,51 +509,46 @@ const OrderDetailModal: React.FC = () => {
                     </div>
                 )}
                 
-                <div ref={scrollableContainerRef} className="scrollable-content p-2 pb-32">
-                     {editedItems.length === 0 ? (
-                        <div className="relative flex flex-col items-center justify-center h-full text-gray-400">
-                            <p className="text-center text-lg font-semibold">품목이 없습니다</p>
-                            {!isCompleted && <p className="text-sm">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>}
+                <div ref={scrollableContainerRef} className="scrollable-content p-2 pb-32 relative">
+                     {isDraftLoading ? (
+                        <div className="absolute inset-0 bg-gray-50/80 flex items-center justify-center z-20">
+                            <SpinnerIcon className="w-8 h-8 text-blue-500" />
+                        </div>
+                     ) : editedItems.length === 0 ? (
+                        <div className="relative flex flex-col items-center justify-center h-full text-gray-400 p-8">
+                             <DocumentIcon className="w-16 h-16 text-gray-300 mb-4" />
+                             <p className="text-center text-lg font-semibold">품목이 없습니다</p>
+                             {!isCompleted && <p className="text-sm mt-1">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>}
                         </div>
                     ) : (
                         <div className="bg-white rounded-lg shadow-md border border-gray-200/80 overflow-hidden">
                             <div className="divide-y divide-gray-200">
                                 {editedItems.map((item) => {
-                                    const sessionStatus = itemStatuses.get(item.barcode);
-
-                                    const isNew = item.status === 'new' || sessionStatus?.status === 'new';
-                                    const isModified = !isNew && (item.status === 'modified' || sessionStatus?.status === 'modified');
-                                
-                                    const rowBgClass = isNew ? 'bg-green-50' : isModified ? 'bg-amber-50' : '';
-                                    const quantityClass = (sessionStatus?.status === 'modified' && sessionStatus?.changes.quantity) ? 'text-blue-600 font-bold' : '';
-                                    const unitClass = (sessionStatus?.status === 'modified' && sessionStatus?.changes.unit) ? 'text-blue-600 font-bold' : '';
-                                    const promotionRingClass = (sessionStatus?.status === 'modified' && sessionStatus?.changes.isPromotion) ? 'ring-2 ring-amber-400' : '';
-
+                                    const isNew = !originalItemBarcodes.has(item.barcode);
                                     return (
                                         <div
                                             key={item.barcode}
                                             ref={el => { if (el) itemRefs.current.set(item.barcode, el); }}
-                                            className={`flex items-center p-3 space-x-2 transition-all duration-200 ${rowBgClass} ${highlightedItem === item.barcode ? 'bg-blue-50' : ''} ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                                            className={`flex items-center p-3 space-x-2 transition-all duration-200 ${highlightedItem === item.barcode ? 'bg-blue-50' : ''} ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
                                             onClick={() => !isCompleted && setEditingItem(item)}
                                         >
                                             <div className="flex-grow min-w-0 pr-1">
                                                 <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
-                                                    {item.isPromotion && <span className={`text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5 ${promotionRingClass}`}>행사</span>}
+                                                    {item.isPromotion && <span className={`text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5`}>행사</span>}
+                                                    {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5">NEW</span>}
                                                     <span>{item.name}</span>
-                                                    {isNew && <span className="text-xs font-bold text-white bg-green-600 rounded-full px-2 py-0.5">추가</span>}
-                                                    {isModified && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5">수정</span>}
                                                 </p>
                                                 <p className="text-xs text-gray-500">{item.price.toLocaleString()}원</p>
                                             </div>
                                             <div className="flex items-center space-x-1.5 flex-shrink-0">
                                                 <span
-                                                    className={`w-12 text-center text-gray-600 font-medium select-none text-sm transition-colors ${quantityClass}`}
+                                                    className={`w-12 text-center text-gray-600 font-medium select-none text-sm transition-colors`}
                                                     aria-label={`수량: ${item.name}, 현재 수량: ${item.quantity}`}
                                                 >
                                                     {item.quantity}
                                                 </span>
                                                 <span
-                                                    className={`w-8 text-center text-gray-600 font-medium select-none text-sm transition-colors ${unitClass}`}
+                                                    className={`w-8 text-center text-gray-600 font-medium select-none text-sm transition-colors`}
                                                     aria-label={`단위: ${item.name}, 현재 단위: ${item.unit}.`}
                                                 >
                                                     {item.unit}
@@ -569,56 +573,59 @@ const OrderDetailModal: React.FC = () => {
                         <span className="text-lg text-gray-600">총 합계:</span>
                         <span className="text-2xl text-gray-800">{totalAmount.toLocaleString()} 원</span>
                     </div>
-                    <button 
-                        onClick={handleSave} 
-                        className="w-full bg-gradient-to-b from-blue-500 to-blue-600 text-white p-3 rounded-xl font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed"
-                    >
-                        수정사항 저장
-                    </button>
+                    <div className="flex items-stretch gap-2">
+                        <button
+                            onClick={handleCancelAndDiscard}
+                            className="px-6 py-3 bg-gray-200 text-gray-800 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm"
+                        >
+                            취소
+                        </button>
+                        <button 
+                            onClick={handleSave} 
+                            disabled={!hasChanges || editedItems.length === 0}
+                            className="flex-grow bg-gradient-to-b from-blue-500 to-blue-600 text-white p-3 rounded-xl font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed"
+                        >
+                            수정사항 저장
+                        </button>
+                    </div>
                 </footer>
                 )}
             </div>
             
-            <MemoModal
-                isOpen={isMemoModalOpen}
-                onClose={() => setIsMemoModalOpen(false)}
-                onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
-                initialMemo={memo}
-            />
-            <AddItemModal
+             <AddItemModal
                 isOpen={!!productForModal}
                 product={productForModal}
                 existingItem={existingItemForModal}
-                trigger={addItemTrigger}
                 onClose={() => {
                     setProductForModal(null);
                     setExistingItemForModal(null);
                 }}
-                onAdd={(details) => {
+                onAdd={({ quantity, unit, isPromotion }) => {
                     if (productForModal) {
-                        const existingItem = editedItems.find(item => item.barcode === productForModal.barcode);
+                        const existingItem = editedItems.find(i => i.barcode === productForModal.barcode);
                         if (existingItem) {
-                            updateItem(productForModal.barcode, { 
-                                quantity: existingItem.quantity + details.quantity,
-                                unit: details.unit,
-                                isPromotion: details.isPromotion
-                             });
+                            updateItem(productForModal.barcode, {
+                                ...existingItem,
+                                quantity: existingItem.quantity + quantity,
+                                unit,
+                                isPromotion,
+                            });
                         } else {
                             addItem(productForModal, {
-                                isBoxUnit: details.unit === '박스',
-                                isPromotion: details.isPromotion,
-                                quantity: details.quantity,
+                                quantity,
+                                isBoxUnit: unit === '박스',
+                                isPromotion,
                             });
                         }
-                        setQuickAddedBarcode(productForModal.barcode);
                         setHighlightedItem(productForModal.barcode);
+                        setQuickAddedBarcode(productForModal.barcode);
                         setTimeout(() => setHighlightedItem(null), 1000);
+                        setProductForModal(null);
+                        setExistingItemForModal(null);
                     }
-                    setScanSettings({ unit: details.unit, isPromotion: details.isPromotion });
-                    setProductForModal(null);
-                    setExistingItemForModal(null);
                 }}
                 onNextScan={handleNextScan}
+                trigger={addItemTrigger}
                 initialSettings={scanSettings}
             />
             <EditItemModal
@@ -628,9 +635,17 @@ const OrderDetailModal: React.FC = () => {
                 onSave={(updatedDetails) => {
                     if (editingItem) {
                         updateItem(editingItem.barcode, updatedDetails);
+                        setHighlightedItem(editingItem.barcode);
+                        setTimeout(() => setHighlightedItem(null), 1000);
                     }
                     setEditingItem(null);
                 }}
+            />
+            <MemoModal
+                isOpen={isMemoModalOpen}
+                onClose={() => setIsMemoModalOpen(false)}
+                onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
+                initialMemo={memo}
             />
         </div>
     );

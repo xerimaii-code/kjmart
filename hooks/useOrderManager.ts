@@ -15,15 +15,15 @@ const normalizeItems = (items: OrderItem[]): OrderItem[] => {
 };
 
 export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderManagerProps) => {
-    // FIX: Normalize initial items to ensure `isPromotion` is always a boolean.
-    // This prevents false positives in change detection where `undefined` is compared to `false`.
     const [items, setItems] = useState<OrderItem[]>(() => normalizeItems(initialItems));
 
+    // This effect synchronizes the hook's internal state with the `initialItems` prop.
+    // This is crucial for components like OrderDetailModal where the `initialItems` can change
+    // when a new order is selected, ensuring the displayed data is always correct.
     useEffect(() => {
-        // When initialItems prop changes (e.g., opening a new order), reset and normalize the state.
         setItems(normalizeItems(initialItems));
     }, [initialItems]);
-    
+
     useEffect(() => {
         // Notify parent component of any changes to the managed items.
         if(onItemsChange) {

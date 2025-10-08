@@ -1,12 +1,15 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useData, useUI } from '../context/AppContext';
-import { Customer, Product, OrderItem } from '../types';
-import { RemoveIcon, DocumentTextIcon, SpinnerIcon } from '../components/Icons';
+import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
+import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useDebounce } from '../hooks/useDebounce';
+import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
+
+const DRAFT_KEY = 'new-order-draft';
 
 const MemoModal: React.FC<{
     isOpen: boolean;
@@ -71,6 +74,15 @@ const MemoModal: React.FC<{
     );
 };
 
+const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
+    if (!show) return null;
+    return (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 mt-4 bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-full shadow-lg z-50 animate-fade-in-down">
+            임시저장된 내용을 불러왔습니다.
+        </div>
+    );
+};
+
 interface SearchDropdownProps<T> {
     items: T[];
     renderItem: (item: T) => React.ReactNode;
@@ -88,19 +100,10 @@ const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>)
     );
 };
 
-interface NewOrderDraft {
-    customer: Customer | null;
-    items: OrderItem[];
-    memo: string;
-    isBoxUnitDefault: boolean;
-    isPromotionMode: boolean;
-    isCustomerLocked: boolean;
-    customerSearch: string;
-}
 
 const NewOrderPage: React.FC = () => {
     const { customers, products, addOrder } = useData();
-    const { showAlert, openScanner, closeScanner } = useUI();
+    const { showAlert, openScanner, setLastModifiedOrderId } = useUI();
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
@@ -110,33 +113,27 @@ const NewOrderPage: React.FC = () => {
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
-    const [isCustomerLocked, setIsCustomerLocked] = useState(false);
+
+    const isCustomerSelected = !!selectedCustomer; 
+
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     const [isPromotionMode, setIsPromotionMode] = useState(false);
     
     const [productForModal, setProductForModal] = useState<Product | null>(null);
     const [existingItemForModal, setExistingItemForModal] = useState<OrderItem | null>(null);
-    const [addItemTrigger, setAddItemTrigger] = useState<'scan' | 'search'>('search');
-    const [scanSettings, setScanSettings] = useState<{ unit: '개' | '박스'; isPromotion: boolean }>({ unit: '개', isPromotion: false });
     const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+    
+    const [isDraftLoading, setIsDraftLoading] = useState(true);
+    const [showDraftLoadedToast, setShowDraftLoadedToast] = useState(false);
 
-    const [draft, setDraft] = useLocalStorage<NewOrderDraft | null>('newOrderDraft', null);
-    const saveTimeoutRef = useRef<number | null>(null);
-    const isRestoredRef = useRef(false);
-
-    const customerSearchBlurTimeout = useRef<number | null>(null);
-    const productSearchBlurTimeout = useRef<number | null>(null);
     const productSearchInputRef = useRef<HTMLInputElement>(null);
     const customerSearchInputRef = useRef<HTMLInputElement>(null);
-
-    const itemsRef = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
-    const lastItemCount = useRef(0);
-    const [highlightedItem, setHighlightedItem] = useState<string | null>(null);
-    const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
+    const customerSearchBlurTimeout = useRef<number | null>(null);
+    const productSearchBlurTimeout = useRef<number | null>(null);
 
-    const [initialItems] = useState<OrderItem[]>([]); 
+    const initialOrderItems = useMemo(() => [], []);
 
     const {
         items,
@@ -146,69 +143,68 @@ const NewOrderPage: React.FC = () => {
         resetItems,
         totalAmount,
     } = useOrderManager({
-        initialItems,
+        initialItems: initialOrderItems,
     });
     
-    // Effect to load draft on initial mount
+    // --- Draft Logic ---
+    const draftDataToSave = useMemo(() => ({
+        selectedCustomer,
+        items,
+        memo,
+        isBoxUnitDefault,
+        isPromotionMode,
+    }), [selectedCustomer, items, memo, isBoxUnitDefault, isPromotionMode]);
+
+    const debouncedDraftData = useDebounce(draftDataToSave, 500);
+
+    // Load draft on mount
     useEffect(() => {
-        if (draft && !isRestoredRef.current) {
-            isRestoredRef.current = true; // Set flag immediately to prevent re-running
-            setSelectedCustomer(draft.customer);
-            resetItems(draft.items);
-            setMemo(draft.memo);
-            setIsBoxUnitDefault(draft.isBoxUnitDefault);
-            setIsPromotionMode(draft.isPromotionMode);
-            setIsCustomerLocked(draft.isCustomerLocked);
-            setCustomerSearch(draft.customerSearch);
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Run only on mount
-
-    // Effect to save draft automatically on any change
-    useEffect(() => {
-        // Don't save until the initial restoration attempt is complete
-        if (!isRestoredRef.current && draft) {
-            return;
-        }
-
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current);
-        }
-
-        saveTimeoutRef.current = window.setTimeout(() => {
-            const hasContent = selectedCustomer || items.length > 0 || memo.trim() !== '';
-
-            if (hasContent) {
-                const draftData: NewOrderDraft = {
-                    customer: selectedCustomer,
-                    items,
-                    memo,
-                    isBoxUnitDefault,
-                    isPromotionMode,
-                    isCustomerLocked,
-                    customerSearch,
-                };
-                setDraft(draftData);
-            } else {
-                // If the form is completely empty, clear any existing draft
-                if (draft !== null) {
-                    setDraft(null);
+        getDraft<NewOrderDraft>(DRAFT_KEY).then(draft => {
+            if (draft) {
+                setSelectedCustomer(draft.selectedCustomer);
+                if (draft.selectedCustomer) {
+                    setCustomerSearch(draft.selectedCustomer.name);
                 }
+                resetItems(draft.items);
+                setMemo(draft.memo);
+                setIsBoxUnitDefault(draft.isBoxUnitDefault);
+                setIsPromotionMode(draft.isPromotionMode);
+                setShowDraftLoadedToast(true);
+                setTimeout(() => setShowDraftLoadedToast(false), 3000);
             }
-        }, 500); // Debounce saving by 500ms
+            setIsDraftLoading(false);
+        }).catch(err => {
+            console.error("Failed to load draft:", err);
+            setIsDraftLoading(false);
+        });
+    }, [resetItems]);
 
-        return () => {
-            if (saveTimeoutRef.current) {
-                clearTimeout(saveTimeoutRef.current);
-            }
-        };
-    }, [selectedCustomer, items, memo, isBoxUnitDefault, isPromotionMode, isCustomerLocked, customerSearch, setDraft, draft]);
+    // Save draft on change
+    useEffect(() => {
+        if (isDraftLoading) return;
+
+        if (debouncedDraftData.selectedCustomer || debouncedDraftData.items.length > 0 || debouncedDraftData.memo) {
+            saveDraft(DRAFT_KEY, debouncedDraftData as NewOrderDraft);
+        } else {
+            deleteDraft(DRAFT_KEY);
+        }
+    }, [debouncedDraftData, isDraftLoading]);
+    // --- End Draft Logic ---
+
+    useEffect(() => {
+        if (scrollableContainerRef.current) {
+            scrollableContainerRef.current.scrollTo({
+                top: scrollableContainerRef.current.scrollHeight,
+                behavior: 'smooth',
+            });
+        }
+    }, [items.length]);
     
     const filteredCustomers = useMemo(() => {
         const searchTerm = customerSearch.trim().toLowerCase();
-        if (!searchTerm) return [];
+        if (!searchTerm || isCustomerSelected) return [];
         return customers.filter(c => c.name.toLowerCase().includes(searchTerm) || c.comcode.includes(searchTerm));
-    }, [customers, customerSearch]);
+    }, [customers, customerSearch, isCustomerSelected]);
 
     const filteredProducts = useMemo(() => {
         const searchTerm = productSearch.trim().toLowerCase();
@@ -220,45 +216,40 @@ const NewOrderPage: React.FC = () => {
         setSelectedCustomer(customer);
         setCustomerSearch(customer.name);
         setShowCustomerDropdown(false);
-        setIsCustomerLocked(true);
         productSearchInputRef.current?.focus();
     };
 
-    const handleUnlockCustomer = () => {
-        setIsCustomerLocked(false);
+    const handleClearCustomer = () => {
         setSelectedCustomer(null);
         setCustomerSearch('');
-        setShowCustomerDropdown(true);
         setTimeout(() => customerSearchInputRef.current?.focus(), 0);
     };
 
-    const handleAddProduct = useCallback((product: Product) => {
-        const existingItem = items.find(item => item.barcode === product.barcode);
-        setExistingItemForModal(existingItem || null);
-        setProductForModal(product);
-    }, [items]);
-
-    const handleScanSuccess = useCallback((barcode: string) => {
-        closeScanner();
-        const product = products.find(p => p.barcode === barcode);
-        if (product) {
-            setAddItemTrigger('scan');
-            const existingItem = items.find(item => item.barcode === product.barcode);
-            setExistingItemForModal(existingItem || null);
-            setProductForModal(product);
-        } else {
-            showAlert("등록되지 않은 바코드입니다.");
-        }
-    }, [products, showAlert, items, closeScanner]);
-
-    const handleProductSelect = (product: Product) => {
-        setAddItemTrigger('search');
-        handleAddProduct(product);
+    const resetOrder = useCallback(() => {
+        setSelectedCustomer(null);
+        setCustomerSearch('');
         setProductSearch('');
-        setShowProductDropdown(false);
-    };
+        resetItems();
+        setMemo('');
+        setIsBoxUnitDefault(false);
+        setIsPromotionMode(false);
+        setIsSaving(false);
+        customerSearchInputRef.current?.focus();
+    }, [resetItems]);
 
-    const handleCompleteOrder = async () => {
+    const handleResetOrder = () => {
+        showAlert(
+            "작성 중인 모든 내용을 초기화하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
+            () => {
+                deleteDraft(DRAFT_KEY);
+                resetOrder();
+            },
+            '초기화',
+            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+        );
+    };
+    
+    const handleSaveOrder = async () => {
         if (!selectedCustomer) {
             showAlert("거래처를 선택해주세요.");
             return;
@@ -268,234 +259,260 @@ const NewOrderPage: React.FC = () => {
             return;
         }
 
-        showAlert(
-            `'${selectedCustomer.name}'으로 발주를 저장하시겠습니까?`,
-            async () => {
-                setIsSaving(true);
-                try {
-                    await addOrder({
-                        customer: selectedCustomer,
-                        items,
-                        total: totalAmount,
-                        memo: memo.trim(),
-                    });
-                    
-                    resetItems();
-                    setSelectedCustomer(null);
-                    setCustomerSearch('');
-                    setIsCustomerLocked(false);
-                    setMemo('');
-                    setDraft(null); // Clear the draft on successful save
-                    showAlert("신규 발주가 추가되었습니다.");
-                } catch (error) {
-                    console.error("Order save failed:", error);
-                    showAlert("발주 저장에 실패했습니다. 네트워크 연결을 확인하고 다시 시도하세요.");
-                } finally {
-                    setIsSaving(false);
-                }
-            },
-            "발주 저장"
-        );
+        setIsSaving(true);
+        try {
+            const newOrderId = await addOrder({
+                customer: selectedCustomer,
+                items,
+                total: totalAmount,
+                memo: memo.trim(),
+            });
+            setLastModifiedOrderId(newOrderId);
+            await deleteDraft(DRAFT_KEY);
+            showAlert("신규 발주가 저장되었습니다.", resetOrder);
+        } catch (error) {
+            console.error("Failed to save order:", error);
+            showAlert("발주 저장에 실패했습니다.");
+            setIsSaving(false);
+        }
     };
 
-    const handleCancelOrder = useCallback(() => {
-        resetItems();
-        setSelectedCustomer(null);
-        setCustomerSearch('');
-        setIsCustomerLocked(false);
-        setMemo('');
+    const handleAddProductFromSearch = (product: Product) => {
+        const existingItem = items.find(item => item.barcode === product.barcode);
+        setProductForModal(product);
+        setExistingItemForModal(existingItem || null);
         setProductSearch('');
-        setDraft(null); // Clear the draft on cancel
-    }, [resetItems, setDraft]);
+        setShowProductDropdown(false);
+        productSearchInputRef.current?.blur();
+    };
 
-    const handleRemoveItem = (e: React.MouseEvent, itemToRemove: OrderItem) => {
-        e.stopPropagation();
+    const handleScanSuccess = useCallback((barcode: string) => {
+        const product = products.find(p => p.barcode === barcode);
+        if (product) {
+            const existingItem = items.find(item => item.barcode === product.barcode);
+            setProductForModal(product);
+            setExistingItemForModal(existingItem || null);
+        } else {
+            showAlert("등록되지 않은 바코드입니다.");
+        }
+    }, [products, items, showAlert]);
+
+    const handleOpenScanner = () => {
+        if (!isCustomerSelected) {
+            showAlert("먼저 거래처를 선택해주세요.");
+            return;
+        }
+        openScanner('new-order', handleScanSuccess, true);
+    };
+
+    const handleRemoveItem = (item: OrderItem) => {
         showAlert(
-            `'${itemToRemove.name}' 품목을 삭제하시겠습니까?`,
-            () => removeItem(itemToRemove.barcode),
+            `'${item.name}' 품목을 삭제하시겠습니까?`,
+            () => removeItem(item.barcode),
             '삭제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
     };
 
-    useEffect(() => {
-        if (scrollableContainerRef.current && quickAddedBarcode) {
-            const itemElement = itemsRef.current.get(quickAddedBarcode);
-            if (itemElement) {
-                itemElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-            setQuickAddedBarcode(null);
-        } else if (scrollableContainerRef.current && items.length > lastItemCount.current) {
-            scrollableContainerRef.current.scrollTo({ top: scrollableContainerRef.current.scrollHeight, behavior: 'smooth' });
+    const handleAddItemFromModal = (product: Product, details: { quantity: number; unit: '개' | '박스'; isPromotion: boolean }) => {
+        const existingItem = items.find(i => i.barcode === product.barcode);
+        if (existingItem) {
+            updateItem(product.barcode, {
+                ...existingItem,
+                quantity: existingItem.quantity + details.quantity,
+                unit: details.unit,
+                isPromotion: details.isPromotion,
+            });
+        } else {
+            addItem(product, {
+                quantity: details.quantity,
+                isBoxUnit: details.unit === '박스',
+                isPromotion: details.isPromotion,
+            });
         }
-        lastItemCount.current = items.length;
-    }, [items, quickAddedBarcode]);
+        setProductForModal(null);
+        setExistingItemForModal(null);
+    };
 
-    useEffect(() => {
-        setScanSettings({ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode });
-    }, [isBoxUnitDefault, isPromotionMode]);
+    if (isDraftLoading) {
+        return (
+            <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                <SpinnerIcon className="w-10 h-10 text-blue-500" />
+            </div>
+        );
+    }
 
     return (
-        <div className="h-full flex flex-col w-full max-w-3xl mx-auto">
-            {/* Combined Search Section */}
-            <div className="p-2 bg-white shadow-md z-10">
-                <div className="flex items-stretch space-x-2">
-                    {/* Left Column: Inputs */}
-                    <div className="flex-grow rounded-lg shadow-inner border border-gray-300 divide-y divide-gray-300 flex flex-col">
-                        {/* Customer Search Part */}
-                        <div className="p-1.5">
-                            <div className="relative">
-                                <input
-                                    ref={customerSearchInputRef}
-                                    id="customer-search"
-                                    type="text"
-                                    value={customerSearch}
-                                    onChange={e => setCustomerSearch(e.target.value)}
-                                    onFocus={() => {
-                                        if (customerSearchBlurTimeout.current) clearTimeout(customerSearchBlurTimeout.current);
-                                        setShowCustomerDropdown(true);
-                                    }}
-                                    onBlur={() => {
-                                        customerSearchBlurTimeout.current = window.setTimeout(() => setShowCustomerDropdown(false), 200);
-                                    }}
-                                    placeholder="거래처명 또는 코드 검색"
-                                    className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 disabled:bg-gray-100 placeholder:text-gray-400"
-                                    disabled={isCustomerLocked}
-                                    autoComplete="off"
-                                />
-                                {isCustomerLocked && (
-                                    <button onClick={handleUnlockCustomer} className="absolute top-1/2 right-3 -translate-y-1/2 text-sm font-semibold text-red-500 hover:text-red-700 z-10">변경</button>
-                                )}
-                                <SearchDropdown<Customer>
-                                    items={filteredCustomers}
-                                    renderItem={(c) => (
-                                        <div key={c.comcode} onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700">
-                                            <div>{c.name} <span className="text-sm text-gray-500">({c.comcode})</span></div>
-                                        </div>
-                                    )}
-                                    show={showCustomerDropdown && !isCustomerLocked}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Product Search Part */}
-                        <div className={`relative z-20 transition-opacity duration-300 ${!selectedCustomer ? 'opacity-50 pointer-events-none' : ''}`}>
-                            <div className="p-1.5 bg-gray-50/50">
-                                <div className="relative">
-                                    <input
-                                        ref={productSearchInputRef}
-                                        id="product-search"
-                                        type="text"
-                                        value={productSearch}
-                                        onChange={e => setProductSearch(e.target.value)}
-                                        onFocus={() => {
-                                            if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current);
-                                            setShowProductDropdown(true);
-                                        }}
-                                        onBlur={() => {
-                                            productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
-                                        }}
-                                        placeholder="품목명 또는 바코드 검색"
-                                        className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 pr-32"
-                                        autoComplete="off"
-                                    />
-                                    <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
-                                        <ToggleSwitch size="small" id="new-order-promotion" label="행사" checked={isPromotionMode} onChange={setIsPromotionMode} color="red" />
-                                        <ToggleSwitch size="small" id="new-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
+        <div className="h-full flex flex-col relative">
+            <DraftLoadedToast show={showDraftLoadedToast} />
+            <div className="p-2 bg-white shadow-md flex-shrink-0 z-20">
+                <div className="flex items-stretch gap-2">
+                    {/* Left side: Inputs */}
+                    <div className="flex-grow flex flex-col gap-2">
+                        {/* Customer Search */}
+                        <div className="relative">
+                            <input
+                                ref={customerSearchInputRef}
+                                type="text"
+                                value={customerSearch}
+                                onChange={(e) => setCustomerSearch(e.target.value)}
+                                onFocus={() => {
+                                    if (customerSearchBlurTimeout.current) clearTimeout(customerSearchBlurTimeout.current);
+                                    if (!isCustomerSelected) setShowCustomerDropdown(true);
+                                }}
+                                onBlur={() => {
+                                    customerSearchBlurTimeout.current = window.setTimeout(() => setShowCustomerDropdown(false), 200);
+                                }}
+                                placeholder="거래처 검색"
+                                readOnly={isCustomerSelected}
+                                className={`w-full p-2 h-11 border ${isCustomerSelected ? 'border-blue-400 bg-blue-50' : 'border-gray-300'} rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors pr-16`}
+                                autoComplete="off"
+                            />
+                             {isCustomerSelected && (
+                                <button onClick={handleClearCustomer} className="absolute top-1/2 right-2 -translate-y-1/2 text-sm bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-md hover:bg-gray-300 transition-colors">
+                                    변경
+                                </button>
+                            )}
+                            <SearchDropdown<Customer>
+                                items={filteredCustomers}
+                                renderItem={(c) => (
+                                    <div onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700">
+                                        {c.name} <span className="text-sm text-gray-500">({c.comcode})</span>
                                     </div>
-                                    <SearchDropdown<Product>
-                                        items={filteredProducts}
-                                        renderItem={(p) => (
-                                            <div key={p.barcode} onClick={() => handleProductSelect(p)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700">
-                                                <div>{p.name} <span className="text-sm text-gray-500">({p.barcode})</span></div>
-                                            </div>
-                                        )}
-                                        show={showProductDropdown}
-                                    />
-                                </div>
+                                )}
+                                show={showCustomerDropdown}
+                            />
+                        </div>
+                        
+                        {/* Product Search */}
+                        <div className="relative">
+                            <input
+                                ref={productSearchInputRef}
+                                type="text"
+                                value={productSearch}
+                                onChange={(e) => setProductSearch(e.target.value)}
+                                onFocus={() => {
+                                    if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current);
+                                    setShowProductDropdown(true);
+                                }}
+                                onBlur={() => {
+                                    productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
+                                }}
+                                placeholder={isCustomerSelected ? "품목명 또는 바코드 검색" : "거래처를 먼저 선택하세요"}
+                                className="w-full p-2 h-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-32"
+                                disabled={!isCustomerSelected}
+                                autoComplete="off"
+                            />
+                            <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
+                                <ToggleSwitch
+                                    id="new-order-promotion-mode"
+                                    label="행사"
+                                    checked={isPromotionMode}
+                                    onChange={setIsPromotionMode}
+                                    disabled={!isCustomerSelected}
+                                    color="red"
+                                    size="small"
+                                />
+                                <ToggleSwitch
+                                    id="new-order-box-unit"
+                                    label="박스"
+                                    checked={isBoxUnitDefault}
+                                    onChange={setIsBoxUnitDefault}
+                                    disabled={!isCustomerSelected}
+                                    color="blue"
+                                    size="small"
+                                />
                             </div>
+                            <SearchDropdown<Product>
+                                items={filteredProducts}
+                                renderItem={(p) => (
+                                    <div onClick={() => handleAddProductFromSearch(p)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700">
+                                        <div>{p.name} <span className="text-sm text-gray-500">({p.barcode})</span></div>
+                                    </div>
+                                )}
+                                show={showProductDropdown}
+                            />
                         </div>
                     </div>
-                    {/* Right Column: Scan Button */}
+                    
+                    {/* Right side: Scan button */}
                     <button
-                        onClick={() => openScanner('new-order', handleScanSuccess, true)}
-                        disabled={!selectedCustomer}
-                        className="w-16 bg-blue-600 text-white rounded-lg flex-shrink-0 hover:bg-blue-700 shadow-md transition-all flex flex-col items-center justify-center gap-1 font-semibold disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed"
+                        onClick={handleOpenScanner}
+                        className="w-20 bg-blue-600 text-white rounded-lg flex-shrink-0 hover:bg-blue-700 shadow-md transition-all flex flex-col items-center justify-center gap-2 font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        disabled={!isCustomerSelected}
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M12 11v2"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M12 11v2"/></svg>
                         <span className="text-sm">스캔</span>
                     </button>
                 </div>
             </div>
 
-
-            {/* Items List */}
-            <div ref={scrollableContainerRef} className="scrollable-content p-2 bg-gray-100 relative">
-                {items.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                        <p className="text-center text-lg font-semibold">품목이 없습니다</p>
+            <div ref={scrollableContainerRef} className="scrollable-content p-2 pb-32">
+                 {items.length === 0 ? (
+                    <div className="relative flex flex-col items-center justify-center h-full text-gray-400">
+                        <p className="text-center text-lg font-semibold">발주 품목이 없습니다</p>
                         <p className="text-sm">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>
                     </div>
                 ) : (
-                    <div className="pb-32">
-                        <div className="bg-white rounded-lg shadow-md border border-gray-200/80 overflow-hidden">
-                            <div className="divide-y divide-gray-200">
-                                {items.map((item) => (
-                                    <div key={item.barcode} ref={el => { if (el) itemsRef.current.set(item.barcode, el); }} className={`flex items-center p-3 space-x-2 cursor-pointer hover:bg-gray-50 transition-all duration-200 ${highlightedItem === item.barcode ? 'bg-blue-50' : ''}`} onClick={() => setEditingItem(item)}>
-                                        <div className="flex-grow min-w-0 pr-1">
-                                            <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-1.5">
-                                                {item.isPromotion && <span className="text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5">행사</span>}
-                                                {item.name}
-                                            </p>
-                                            <p className="text-xs text-gray-500">{item.price.toLocaleString()}원</p>
-                                        </div>
-                                        <div className="flex items-center space-x-1.5 flex-shrink-0">
-                                            <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
-                                            <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
-                                            <button onClick={(e) => handleRemoveItem(e, item)} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative"><RemoveIcon className="w-5 h-5"/></button>
-                                        </div>
+                    <div className="bg-white rounded-lg shadow-md border border-gray-200/80 overflow-hidden">
+                        <div className="divide-y divide-gray-200">
+                            {items.map((item) => (
+                                <div
+                                    key={item.barcode}
+                                    className="flex items-center p-3 space-x-2 cursor-pointer hover:bg-gray-50"
+                                    onClick={() => setEditingItem(item)}
+                                >
+                                    <div className="flex-grow min-w-0 pr-1">
+                                        <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
+                                            {item.isPromotion && <span className="text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5">행사</span>}
+                                            <span>{item.name}</span>
+                                        </p>
+                                        <p className="text-xs text-gray-500">{item.price.toLocaleString()}원</p>
                                     </div>
-                                ))}
-                            </div>
+                                    <div className="flex items-center space-x-1.5 flex-shrink-0">
+                                        <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
+                                        <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); handleRemoveItem(item); }} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+                                            <RemoveIcon className="w-5 h-5"/>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 )}
-                {/* Memo FAB */}
-                <button 
-                    onClick={() => setIsMemoModalOpen(true)}
-                    disabled={!selectedCustomer || items.length === 0}
-                    className="absolute bottom-24 right-4 bg-white border-2 border-gray-300 text-gray-600 rounded-2xl p-3 shadow-lg hover:bg-gray-100 hover:border-gray-400 transition z-20 disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-300 disabled:cursor-not-allowed"
-                    aria-label="메모 추가/수정"
-                >
-                    <DocumentTextIcon className="w-6 h-6" />
-                </button>
             </div>
 
-            {/* Footer */}
-            <footer className="absolute bottom-0 left-0 right-0 p-2 bg-white/80 backdrop-blur-lg border-t border-gray-200/60 shadow-[0_-5px_25px_rgba(0,0,0,0.1)]">
-                <div className="flex justify-between items-center mb-2 font-bold">
-                    <span className="text-base text-gray-600">총 합계:</span>
-                    <span className="text-xl text-gray-800">{totalAmount.toLocaleString()} 원</span>
+            <footer className="absolute bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-lg border-t border-gray-200/60 shadow-[0_-5px_25px_rgba(0,0,0,0.1)]">
+                <div className="flex justify-between items-center font-bold mb-3">
+                    <span className="text-lg text-gray-600">총 합계:</span>
+                    <span className="text-2xl text-gray-800">{totalAmount.toLocaleString()} 원</span>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={handleCancelOrder}
-                        className="w-[20%] bg-gray-200 text-gray-700 p-2 rounded-lg font-bold text-base hover:bg-gray-300 transition shadow-sm disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                        disabled={!selectedCustomer && items.length === 0 && memo.trim() === ''}
+                 <div className="flex items-stretch gap-2">
+                    <button 
+                        onClick={handleResetOrder} 
+                        className="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0"
                     >
-                        취소
+                        <TrashIcon className="w-5 h-5" />
                     </button>
                     <button 
-                        onClick={handleCompleteOrder} 
-                        className="w-[80%] bg-gradient-to-b from-blue-500 to-blue-600 text-white p-2 rounded-lg font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center" 
-                        disabled={!selectedCustomer || items.length === 0 || isSaving}
+                        onClick={() => setIsMemoModalOpen(true)} 
+                        className="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0"
                     >
-                        {isSaving ? <SpinnerIcon className="w-6 h-6" /> : '발주 저장'}
+                        <DocumentTextIcon className="w-5 h-5"/>
+                        <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>
+                    </button>
+                    <button 
+                        onClick={handleSaveOrder} 
+                        disabled={isSaving || items.length === 0 || !isCustomerSelected}
+                        className="flex-grow bg-gradient-to-b from-blue-500 to-blue-600 text-white p-3 rounded-xl font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center"
+                    >
+                        {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '신규 발주 저장'}
                     </button>
                 </div>
             </footer>
-            
-            <MemoModal 
+
+            <MemoModal
                 isOpen={isMemoModalOpen}
                 onClose={() => setIsMemoModalOpen(false)}
                 onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
@@ -505,37 +522,17 @@ const NewOrderPage: React.FC = () => {
                 isOpen={!!productForModal}
                 product={productForModal}
                 existingItem={existingItemForModal}
-                trigger={addItemTrigger}
                 onClose={() => {
                     setProductForModal(null);
                     setExistingItemForModal(null);
                 }}
                 onAdd={(details) => {
                     if (productForModal) {
-                        const existingItem = items.find(item => item.barcode === productForModal.barcode);
-                        if (existingItem) {
-                            updateItem(productForModal.barcode, { 
-                                quantity: existingItem.quantity + details.quantity,
-                                unit: details.unit,
-                                isPromotion: details.isPromotion
-                             });
-                        } else {
-                            addItem(productForModal, {
-                                isBoxUnit: details.unit === '박스',
-                                isPromotion: details.isPromotion,
-                                quantity: details.quantity,
-                            });
-                        }
-                        setQuickAddedBarcode(productForModal.barcode);
-                        setHighlightedItem(productForModal.barcode);
-                        setTimeout(() => setHighlightedItem(null), 1000);
+                        handleAddItemFromModal(productForModal, details);
                     }
-                    setScanSettings({ unit: details.unit, isPromotion: details.isPromotion });
-                    setProductForModal(null);
-                    setExistingItemForModal(null);
                 }}
-                onNextScan={() => openScanner('new-order', handleScanSuccess, true)}
-                initialSettings={scanSettings}
+                trigger={'search'}
+                initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode }}
             />
             <EditItemModal
                 isOpen={!!editingItem}

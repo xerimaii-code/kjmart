@@ -62,9 +62,10 @@ self.addEventListener('fetch', (event) => {
         // Not in cache - fetch from network
         return fetch(event.request).then(
           (response) => {
-            // Check if we received a valid response
-            // We don't cache non-GET requests, or opaque responses (e.g., from third-party CDNs without CORS)
-            if (!response || response.status !== 200 || response.type !== 'basic' || event.request.method !== 'GET') {
+            // Check if we received a valid response.
+            // We only cache successful GET requests.
+            // The status check also prevents caching opaque responses (status 0).
+            if (!response || response.status !== 200 || event.request.method !== 'GET') {
               return response;
             }
 
@@ -76,7 +77,10 @@ self.addEventListener('fetch', (event) => {
 
             caches.open(CACHE_NAME)
               .then((cache) => {
-                cache.put(event.request, responseToCache);
+                // Prevent caching of non-http schemes like chrome-extension
+                if (event.request.url.startsWith('http')) {
+                    cache.put(event.request, responseToCache);
+                }
               });
 
             return response;

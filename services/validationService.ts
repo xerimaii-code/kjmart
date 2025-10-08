@@ -23,8 +23,7 @@ export const validateOrderItem = (item: any): item is OrderItem => {
     return validateProduct(item) &&
            typeof typedItem.quantity === 'number' &&
            (typedItem.unit === '개' || typedItem.unit === '박스') &&
-           (typeof typedItem.isPromotion === 'boolean' || typeof typedItem.isPromotion === 'undefined') &&
-           (typeof typedItem.status === 'undefined' || typedItem.status === 'new' || typedItem.status === 'modified' || typedItem.status === null);
+           (typeof typedItem.isPromotion === 'boolean' || typeof typedItem.isPromotion === 'undefined');
 };
 
 // FIX: Cast `item` to access properties, as `isObject` narrows its type to `object`.

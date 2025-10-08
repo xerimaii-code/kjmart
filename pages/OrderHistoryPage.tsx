@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useData, useUI } from '../context/AppContext';
 import { Order } from '../types';
-import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon } from '../components/Icons';
+import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon } from '../components/Icons';
 import { exportToSMS, exportToXLS } from '../services/dataService';
 import DeliveryTypeModal from '../components/DeliveryTypeModal';
+import { getAllDraftKeys } from '../services/draftDbService';
 
 interface ActionMenuItem {
     id: string;
@@ -15,7 +16,10 @@ interface ActionMenuItem {
 
 const OrderHistoryPage: React.FC = () => {
     const { orders, deleteOrder, updateOrder } = useData();
-    const { openDetailModal, showAlert } = useUI();
+    const { openDetailModal, showAlert, lastModifiedOrderId, setLastModifiedOrderId } = useUI();
+    const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
+    const [draftOrderIds, setDraftOrderIds] = useState<Set<number>>(new Set());
+
 
     // This function correctly gets the 'YYYY-MM-DD' string for the user's LOCAL timezone.
     const getLocalDateString = (date: Date): string => {
@@ -43,6 +47,44 @@ const OrderHistoryPage: React.FC = () => {
 
     const scrollableContainerRef = useRef<HTMLDivElement>(null);
     const filterContainerRef = useRef<HTMLDivElement>(null);
+
+     useEffect(() => {
+        const fetchDrafts = async () => {
+            try {
+                const keys = await getAllDraftKeys();
+                const numericKeys = keys.filter(key => typeof key === 'number') as number[];
+                setDraftOrderIds(new Set(numericKeys));
+            } catch (error) {
+                console.error("Failed to fetch draft keys:", error);
+            }
+        };
+        fetchDrafts();
+    }, [orders, openDetailModal]); // Re-check when orders list or modal state changes.
+    
+    useEffect(() => {
+        if (lastModifiedOrderId) {
+            setHighlightedOrderId(lastModifiedOrderId);
+
+            // Scroll into view after a short delay to ensure the element is rendered.
+            const scrollTimer = setTimeout(() => {
+                const element = document.getElementById(`order-item-${lastModifiedOrderId}`);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 100);
+
+            // Clear the highlight after the animation and effect have completed.
+            const highlightTimer = setTimeout(() => {
+                setHighlightedOrderId(null);
+                setLastModifiedOrderId(null); // Reset the global state
+            }, 3000); // Highlight duration: 3 seconds
+
+            return () => {
+                clearTimeout(scrollTimer);
+                clearTimeout(highlightTimer);
+            };
+        }
+    }, [lastModifiedOrderId, setLastModifiedOrderId]);
 
     // This effect ensures that whenever the user navigates to this page,
     // the date filters are reliably reset to the last 7 days.
@@ -244,6 +286,7 @@ const OrderHistoryPage: React.FC = () => {
                                         };
                                         
                                         const isCompleted = !!order.completedAt || !!order.completionDetails;
+                                        const hasDraft = draftOrderIds.has(order.id);
                                         
                                         const actionMenuItems: ActionMenuItem[] = isCompleted ? [
                                             {
@@ -278,7 +321,10 @@ const OrderHistoryPage: React.FC = () => {
 
                                         return (
                                             <div key={order.id} className={`relative ${openMenuId === order.id ? 'z-10' : ''}`}>
-                                                <div className="flex items-center bg-white rounded-xl transition-colors hover:bg-slate-100">
+                                                <div 
+                                                  id={`order-item-${order.id}`}
+                                                  className={`flex items-center bg-white rounded-xl transition-colors duration-500 ease-in-out ${highlightedOrderId === order.id ? 'bg-yellow-100 ring-2 ring-yellow-300' : 'hover:bg-slate-100'}`}
+                                                >
                                                     <div
                                                         onClick={() => openDetailModal(order.id)}
                                                         className={`flex-grow p-3 cursor-pointer rounded-l-xl ${isCompleted ? 'opacity-60' : ''}`}
@@ -287,6 +333,7 @@ const OrderHistoryPage: React.FC = () => {
                                                         <div className="flex justify-between items-center">
                                                             <p className="font-bold text-gray-800 text-lg flex items-center" title={order.customer.name}>
                                                                 {getStatusIcon(order)}
+                                                                {hasDraft && <PencilSquareIcon className="w-5 h-5 text-orange-500 mr-2 flex-shrink-0" title="임시 저장된 수정사항이 있습니다." />}
                                                                 <span className="truncate">{order.customer.name}</span>
                                                                 {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
                                                             </p>
