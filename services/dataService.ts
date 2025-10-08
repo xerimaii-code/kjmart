@@ -232,15 +232,14 @@ const base64ToArrayBuffer = (base64: string) => {
 
 
 export const exportToSMS = (order: Order): string => {
-    const title = '경진마트';
-    const header = '품명/수량단위';
+    const title = '*경진마트';
 
     const itemsBody = order.items.map(item => {
         const prefix = item.isPromotion ? '(행사)' : '';
         return `${prefix}${item.name}/${item.quantity}${item.unit}`;
     }).join('\n');
 
-    const fullMessage = `${title}\n${header}\n${itemsBody}`;
+    const fullMessage = `${title}\n${itemsBody}`;
     return fullMessage;
 };
 
