@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useData, useUI } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
-import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon } from '../components/Icons';
+import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon, ChatBubbleLeftIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from '../components/AddItemModal';
@@ -117,7 +117,6 @@ const NewOrderPage: React.FC = () => {
     const isCustomerSelected = !!selectedCustomer; 
 
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
-    const [isPromotionMode, setIsPromotionMode] = useState(false);
     
     const [productForModal, setProductForModal] = useState<Product | null>(null);
     const [existingItemForModal, setExistingItemForModal] = useState<OrderItem | null>(null);
@@ -152,8 +151,7 @@ const NewOrderPage: React.FC = () => {
         items,
         memo,
         isBoxUnitDefault,
-        isPromotionMode,
-    }), [selectedCustomer, items, memo, isBoxUnitDefault, isPromotionMode]);
+    }), [selectedCustomer, items, memo, isBoxUnitDefault]);
 
     const debouncedDraftData = useDebounce(draftDataToSave, 500);
 
@@ -168,7 +166,6 @@ const NewOrderPage: React.FC = () => {
                 resetItems(draft.items);
                 setMemo(draft.memo);
                 setIsBoxUnitDefault(draft.isBoxUnitDefault);
-                setIsPromotionMode(draft.isPromotionMode);
                 setShowDraftLoadedToast(true);
                 setTimeout(() => setShowDraftLoadedToast(false), 3000);
             }
@@ -232,7 +229,6 @@ const NewOrderPage: React.FC = () => {
         resetItems();
         setMemo('');
         setIsBoxUnitDefault(false);
-        setIsPromotionMode(false);
         setIsSaving(false);
         customerSearchInputRef.current?.focus();
     }, [resetItems]);
@@ -314,20 +310,20 @@ const NewOrderPage: React.FC = () => {
         );
     };
 
-    const handleAddItemFromModal = (product: Product, details: { quantity: number; unit: '개' | '박스'; isPromotion: boolean }) => {
+    const handleAddItemFromModal = (product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
         const existingItem = items.find(i => i.barcode === product.barcode);
         if (existingItem) {
             updateItem(product.barcode, {
                 ...existingItem,
                 quantity: existingItem.quantity + details.quantity,
                 unit: details.unit,
-                isPromotion: details.isPromotion,
+                memo: details.memo,
             });
         } else {
             addItem(product, {
                 quantity: details.quantity,
                 isBoxUnit: details.unit === '박스',
-                isPromotion: details.isPromotion,
+                memo: details.memo,
             });
         }
         setProductForModal(null);
@@ -399,20 +395,11 @@ const NewOrderPage: React.FC = () => {
                                     productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
                                 }}
                                 placeholder={isCustomerSelected ? "품목명 또는 바코드 검색" : "거래처를 먼저 선택하세요"}
-                                className="w-full p-2 h-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-32"
+                                className="w-full p-2 h-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-20"
                                 disabled={!isCustomerSelected}
                                 autoComplete="off"
                             />
                             <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
-                                <ToggleSwitch
-                                    id="new-order-promotion-mode"
-                                    label="행사"
-                                    checked={isPromotionMode}
-                                    onChange={setIsPromotionMode}
-                                    disabled={!isCustomerSelected}
-                                    color="red"
-                                    size="small"
-                                />
                                 <ToggleSwitch
                                     id="new-order-box-unit"
                                     label="박스"
@@ -464,10 +451,15 @@ const NewOrderPage: React.FC = () => {
                                 >
                                     <div className="flex-grow min-w-0 pr-1">
                                         <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
-                                            {item.isPromotion && <span className="text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5">행사</span>}
                                             <span>{item.name}</span>
                                         </p>
-                                        <p className="text-xs text-gray-500">{item.price.toLocaleString()}원</p>
+                                        {item.memo && (
+                                            <p className="text-xs text-blue-600 flex items-start gap-1 mt-0.5">
+                                                <ChatBubbleLeftIcon className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                                                <span className="break-all">{item.memo}</span>
+                                            </p>
+                                        )}
+                                        <p className="text-xs text-gray-500 mt-0.5">{item.price.toLocaleString()}원</p>
                                     </div>
                                     <div className="flex items-center space-x-1.5 flex-shrink-0">
                                         <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
@@ -532,7 +524,7 @@ const NewOrderPage: React.FC = () => {
                     }
                 }}
                 trigger={'search'}
-                initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode }}
+                initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
             />
             <EditItemModal
                 isOpen={!!editingItem}

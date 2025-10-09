@@ -14,7 +14,7 @@ export interface Product {
 export interface OrderItem extends Product {
     quantity: number;
     unit: '개' | '박스';
-    isPromotion?: boolean;
+    memo?: string;
 }
 
 export interface Order {
@@ -42,7 +42,6 @@ export interface NewOrderDraft {
     items: OrderItem[];
     memo: string;
     isBoxUnitDefault: boolean;
-    isPromotionMode: boolean;
 }
 
 export interface EditedOrderDraft {

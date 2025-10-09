@@ -23,7 +23,8 @@ export const validateOrderItem = (item: any): item is OrderItem => {
     return validateProduct(item) &&
            typeof typedItem.quantity === 'number' &&
            (typedItem.unit === '개' || typedItem.unit === '박스') &&
-           (typeof typedItem.isPromotion === 'boolean' || typeof typedItem.isPromotion === 'undefined');
+           // FIX: The property 'isPromotion' does not exist on 'OrderItem'. Replaced with a check for the optional 'memo' property.
+           (typeof typedItem.memo === 'string' || typeof typedItem.memo === 'undefined');
 };
 
 // FIX: Cast `item` to access properties, as `isObject` narrows its type to `object`.

@@ -10,7 +10,6 @@ interface UseOrderManagerProps {
 const normalizeItems = (items: OrderItem[]): OrderItem[] => {
     return items.map(item => ({
         ...item,
-        isPromotion: !!item.isPromotion, // Coerce undefined/null to false, keep true as true.
     }));
 };
 
@@ -33,11 +32,11 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
 
     const addItem = useCallback((
         product: Product, 
-        options: { isBoxUnit: boolean; isPromotion: boolean; quantity?: number; }
+        options: { isBoxUnit: boolean; quantity?: number; memo?: string; }
     ) => {
         const newUnit = options.isBoxUnit ? '박스' : '개';
         // New items are already normalized by their creation process.
-        const newItem: OrderItem = { ...product, quantity: options.quantity ?? 1, unit: newUnit, isPromotion: options.isPromotion };
+        const newItem: OrderItem = { ...product, quantity: options.quantity ?? 1, unit: newUnit, memo: options.memo };
         
         setItems(prevItems => [...prevItems, newItem]);
     }, []);

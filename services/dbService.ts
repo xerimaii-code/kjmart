@@ -174,6 +174,11 @@ export const clearAllData = (): Promise<void> => {
     return remove(ref(db));
 };
 
+export const clearOrders = (): Promise<void> => {
+    if (!dbInitialized) return Promise.resolve();
+    return remove(ref(db, 'orders'));
+};
+
 export const hasData = async (): Promise<boolean> => {
     if (!dbInitialized) return false;
     const snapshot = await get(ref(db));

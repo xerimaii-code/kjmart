@@ -114,11 +114,10 @@ const OrderDetailModal: React.FC = () => {
     const [productSearch, setProductSearch] = useState('');
     const [showDropdown, setShowDropdown] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
-    const [isPromotionMode, setIsPromotionMode] = useState(false);
     const [productForModal, setProductForModal] = useState<Product | null>(null);
     const [existingItemForModal, setExistingItemForModal] = useState<OrderItem | null>(null);
     const [addItemTrigger, setAddItemTrigger] = useState<'scan' | 'search'>('search');
-    const [scanSettings, setScanSettings] = useState<{ unit: '개' | '박스'; isPromotion: boolean }>({ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode });
+    const [scanSettings, setScanSettings] = useState<{ unit: '개' | '박스' }>({ unit: isBoxUnitDefault ? '박스' : '개' });
     
     const [highlightedItem, setHighlightedItem] = useState<string | null>(null);
     const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
@@ -226,8 +225,8 @@ const OrderDetailModal: React.FC = () => {
     }, [order]);
 
     useEffect(() => {
-        setScanSettings({ unit: isBoxUnitDefault ? '박스' : '개', isPromotion: isPromotionMode });
-    }, [isBoxUnitDefault, isPromotionMode]);
+        setScanSettings({ unit: isBoxUnitDefault ? '박스' : '개' });
+    }, [isBoxUnitDefault]);
     
 
     useEffect(() => {
@@ -294,8 +293,8 @@ const OrderDetailModal: React.FC = () => {
         }
 
         const itemsToSave = editedItems.map(item => {
-            const { barcode, name, price, quantity, unit, isPromotion } = item;
-            const cleanItem: OrderItem = { barcode, name, price, quantity, unit, isPromotion: !!isPromotion };
+            const { barcode, name, price, quantity, unit, memo } = item;
+            const cleanItem: OrderItem = { barcode, name, price, quantity, unit, memo: memo || undefined };
             return cleanItem;
         });
 
@@ -462,18 +461,10 @@ const OrderDetailModal: React.FC = () => {
                                                 productSearchBlurTimeout.current = window.setTimeout(() => setShowDropdown(false), 200);
                                             }}
                                             placeholder="품목명 또는 바코드 검색"
-                                            className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-32"
+                                            className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-20"
                                             autoComplete="off"
                                         />
                                         <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
-                                            <ToggleSwitch
-                                                id="modal-promotion-mode"
-                                                label="행사"
-                                                checked={isPromotionMode}
-                                                onChange={setIsPromotionMode}
-                                                color="red"
-                                                size="small"
-                                            />
                                             <ToggleSwitch
                                                 id="modal-box-unit"
                                                 label="박스"
@@ -534,11 +525,16 @@ const OrderDetailModal: React.FC = () => {
                                         >
                                             <div className="flex-grow min-w-0 pr-1">
                                                 <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
-                                                    {item.isPromotion && <span className={`text-xs font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5`}>행사</span>}
                                                     {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5">NEW</span>}
                                                     <span>{item.name}</span>
                                                 </p>
-                                                <p className="text-xs text-gray-500">{item.price.toLocaleString()}원</p>
+                                                {item.memo && (
+                                                    <p className="text-xs text-blue-600 flex items-start gap-1 mt-0.5">
+                                                        <ChatBubbleLeftIcon className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                                                        <span className="break-all">{item.memo}</span>
+                                                    </p>
+                                                )}
+                                                <p className="text-xs text-gray-500 mt-0.5">{item.price.toLocaleString()}원</p>
                                             </div>
                                             <div className="flex items-center space-x-1.5 flex-shrink-0">
                                                 <span
@@ -600,7 +596,7 @@ const OrderDetailModal: React.FC = () => {
                     setProductForModal(null);
                     setExistingItemForModal(null);
                 }}
-                onAdd={({ quantity, unit, isPromotion }) => {
+                onAdd={({ quantity, unit, memo }) => {
                     if (productForModal) {
                         const existingItem = editedItems.find(i => i.barcode === productForModal.barcode);
                         if (existingItem) {
@@ -608,13 +604,13 @@ const OrderDetailModal: React.FC = () => {
                                 ...existingItem,
                                 quantity: existingItem.quantity + quantity,
                                 unit,
-                                isPromotion,
+                                memo,
                             });
                         } else {
                             addItem(productForModal, {
                                 quantity,
                                 isBoxUnit: unit === '박스',
-                                isPromotion,
+                                memo,
                             });
                         }
                         setHighlightedItem(productForModal.barcode);

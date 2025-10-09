@@ -20,6 +20,7 @@ interface DataActions {
     updateOrder: (updatedOrder: Order) => Promise<void>;
     deleteOrder: (orderId: number) => Promise<void>;
     setSelectedCameraId: (id: string | null) => Promise<void>;
+    clearOrders: () => Promise<void>;
 }
 
 interface AlertState {
@@ -147,6 +148,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updateOrder: (updatedOrder) => db.put('orders', updatedOrder),
         deleteOrder: (orderId) => db.deleteByKey('orders', orderId),
         setSelectedCameraId: (id) => db.setSetting('selectedCameraId', id),
+        clearOrders: () => db.clearOrders(),
     };
 
     return (

@@ -7,16 +7,16 @@ interface AddItemModalProps {
     product: Product | null;
     existingItem: OrderItem | null;
     onClose: () => void;
-    onAdd: (details: { quantity: number; unit: '개' | '박스'; isPromotion: boolean }) => void;
+    onAdd: (details: { quantity: number; unit: '개' | '박스'; memo?: string }) => void;
     onNextScan?: () => void;
     trigger: 'scan' | 'search';
-    initialSettings?: { unit: '개' | '박스'; isPromotion: boolean };
+    initialSettings?: { unit: '개' | '박스' };
 }
 
 const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingItem, onClose, onAdd, onNextScan, trigger, initialSettings }) => {
     const [quantity, setQuantity] = useState(1);
     const [unit, setUnit] = useState<'개' | '박스'>('개');
-    const [isPromotion, setIsPromotion] = useState(false);
+    const [memo, setMemo] = useState('');
 
     const longPressTimeoutRef = useRef<number | null>(null);
     const rapidChangeIntervalRef = useRef<number | null>(null);
@@ -77,19 +77,19 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
             setQuantity(1); // Always default to adding 1
             // Use initialSettings if available (continuous scan), otherwise use existingItem's settings, or default.
             setUnit(initialSettings?.unit ?? existingItem?.unit ?? '개');
-            setIsPromotion(initialSettings?.isPromotion ?? (existingItem?.isPromotion || false));
+            setMemo(existingItem?.memo || '');
         }
     }, [product, existingItem, initialSettings]);
 
     if (!isOpen || !product) return null;
 
     const handleAddAndClose = () => {
-        onAdd({ quantity, unit, isPromotion });
+        onAdd({ quantity, unit, memo: memo.trim() });
         onClose();
     };
 
     const handleAddAndNextScan = () => {
-        onAdd({ quantity, unit, isPromotion });
+        onAdd({ quantity, unit, memo: memo.trim() });
         onClose(); // Close current modal before opening scanner
         if (onNextScan) {
             onNextScan();
@@ -148,15 +148,25 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                             </div>
                         </div>
 
+                        {/* Memo Input */}
+                        <div>
+                            <label htmlFor="add-item-memo" className="block text-sm font-bold text-gray-700 mb-2 text-center">
+                                품목 메모 (선택)
+                            </label>
+                            <input
+                                id="add-item-memo"
+                                type="text"
+                                value={memo}
+                                onChange={(e) => setMemo(e.target.value)}
+                                placeholder="예: 월요일 도착"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                maxLength={50}
+                            />
+                        </div>
+
+
                         {/* Toggles */}
                         <div className="flex justify-end items-center pt-4 border-t border-gray-200 space-x-4">
-                            <ToggleSwitch
-                                id="add-item-promotion"
-                                label="행사"
-                                checked={isPromotion}
-                                onChange={setIsPromotion}
-                                color="red"
-                            />
                             <ToggleSwitch
                                 id="add-item-unit"
                                 label="박스"

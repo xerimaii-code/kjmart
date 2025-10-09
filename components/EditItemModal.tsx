@@ -6,20 +6,20 @@ interface EditItemModalProps {
     isOpen: boolean;
     item: OrderItem | null;
     onClose: () => void;
-    onSave: (details: { quantity: number; unit: '개' | '박스'; isPromotion: boolean }) => void;
+    onSave: (details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => void;
 }
 
 export default function EditItemModal({ isOpen, item, onClose, onSave }: EditItemModalProps) {
     const [quantity, setQuantity] = useState(1);
     const [unit, setUnit] = useState<'개' | '박스'>('개');
-    const [isPromotion, setIsPromotion] = useState(false);
+    const [memo, setMemo] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (isOpen && item) {
             setQuantity(item.quantity);
             setUnit(item.unit);
-            setIsPromotion(item.isPromotion || false);
+            setMemo(item.memo || '');
             // Auto-focus and select text for quick editing
             setTimeout(() => {
                 inputRef.current?.focus();
@@ -33,7 +33,7 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
     const handleSave = () => {
         const newQuantity = Number(quantity);
         if (newQuantity > 0) {
-            onSave({ quantity: newQuantity, unit, isPromotion });
+            onSave({ quantity: newQuantity, unit, memo: memo.trim() });
         }
     };
 
@@ -72,15 +72,24 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
                             </div>
                         </div>
 
+                        {/* Memo Input */}
+                        <div>
+                            <label htmlFor="edit-item-memo" className="block text-sm font-bold text-gray-700 mb-2 text-center">
+                                품목 메모 (선택)
+                            </label>
+                            <input
+                                id="edit-item-memo"
+                                type="text"
+                                value={memo}
+                                onChange={(e) => setMemo(e.target.value)}
+                                placeholder="예: 월요일 도착"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                maxLength={50}
+                            />
+                        </div>
+
                         {/* Toggles */}
                         <div className="flex justify-end items-center pt-4 border-t border-gray-200 space-x-4">
-                             <ToggleSwitch
-                                id="edit-item-promotion"
-                                label="행사"
-                                checked={isPromotion}
-                                onChange={setIsPromotion}
-                                color="red"
-                            />
                             <ToggleSwitch
                                 id="edit-item-unit"
                                 label="박스"

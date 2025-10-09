@@ -65,6 +65,7 @@ const getAutoColumnWidths = (data: any[][]): { wch: number }[] => {
         let padding = 3;
         if (index === 0) padding = 5; // 바코드
         if (index === 1) padding = 5; // 품명
+        if (index === 3) padding = 5; // 단위
         return { wch: width + padding };
     });
 };
@@ -232,15 +233,12 @@ const base64ToArrayBuffer = (base64: string) => {
 
 
 export const exportToSMS = (order: Order): string => {
-    const title = '*경진마트';
-
     const itemsBody = order.items.map(item => {
-        const prefix = item.isPromotion ? '(행사)' : '';
-        return `${prefix}${item.name}/${item.quantity}${item.unit}`;
+        const memoText = item.memo ? item.memo : '';
+        return `${item.name}/${item.quantity}${item.unit}${memoText}`;
     }).join('\n');
 
-    const fullMessage = `${title}\n${itemsBody}`;
-    return fullMessage;
+    return `경진마트\n${itemsBody}`;
 };
 
 export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '택배배송') => {
@@ -258,17 +256,13 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
     const workbook = XLSX.utils.book_new();
 
     const itemData: (string | number | null)[][] = [];
-    order.items.forEach((item, index) => {
+    order.items.forEach((item) => {
         itemData.push([
             item.barcode,
-            `${item.isPromotion ? '(행사)' : ''}${item.name}`,
+            item.name,
             item.quantity,
-            item.unit
+            `${item.unit}${item.memo ? ` (${item.memo})` : ''}`,
         ]);
-        // 마지막 아이템 뒤에는 빈 행을 추가하지 않음
-        if ((index + 1) % 5 === 0 && (index + 1) < order.items.length) {
-            itemData.push([null, null, null, null]);
-        }
     });
 
     const dataForSheet: (string | number | null)[][] = [
@@ -333,8 +327,12 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
             if (cell) {
                 if (!cell.s) cell.s = {};
                 cell.s.font = { sz: 12 };
-                if (col === 2) {
+                if (col === 2) { // 수량 column
                     cell.s.font.bold = true;
+                }
+                 if (col === 3) { // 단위 column, left-align
+                    if (!cell.s.alignment) cell.s.alignment = {};
+                    cell.s.alignment.horizontal = 'left';
                 }
             }
         }

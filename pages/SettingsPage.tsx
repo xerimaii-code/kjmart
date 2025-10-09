@@ -3,7 +3,7 @@ import { useData, useUI } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon, TrashIcon } from '../components/Icons';
 
 const LoadingSpinner: React.FC = () => (
     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
@@ -20,6 +20,7 @@ const SettingsPage: React.FC = () => {
         setSelectedCameraId,
         setCustomers,
         setProducts,
+        clearOrders,
     } = useData();
     const { showAlert, triggerInstallPrompt, isInstallPromptAvailable } = useUI();
     const { user, logout } = useAuth();
@@ -208,6 +209,26 @@ const SettingsPage: React.FC = () => {
         );
     };
 
+    const handleClearOrders = () => {
+        showAlert(
+            "모든 발주 내역을 영구적으로 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+            async () => {
+                setIsLoading(true);
+                try {
+                    await clearOrders();
+                    showAlert("모든 발주 내역이 삭제되었습니다.");
+                } catch (error) {
+                    console.error("Failed to clear orders:", error);
+                    showAlert("발주 내역 삭제에 실패했습니다.");
+                } finally {
+                    setIsLoading(false);
+                }
+            },
+            "내역 삭제",
+            'bg-red-500 hover:bg-red-600 focus:ring-red-500'
+        );
+    };
+
     return (
         <div className="h-full overflow-y-auto bg-gray-200 relative pb-10">
             {isLoading && <LoadingSpinner />}
@@ -259,38 +280,35 @@ const SettingsPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* --- 데이터 백업 및 복원 (Data Backup & Restore) --- */}
+                {/* --- 데이터 관리 (Data Management) --- */}
                 <div>
-                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">데이터 백업 및 복원</h2>
-                    <div className="grid md:grid-cols-2 gap-4">
-                         <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4 flex flex-col justify-between">
-                            <div>
-                                <h3 className="font-semibold text-slate-800">전체 데이터 백업</h3>
-                                <p className="text-sm text-slate-500 mt-1 mb-4">모든 데이터를 로컬 파일로 다운로드합니다.</p>
-                                <div className="flex items-center justify-center space-x-3 my-4 p-3 bg-slate-50 rounded-lg">
-                                    <DevicePhoneMobileIcon className="w-8 h-8 text-slate-600" />
-                                    <ArrowLongRightIcon className="w-8 h-8 text-slate-400" />
-                                    <DocumentIcon className="w-8 h-8 text-green-600" />
-                                </div>
-                            </div>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">데이터 관리</h2>
+                    <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4 divide-y divide-slate-200">
+                        {/* Backup */}
+                        <div className="py-4 first:pt-0 last:pb-0">
+                            <h3 className="font-semibold text-slate-800">전체 데이터 백업</h3>
+                            <p className="text-sm text-slate-500 mt-1 mb-3">모든 데이터를 로컬 파일로 다운로드합니다.</p>
                             <button onClick={handleFullBackup} className="w-full mt-2 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white p-3 rounded-md font-bold transition shadow-sm">
                                 <DownloadIcon className="w-5 h-5"/>
                                 <span>백업 파일 생성</span>
                             </button>
                         </div>
-                         <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4 flex flex-col justify-between">
-                             <div>
-                                <h3 className="font-semibold text-slate-800">백업에서 복원</h3>
-                                <p className="text-sm text-slate-500 mt-1 mb-4">로컬 백업 파일에서 모든 데이터를 복원합니다.</p>
-                                <div className="flex items-center justify-center space-x-3 my-4 p-3 bg-slate-50 rounded-lg">
-                                    <DocumentIcon className="w-8 h-8 text-orange-600" />
-                                    <ArrowLongRightIcon className="w-8 h-8 text-slate-400" />
-                                    <DevicePhoneMobileIcon className="w-8 h-8 text-slate-600" />
-                                </div>
-                            </div>
+                        {/* Restore */}
+                        <div className="py-4 first:pt-0 last:pb-0">
+                            <h3 className="font-semibold text-slate-800">백업에서 복원</h3>
+                            <p className="text-sm text-slate-500 mt-1 mb-3">로컬 백업 파일에서 모든 데이터를 복원합니다.</p>
                              <button onClick={triggerRestore} className="w-full mt-2 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white p-3 rounded-md font-bold transition shadow-sm">
                                 <UploadIcon className="w-5 h-5"/>
                                 <span>파일에서 복원</span>
+                             </button>
+                        </div>
+                        {/* Clear Order History */}
+                        <div className="py-4 first:pt-0 last:pb-0">
+                            <h3 className="font-semibold text-slate-800 text-red-600">발주 내역 초기화</h3>
+                            <p className="text-sm text-slate-500 mt-1 mb-3">모든 발주 기록을 영구적으로 삭제합니다. 거래처 및 상품 데이터는 유지됩니다.</p>
+                             <button onClick={handleClearOrders} className="w-full mt-2 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white p-3 rounded-md font-bold transition shadow-sm">
+                                <TrashIcon className="w-5 h-5"/>
+                                <span>모든 발주 내역 삭제</span>
                              </button>
                         </div>
                     </div>
