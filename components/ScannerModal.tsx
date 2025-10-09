@@ -16,10 +16,8 @@ interface ScannerModalProps {
 const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSuccess }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const codeReaderRef = useRef<any>(null);
-    const { selectedCameraId, products } = useData();
-    const { showAlert, isContinuousScan } = useUI();
-    const [scannedProductInfo, setScannedProductInfo] = useState<{ name: string; barcode: string } | null>(null);
-    const scanTimeoutRef = useRef<number | null>(null);
+    const { selectedCameraId } = useData();
+    const { showAlert } = useUI();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
 
     useEffect(() => {
@@ -36,12 +34,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     }, [isOpen, onClose, showAlert]);
 
     useEffect(() => {
-        // Clear any lingering success message when opening
-        setScannedProductInfo(null);
-        if (scanTimeoutRef.current) {
-            clearTimeout(scanTimeoutRef.current);
-        }
-
         if (isOpen && !isLibraryLoading && videoRef.current) {
             const hints = new Map();
             // Optimize for 1D barcodes to improve scanning speed and accuracy for industrial products.
@@ -77,23 +69,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         await codeReaderRef.current.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
                             if (result) {
                                 if (navigator.vibrate) navigator.vibrate(100);
-                                const barcode = result.getText();
-                                
-                                onScanSuccess(barcode); // Always call parent handler
-                                
-                                if (isContinuousScan) {
-                                    const product = products.find(p => p.barcode === barcode);
-                                    setScannedProductInfo({ name: product?.name || '알 수 없는 상품', barcode });
-
-                                    if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
-                                    scanTimeoutRef.current = window.setTimeout(() => {
-                                        setScannedProductInfo(null);
-                                    }, 1500); // Show for 1.5 seconds
-
-                                    // DO NOT close in continuous mode
-                                } else {
-                                    onClose(); // Close on single scan
-                                }
+                                const barcode = result.getText();                             
+                                onScanSuccess(barcode);
+                                onClose();
                             }
                             if (err && !(err instanceof ZXing.NotFoundException)) {
                                 console.error('Scan Error:', err);
@@ -117,12 +95,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             if (codeReaderRef.current) {
                 codeReaderRef.current.reset();
             }
-            if (scanTimeoutRef.current) {
-                clearTimeout(scanTimeoutRef.current);
-            }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, isLibraryLoading, selectedCameraId, isContinuousScan, products, onScanSuccess, onClose, showAlert]);
+    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert]);
 
     if (!isOpen) return null;
 
@@ -156,14 +131,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     <p className="text-white text-center mt-4 text-lg font-medium">바코드를 영역 안에 맞춰주세요</p>
                 </div>
             </div>
-
-            {/* Scan Success Popup */}
-            {scannedProductInfo && (
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 transform bg-green-500/90 text-white p-4 rounded-lg shadow-2xl animate-pulse">
-                    <p className="font-bold text-lg text-center">{scannedProductInfo.name}</p>
-                    <p className="text-sm text-center mt-1">{scannedProductInfo.barcode}</p>
-                </div>
-            )}
 
             <button
                 onClick={onClose}

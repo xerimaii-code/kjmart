@@ -8,7 +8,21 @@ import AddItemModal from './AddItemModal';
 import EditItemModal from './EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
-import QuantityInputModal from './QuantityInputModal';
+
+// Helper to ensure item properties are consistent for reliable comparison.
+// This creates a clean object with a defined property order and ensures optional fields are handled consistently.
+const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
+    if (!items) return [];
+    // Create a new array of new objects to avoid mutation and ensure consistent property order.
+    return items.map(({ barcode, name, price, quantity, unit, memo }) => ({
+        barcode,
+        name,
+        price,
+        quantity,
+        unit,
+        memo: memo || '',
+    }));
+};
 
 const MemoModal: React.FC<{
     isOpen: boolean;
@@ -126,7 +140,6 @@ const OrderDetailModal: React.FC = () => {
     const [memo, setMemo] = useState('');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     const [isMemoSectionOpen, setIsMemoSectionOpen] = useState(false);
-    const [productForQuantityModal, setProductForQuantityModal] = useState<Product | null>(null);
     const productSearchBlurTimeout = useRef<number | null>(null);
     const productSearchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -177,11 +190,15 @@ const OrderDetailModal: React.FC = () => {
 
     const serverStateJSON = useMemo(() => {
         if (!order) return '';
-        return JSON.stringify({ items: order.items, memo: order.memo || '' });
+        // Normalize the original order items before stringifying for a reliable comparison.
+        const normalizedOriginalItems = normalizeItemsForComparison(order.items);
+        return JSON.stringify({ items: normalizedOriginalItems, memo: order.memo || '' });
     }, [order]);
     
     const hasChanges = useMemo(() => {
         if (isDraftLoading || !serverStateJSON) return false;
+        // The `editedItems` are already normalized by the `useOrderManager` hook.
+        // This comparison is now reliable.
         return JSON.stringify({ items: editedItems, memo }) !== serverStateJSON;
     }, [editedItems, memo, serverStateJSON, isDraftLoading]);
 
@@ -259,11 +276,14 @@ const OrderDetailModal: React.FC = () => {
     const handleScanSuccess = useCallback((barcode: string) => {
         const product = products.find(p => p.barcode === barcode);
         if (product) {
-            setProductForQuantityModal(product);
+            setAddItemTrigger('scan');
+            const existingItem = editedItems.find(item => item.barcode === product.barcode);
+            setExistingItemForModal(existingItem || null);
+            setProductForModal(product);
         } else {
             showAlert("등록되지 않은 바코드입니다.");
         }
-    }, [products, showAlert]);
+    }, [products, showAlert, editedItems]);
     
     const handleNextScan = () => {
         openScanner('modal', handleScanSuccess, true);
@@ -290,20 +310,17 @@ const OrderDetailModal: React.FC = () => {
             return;
         }
 
-        const itemsToSave = editedItems.map(item => {
-            const { barcode, name, price, quantity, unit, memo } = item;
-            const cleanItem: OrderItem = { barcode, name, price, quantity, unit, memo: memo || undefined };
-            return cleanItem;
-        });
-
-        const updatedOrder: Order = { 
-            ...order, 
-            items: itemsToSave,
+        // The `editedItems` from useOrderManager are already normalized and ready for saving.
+        // The previous re-mapping was redundant and introduced a bug by stripping empty memos.
+        const updatedOrder: Order = {
+            ...order,
+            items: editedItems, // Use the normalized items directly
             total: totalAmount,
             memo: memo.trim(),
-            date: new Date().toISOString(),
+            date: new Date().toISOString(), // Update the modification date
             createdAt: order.createdAt || order.date,
         };
+
         updateOrder(updatedOrder);
         setLastModifiedOrderId(order.id);
         deleteDraft(order.id);
@@ -442,57 +459,53 @@ const OrderDetailModal: React.FC = () => {
 
                 {!isCompleted && (
                     <div className="p-2 bg-white shadow-md flex-shrink-0 z-30">
-                        <div className="flex items-stretch space-x-2">
-                            <div className="flex-grow rounded-lg shadow-inner border border-gray-300 flex flex-col">
-                                <div className="p-1.5 bg-gray-50/50">
-                                    <div className="relative">
-                                        <input
-                                            ref={productSearchInputRef}
-                                            type="text"
-                                            value={productSearch}
-                                            onChange={(e) => setProductSearch(e.target.value)}
-                                            onFocus={() => {
-                                                if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current);
-                                                setShowDropdown(true);
-                                            }}
-                                            onBlur={() => {
-                                                productSearchBlurTimeout.current = window.setTimeout(() => setShowDropdown(false), 200);
-                                            }}
-                                            placeholder="품목명 또는 바코드 검색"
-                                            className="w-full p-2 h-9 text-base border-0 bg-transparent rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-20"
-                                            autoComplete="off"
-                                        />
-                                        <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
-                                            <ToggleSwitch
-                                                id="modal-box-unit"
-                                                label="박스"
-                                                checked={isBoxUnitDefault}
-                                                onChange={setIsBoxUnitDefault}
-                                                color="blue"
-                                                size="small"
-                                            />
-                                        </div>
-                                        <SearchDropdown<Product>
-                                            items={filteredProducts}
-                                            renderItem={(p) => (
-                                                <div
-                                                    onClick={() => handleProductSelect(p)}
-                                                    className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700"
-                                                >
-                                                    <div>{p.name} <span className="text-sm text-gray-500">({p.barcode})</span></div>
-                                                </div>
-                                            )}
-                                            show={showDropdown}
-                                        />
-                                    </div>
+                        <div className="flex gap-2 items-center">
+                            <div className="relative flex-grow">
+                                <input
+                                    ref={productSearchInputRef}
+                                    type="text"
+                                    value={productSearch}
+                                    onChange={(e) => setProductSearch(e.target.value)}
+                                    onFocus={() => {
+                                        if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current);
+                                        setShowDropdown(true);
+                                    }}
+                                    onBlur={() => {
+                                        productSearchBlurTimeout.current = window.setTimeout(() => setShowDropdown(false), 200);
+                                    }}
+                                    placeholder="품목명 또는 바코드 검색"
+                                    className="w-full p-2 h-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-24"
+                                    autoComplete="off"
+                                />
+                                <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
+                                    <ToggleSwitch
+                                        id="modal-box-unit"
+                                        label="박스"
+                                        checked={isBoxUnitDefault}
+                                        onChange={setIsBoxUnitDefault}
+                                        color="blue"
+                                    />
                                 </div>
+                                <SearchDropdown<Product>
+                                    items={filteredProducts}
+                                    renderItem={(p) => (
+                                        <div
+                                            onClick={() => handleProductSelect(p)}
+                                            className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700"
+                                        >
+                                            <div>{p.name} <span className="text-sm text-gray-500">({p.barcode})</span></div>
+                                        </div>
+                                    )}
+                                    show={showDropdown}
+                                />
                             </div>
                             <button
                                 onClick={() => openScanner('modal', handleScanSuccess, true)}
-                                className="w-16 bg-blue-600 text-white rounded-lg flex-shrink-0 hover:bg-blue-700 shadow-md transition-all flex flex-col items-center justify-center gap-1 font-semibold"
+                                className="flex-shrink-0 h-11 bg-blue-600 text-white rounded-lg p-2 flex items-center justify-center gap-2 font-bold hover:bg-blue-700 transition"
+                                aria-label="바코드 스캔"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M12 11v2"/></svg>
-                                <span className="text-sm">스캔</span>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+                                <span>스캔</span>
                             </button>
                         </div>
                     </div>
@@ -640,33 +653,6 @@ const OrderDetailModal: React.FC = () => {
                 onClose={() => setIsMemoModalOpen(false)}
                 onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
                 initialMemo={memo}
-            />
-            <QuantityInputModal
-                isOpen={!!productForQuantityModal}
-                itemName={productForQuantityModal?.name || ''}
-                initialQuantity={1}
-                onClose={() => setProductForQuantityModal(null)}
-                onConfirm={(newQuantity) => {
-                    if (productForQuantityModal) {
-                        const product = productForQuantityModal;
-                        const existingItem = editedItems.find(i => i.barcode === product.barcode);
-                        if (existingItem) {
-                            updateItem(product.barcode, {
-                                ...existingItem,
-                                quantity: existingItem.quantity + newQuantity,
-                            });
-                        } else {
-                            addItem(product, {
-                                quantity: newQuantity,
-                                isBoxUnit: isBoxUnitDefault,
-                            });
-                        }
-                        setHighlightedItem(product.barcode);
-                        setQuickAddedBarcode(product.barcode);
-                        setTimeout(() => setHighlightedItem(null), 1000);
-                    }
-                    setProductForQuantityModal(null);
-                }}
             />
         </div>
     );

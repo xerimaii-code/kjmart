@@ -41,14 +41,14 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
             isLongPress.current = true;
             
             // Initial rapid change
-            setQuantity(prev => Math.max(1, prev + (delta * 10)));
+            setQuantity(prev => prev + (delta * 10));
             if (navigator.vibrate) {
                 navigator.vibrate(20);
             }
 
             // Subsequent rapid changes
             rapidChangeIntervalRef.current = window.setInterval(() => {
-                setQuantity(prev => Math.max(1, prev + (delta * 10)));
+                setQuantity(prev => prev + (delta * 10));
                 if (navigator.vibrate) {
                     navigator.vibrate(20);
                 }
@@ -59,7 +59,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const handleShortClick = useCallback((delta: number) => {
         // The click event fires after pressEnd. We check the ref to see if a long press occurred.
         if (!isLongPress.current) {
-            setQuantity(prev => Math.max(1, prev + delta));
+            setQuantity(prev => prev + delta);
         }
     }, []);
 
@@ -131,7 +131,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                 <input 
                                     type="number" 
                                     value={quantity}
-                                    onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                                    onChange={e => setQuantity(parseInt(e.target.value) || 0)}
                                     className="w-24 h-16 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-3xl focus:outline-none"
                                     autoComplete="off"
                                 />
@@ -188,16 +188,21 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                 취소
                             </button>
                              <button
-                                onClick={handleAddAndClose}
+                                onClick={() => {
+                                    onClose();
+                                    if (onNextScan) {
+                                        onNextScan();
+                                    }
+                                }}
                                 className="text-white px-4 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-sm"
                             >
-                                추가 후 닫기
+                                취소후계속
                             </button>
                             <button
                                 onClick={handleAddAndNextScan}
                                 className="text-white px-4 py-3 rounded-lg font-bold bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition text-sm"
                             >
-                                추가 후 스캔
+                                추가후계속
                             </button>
                         </div>
                     ) : (

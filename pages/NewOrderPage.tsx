@@ -8,7 +8,6 @@ import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
-import QuantityInputModal from '../components/QuantityInputModal';
 
 const DRAFT_KEY = 'new-order-draft';
 
@@ -123,7 +122,7 @@ const NewOrderPage: React.FC = () => {
     const [existingItemForModal, setExistingItemForModal] = useState<OrderItem | null>(null);
     const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
     const [isSaving, setIsSaving] = useState(false);
-    const [productForQuantityModal, setProductForQuantityModal] = useState<Product | null>(null);
+    const [addItemTrigger, setAddItemTrigger] = useState<'scan' | 'search'>('search');
     
     const [isDraftLoading, setIsDraftLoading] = useState(true);
     const [showDraftLoadedToast, setShowDraftLoadedToast] = useState(false);
@@ -276,6 +275,7 @@ const NewOrderPage: React.FC = () => {
     };
 
     const handleAddProductFromSearch = (product: Product) => {
+        setAddItemTrigger('search');
         const existingItem = items.find(item => item.barcode === product.barcode);
         setProductForModal(product);
         setExistingItemForModal(existingItem || null);
@@ -287,11 +287,14 @@ const NewOrderPage: React.FC = () => {
     const handleScanSuccess = useCallback((barcode: string) => {
         const product = products.find(p => p.barcode === barcode);
         if (product) {
-            setProductForQuantityModal(product);
+            setAddItemTrigger('scan');
+            const existingItem = items.find(item => item.barcode === product.barcode);
+            setProductForModal(product);
+            setExistingItemForModal(existingItem || null);
         } else {
             showAlert("등록되지 않은 바코드입니다.");
         }
-    }, [products, showAlert]);
+    }, [products, showAlert, items]);
 
     const handleOpenScanner = () => {
         if (!isCustomerSelected) {
@@ -342,9 +345,9 @@ const NewOrderPage: React.FC = () => {
         <div className="h-full flex flex-col relative">
             <DraftLoadedToast show={showDraftLoadedToast} />
             <div className="p-2 bg-white shadow-md flex-shrink-0 z-20">
-                <div className="flex items-stretch gap-2">
-                    {/* Left side: Inputs */}
-                    <div className="flex-grow flex flex-col gap-2">
+                <div className="flex gap-2">
+                    {/* Left Column for inputs */}
+                    <div className="flex flex-col gap-2 flex-grow">
                         {/* Customer Search */}
                         <div className="relative">
                             <input
@@ -361,12 +364,19 @@ const NewOrderPage: React.FC = () => {
                                 }}
                                 placeholder="거래처 검색"
                                 readOnly={isCustomerSelected}
-                                className={`w-full p-2 h-11 border ${isCustomerSelected ? 'border-blue-400 bg-blue-50' : 'border-gray-300'} rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors pr-16`}
+                                className={`w-full p-2 h-11 border ${isCustomerSelected ? 'border-blue-400 bg-blue-50 pr-24' : 'border-gray-300'} rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors`}
                                 autoComplete="off"
                             />
                              {isCustomerSelected && (
-                                <button onClick={handleClearCustomer} className="absolute top-1/2 right-2 -translate-y-1/2 text-sm bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-md hover:bg-gray-300 transition-colors">
-                                    변경
+                                <button
+                                    onClick={handleClearCustomer}
+                                    className="absolute top-1/2 right-2 -translate-y-1/2 h-8 px-3 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300"
+                                    aria-label="거래처 변경"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.13-6.36M20 15a9 9 0 01-14.13 6.36" />
+                                    </svg>
+                                    <span>변경</span>
                                 </button>
                             )}
                             <SearchDropdown<Customer>
@@ -395,11 +405,11 @@ const NewOrderPage: React.FC = () => {
                                     productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
                                 }}
                                 placeholder={isCustomerSelected ? "품목명 또는 바코드 검색" : "거래처를 먼저 선택하세요"}
-                                className="w-full p-2 h-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-20"
+                                className="w-full p-2 h-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-24"
                                 disabled={!isCustomerSelected}
                                 autoComplete="off"
                             />
-                            <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center space-x-2">
+                            <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
                                 <ToggleSwitch
                                     id="new-order-box-unit"
                                     label="박스"
@@ -407,7 +417,6 @@ const NewOrderPage: React.FC = () => {
                                     onChange={setIsBoxUnitDefault}
                                     disabled={!isCustomerSelected}
                                     color="blue"
-                                    size="small"
                                 />
                             </div>
                             <SearchDropdown<Product>
@@ -422,15 +431,18 @@ const NewOrderPage: React.FC = () => {
                         </div>
                     </div>
                     
-                    {/* Right side: Scan button */}
-                    <button
-                        onClick={handleOpenScanner}
-                        className="w-20 bg-blue-600 text-white rounded-lg flex-shrink-0 hover:bg-blue-700 shadow-md transition-all flex flex-col items-center justify-center gap-2 font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed"
-                        disabled={!isCustomerSelected}
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M12 11v2"/></svg>
-                        <span className="text-sm">스캔</span>
-                    </button>
+                    {/* Right Column for Scan Button */}
+                    <div className="flex-shrink-0">
+                        <button
+                            onClick={handleOpenScanner}
+                            className="h-full w-24 bg-blue-600 text-white rounded-lg p-2 flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition disabled:bg-gray-400"
+                            disabled={!isCustomerSelected}
+                            aria-label="바코드 스캔"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+                            <span className="text-sm">스캔</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -524,7 +536,8 @@ const NewOrderPage: React.FC = () => {
                         handleAddItemFromModal(productForModal, details);
                     }
                 }}
-                trigger={'search'}
+                onNextScan={handleOpenScanner}
+                trigger={addItemTrigger}
                 initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
             />
             <EditItemModal
@@ -536,29 +549,6 @@ const NewOrderPage: React.FC = () => {
                         updateItem(editingItem.barcode, updatedDetails);
                     }
                     setEditingItem(null);
-                }}
-            />
-            <QuantityInputModal
-                isOpen={!!productForQuantityModal}
-                itemName={productForQuantityModal?.name || ''}
-                initialQuantity={1}
-                onClose={() => setProductForQuantityModal(null)}
-                onConfirm={(newQuantity) => {
-                    if (productForQuantityModal) {
-                        const existingItem = items.find(i => i.barcode === productForQuantityModal!.barcode);
-                        if (existingItem) {
-                            updateItem(productForQuantityModal!.barcode, {
-                                ...existingItem,
-                                quantity: existingItem.quantity + newQuantity,
-                            });
-                        } else {
-                            addItem(productForQuantityModal!, {
-                                quantity: newQuantity,
-                                isBoxUnit: isBoxUnitDefault,
-                            });
-                        }
-                    }
-                    setProductForQuantityModal(null);
                 }}
             />
         </div>

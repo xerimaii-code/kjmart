@@ -32,7 +32,7 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
 
     const handleSave = () => {
         const newQuantity = Number(quantity);
-        if (newQuantity > 0) {
+        if (Number.isFinite(newQuantity)) {
             onSave({ quantity: newQuantity, unit, memo: memo.trim() });
         }
     };
@@ -62,11 +62,10 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
                                     id="edit-quantity"
                                     type="number" 
                                     value={quantity}
-                                    onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                                    onChange={e => setQuantity(parseInt(e.target.value) || 0)}
                                     onKeyDown={handleKeyDown}
                                     className="w-full h-16 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-3xl focus:outline-none"
                                     autoComplete="off"
-                                    min="1"
                                     pattern="\d*"
                                 />
                             </div>
