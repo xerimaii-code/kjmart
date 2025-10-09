@@ -8,6 +8,7 @@ import AddItemModal from './AddItemModal';
 import EditItemModal from './EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
+import QuantityInputModal from './QuantityInputModal';
 
 const MemoModal: React.FC<{
     isOpen: boolean;
@@ -125,6 +126,7 @@ const OrderDetailModal: React.FC = () => {
     const [memo, setMemo] = useState('');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     const [isMemoSectionOpen, setIsMemoSectionOpen] = useState(false);
+    const [productForQuantityModal, setProductForQuantityModal] = useState<Product | null>(null);
     const productSearchBlurTimeout = useRef<number | null>(null);
     const productSearchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -255,17 +257,13 @@ const OrderDetailModal: React.FC = () => {
     }, [editedItems]);
 
     const handleScanSuccess = useCallback((barcode: string) => {
-        closeScanner();
         const product = products.find(p => p.barcode === barcode);
         if (product) {
-            setAddItemTrigger('scan');
-            const existingItem = editedItems.find(item => item.barcode === product.barcode);
-            setExistingItemForModal(existingItem || null);
-            setProductForModal(product);
+            setProductForQuantityModal(product);
         } else {
             showAlert("등록되지 않은 바코드입니다.");
         }
-    }, [products, showAlert, editedItems, closeScanner]);
+    }, [products, showAlert]);
     
     const handleNextScan = () => {
         openScanner('modal', handleScanSuccess, true);
@@ -642,6 +640,33 @@ const OrderDetailModal: React.FC = () => {
                 onClose={() => setIsMemoModalOpen(false)}
                 onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
                 initialMemo={memo}
+            />
+            <QuantityInputModal
+                isOpen={!!productForQuantityModal}
+                itemName={productForQuantityModal?.name || ''}
+                initialQuantity={1}
+                onClose={() => setProductForQuantityModal(null)}
+                onConfirm={(newQuantity) => {
+                    if (productForQuantityModal) {
+                        const product = productForQuantityModal;
+                        const existingItem = editedItems.find(i => i.barcode === product.barcode);
+                        if (existingItem) {
+                            updateItem(product.barcode, {
+                                ...existingItem,
+                                quantity: existingItem.quantity + newQuantity,
+                            });
+                        } else {
+                            addItem(product, {
+                                quantity: newQuantity,
+                                isBoxUnit: isBoxUnitDefault,
+                            });
+                        }
+                        setHighlightedItem(product.barcode);
+                        setQuickAddedBarcode(product.barcode);
+                        setTimeout(() => setHighlightedItem(null), 1000);
+                    }
+                    setProductForQuantityModal(null);
+                }}
             />
         </div>
     );

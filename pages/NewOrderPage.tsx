@@ -8,6 +8,7 @@ import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
+import QuantityInputModal from '../components/QuantityInputModal';
 
 const DRAFT_KEY = 'new-order-draft';
 
@@ -122,6 +123,7 @@ const NewOrderPage: React.FC = () => {
     const [existingItemForModal, setExistingItemForModal] = useState<OrderItem | null>(null);
     const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+    const [productForQuantityModal, setProductForQuantityModal] = useState<Product | null>(null);
     
     const [isDraftLoading, setIsDraftLoading] = useState(true);
     const [showDraftLoadedToast, setShowDraftLoadedToast] = useState(false);
@@ -285,13 +287,11 @@ const NewOrderPage: React.FC = () => {
     const handleScanSuccess = useCallback((barcode: string) => {
         const product = products.find(p => p.barcode === barcode);
         if (product) {
-            const existingItem = items.find(item => item.barcode === product.barcode);
-            setProductForModal(product);
-            setExistingItemForModal(existingItem || null);
+            setProductForQuantityModal(product);
         } else {
             showAlert("등록되지 않은 바코드입니다.");
         }
-    }, [products, items, showAlert]);
+    }, [products, showAlert]);
 
     const handleOpenScanner = () => {
         if (!isCustomerSelected) {
@@ -536,6 +536,29 @@ const NewOrderPage: React.FC = () => {
                         updateItem(editingItem.barcode, updatedDetails);
                     }
                     setEditingItem(null);
+                }}
+            />
+            <QuantityInputModal
+                isOpen={!!productForQuantityModal}
+                itemName={productForQuantityModal?.name || ''}
+                initialQuantity={1}
+                onClose={() => setProductForQuantityModal(null)}
+                onConfirm={(newQuantity) => {
+                    if (productForQuantityModal) {
+                        const existingItem = items.find(i => i.barcode === productForQuantityModal!.barcode);
+                        if (existingItem) {
+                            updateItem(productForQuantityModal!.barcode, {
+                                ...existingItem,
+                                quantity: existingItem.quantity + newQuantity,
+                            });
+                        } else {
+                            addItem(productForQuantityModal!, {
+                                quantity: newQuantity,
+                                isBoxUnit: isBoxUnitDefault,
+                            });
+                        }
+                    }
+                    setProductForQuantityModal(null);
                 }}
             />
         </div>
