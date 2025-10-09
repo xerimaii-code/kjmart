@@ -489,7 +489,8 @@ const NewOrderPage: React.FC = () => {
                     </button>
                     <button 
                         onClick={() => setIsMemoModalOpen(true)} 
-                        className="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0"
+                        disabled={items.length === 0}
+                        className="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                     >
                         <DocumentTextIcon className="w-5 h-5"/>
                         <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>

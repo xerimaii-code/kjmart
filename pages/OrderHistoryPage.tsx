@@ -239,7 +239,6 @@ const OrderHistoryPage: React.FC = () => {
                                             if (navigator.share) {
                                                 try {
                                                     await navigator.share({
-                                                        title: `발주서: ${order.customer.name}`,
                                                         text: message,
                                                     });
                                                     success = true;
