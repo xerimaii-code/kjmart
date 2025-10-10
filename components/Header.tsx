@@ -5,6 +5,20 @@ import { ExitFullscreenIcon } from './Icons';
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [currentDateTime, setCurrentDateTime] = useState(new Date());
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
     useEffect(() => {
         const timerId = setInterval(() => {
@@ -53,7 +67,14 @@ const Header: React.FC = () => {
 
     return (
         <header id="app-header" className="bg-gradient-to-b from-white to-gray-100 px-4 flex justify-between items-center h-12 flex-shrink-0 shadow-sm border-b border-gray-200">
-            <h1 className="text-lg font-bold text-gray-800">경진마트 발주관리</h1>
+            <div className="flex items-center gap-2.5">
+                <h1 className="text-lg font-bold text-gray-800">경진마트 발주관리</h1>
+                <span 
+                    className={`w-3 h-3 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}
+                    title={isOnline ? '온라인' : '오프라인'}
+                    aria-label={isOnline ? '온라인 상태' : '오프라인 상태'}
+                />
+            </div>
             
             <div className="flex items-center space-x-3">
                 <div className="text-right">

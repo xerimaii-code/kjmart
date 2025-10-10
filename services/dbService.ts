@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, get, set, remove } from 'firebase/database';
+import { getDatabase, ref, onValue, get, set, remove, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
 import { firebaseConfig } from '../firebaseConfig';
+import { Order } from '../types';
 
 let app;
 let db;
@@ -55,6 +56,41 @@ export const listenToStore = <T>(storeName: string, callback: (data: T[]) => voi
         console.error(`Error listening to ${storeName}:`, error);
         callback([]);
     });
+};
+
+export interface OrderChangeEvent {
+    type: 'added' | 'changed' | 'removed';
+    order: Order;
+}
+
+/**
+ * Listens for granular changes (add, change, remove) to the 'orders' collection.
+ * This is more efficient than listening for 'value' on the entire collection.
+ * @param callback A function to be called with the change event.
+ * @returns An unsubscribe function to detach all listeners.
+ */
+export const listenToOrderChanges = (
+    callback: (event: OrderChangeEvent) => void
+): (() => void) => {
+    if (!dbInitialized) return () => {};
+    const ordersRef = ref(db, 'orders');
+
+    const unsubscribers = [
+        onChildAdded(ordersRef, (snapshot) => {
+            const order = snapshot.val() as Order;
+            if (order) callback({ type: 'added', order });
+        }),
+        onChildChanged(ordersRef, (snapshot) => {
+            const order = snapshot.val() as Order;
+            if (order) callback({ type: 'changed', order });
+        }),
+        onChildRemoved(ordersRef, (snapshot) => {
+            const order = snapshot.val() as Order;
+            if (order) callback({ type: 'removed', order });
+        })
+    ];
+    
+    return () => unsubscribers.forEach(unsub => unsub());
 };
 
 export const listenToSetting = <T>(key: string, callback: (data: T | null) => void): (() => void) => {

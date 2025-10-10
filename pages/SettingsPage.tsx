@@ -2,8 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
+import * as googleDriveService from '../services/googleDriveService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon, TrashIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon, TrashIcon, GoogleIcon } from '../components/Icons';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+import { SyncFile } from '../types';
 
 const LoadingSpinner: React.FC = () => (
     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
@@ -13,6 +16,141 @@ const LoadingSpinner: React.FC = () => (
         </svg>
     </div>
 );
+
+const GoogleDriveSyncSection: React.FC = () => {
+    const { setProducts } = useDataActions();
+    const { showAlert } = useUIActions();
+    const [isApiReady, setIsApiReady] = useState(false);
+    const [authToken, setAuthToken] = useLocalStorage<any | null>('google-auth-token', null);
+    const [syncFile, setSyncFile] = useLocalStorage<SyncFile | null>('google-drive-sync-file', null);
+    const [lastSync, setLastSync] = useLocalStorage('google-drive-last-sync', '');
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const isSignedIn = !!authToken;
+
+    useEffect(() => {
+        googleDriveService.initClient()
+            .then(() => setIsApiReady(true))
+            .catch(err => {
+                console.error("Google API init failed:", err);
+                setError("Google API를 로드하지 못했습니다. API Key/Client ID 설정을 확인하세요.");
+            });
+    }, []);
+
+    const handleSignIn = async () => {
+        try {
+            const token = await googleDriveService.signIn();
+            setAuthToken(token);
+        } catch (error) {
+            console.error("Google Sign-In failed:", error);
+            showAlert("Google 로그인에 실패했습니다.");
+        }
+    };
+
+    const handleSignOut = () => {
+        googleDriveService.signOut();
+        setAuthToken(null);
+        setSyncFile(null);
+    };
+
+    const handleSelectFile = async () => {
+        try {
+            await googleDriveService.showPicker((file) => {
+                setSyncFile({ id: file.id, name: file.name });
+            });
+        } catch (error) {
+            console.error("Google Picker failed:", error);
+            showAlert("파일 선택기를 여는 데 실패했습니다.");
+        }
+    };
+
+    const handleManualSync = async () => {
+        if (!syncFile) return;
+        setIsSyncing(true);
+        setError(null);
+        try {
+            const sheetData = await googleDriveService.getSheetData(syncFile.id);
+            const { valid, invalidCount } = processProductData(sheetData);
+
+            if (valid.length > 0) {
+                await setProducts(valid);
+                const syncTime = new Date().toISOString();
+                setLastSync(syncTime);
+                showAlert(`동기화 완료!\n${valid.length}개의 상품 데이터가 업데이트되었습니다.`);
+            } else {
+                 showAlert(`동기화할 유효한 상품 데이터가 없습니다. 실패: ${invalidCount}건`);
+            }
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다.";
+            setError(errorMessage);
+            showAlert(`동기화 실패: ${errorMessage}`);
+            if (errorMessage.includes("Authorization expired")) {
+                handleSignOut();
+            }
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    if (error) {
+        return <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>
+    }
+
+    if (!isApiReady) {
+        return (
+            <div className="flex items-center justify-center gap-2 text-slate-500">
+                <SpinnerIcon className="w-5 h-5" />
+                <span>Google API 로딩 중...</span>
+            </div>
+        )
+    }
+
+    if (!isSignedIn) {
+        return (
+            <div>
+                <p className="text-sm text-slate-500 mt-1 mb-3">Google Drive 시트에서 상품 자료를 자동으로 동기화합니다. (Wi-Fi 연결 시)</p>
+                <button onClick={handleSignIn} className="w-full mt-2 flex items-center justify-center gap-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 p-3 rounded-md font-bold transition shadow-sm">
+                    <GoogleIcon className="w-5 h-5"/>
+                    <span>Google 계정으로 로그인</span>
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-slate-600">Google 계정 연동됨</span>
+                <button onClick={handleSignOut} className="text-sm font-semibold text-red-600 hover:text-red-800">로그아웃</button>
+            </div>
+
+            {!syncFile ? (
+                 <button onClick={handleSelectFile} className="w-full flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
+                    <UploadIcon className="w-5 h-5"/>
+                    <span>동기화할 상품 파일 선택</span>
+                </button>
+            ) : (
+                <div className="space-y-4">
+                    <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <p className="text-xs text-slate-500">동기화 파일</p>
+                                <p className="font-semibold text-slate-800 truncate" title={syncFile.name}>{syncFile.name}</p>
+                            </div>
+                            <button onClick={handleSelectFile} className="text-sm font-semibold text-sky-600 hover:text-sky-800 flex-shrink-0 ml-2">변경</button>
+                        </div>
+                         {lastSync && <p className="text-xs text-slate-500 mt-2">마지막 동기화: {new Date(lastSync).toLocaleString()}</p>}
+                    </div>
+                    <button onClick={handleManualSync} disabled={isSyncing} className="w-full flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white p-3 rounded-md font-bold transition shadow-sm disabled:bg-slate-400">
+                        {isSyncing ? <SpinnerIcon className="w-5 h-5" /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.13-6.36M20 15a9 9 0 01-14.13 6.36" /></svg>}
+                        <span>지금 동기화</span>
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 
 interface SettingsPageProps {
     isActive: boolean;
@@ -254,7 +392,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 onChange={handleRestoreFileSelected}
             />
             <div className="max-w-3xl mx-auto w-full p-4 md:p-6 space-y-8">
-                
+
+                {/* --- Google Drive 동기화 --- */}
+                <div>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">Google Drive 동기화</h2>
+                    <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4">
+                        <GoogleDriveSyncSection />
+                    </div>
+                </div>
+
                 {/* --- 초기 데이터 설정 (Initial Data Setup) --- */}
                 <div>
                     <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">초기 데이터 설정</h2>

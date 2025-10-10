@@ -48,3 +48,8 @@ export interface EditedOrderDraft {
     items: OrderItem[];
     memo: string;
 }
+
+export interface SyncFile {
+    id: string;
+    name: string;
+}

@@ -24,9 +24,12 @@ const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
     }));
 };
 
-const EditedItemRow = memo(({ item, isCompleted, isNew, onEdit, onRemove }: { item: OrderItem; isCompleted: boolean, isNew: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }) => {
+// FIX: Wrap EditedItemRow in React.forwardRef to allow it to receive a ref.
+// This is necessary to scroll to the item when it's added.
+const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; isCompleted: boolean, isNew: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, isCompleted, isNew, onEdit, onRemove }, ref) => {
     return (
         <div
+            ref={ref}
             className={`flex items-center p-3 space-x-2 transition-all duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
             onClick={() => !isCompleted && onEdit(item)}
         >
@@ -54,7 +57,7 @@ const EditedItemRow = memo(({ item, isCompleted, isNew, onEdit, onRemove }: { it
             </div>
         </div>
     );
-});
+}));
 
 
 const OrderDetailModal: React.FC = () => {
