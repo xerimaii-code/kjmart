@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useData, useUI } from '../context/AppContext';
+import React, { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
+import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { Order } from '../types';
 import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon } from '../components/Icons';
-import { exportToSMS, exportToXLS } from '../services/dataService';
+import { exportToSMS } from '../services/dataService';
 import { getAllDraftKeys } from '../services/draftDbService';
 
 interface ActionMenuItem {
@@ -17,14 +17,102 @@ interface OrderHistoryPageProps {
     isActive: boolean;
 }
 
+const getStatusIcon = (order: Order, hasDraft: boolean) => {
+    const details = order.completionDetails;
+    const timestamp = details?.timestamp || order.completedAt;
+    const localeTimestamp = timestamp ? new Date(timestamp).toLocaleString() : '';
+
+    if (details?.type === 'sms') {
+        return <SmsIcon className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" title={`SMS 완료: ${localeTimestamp}`} />;
+    }
+    if (details?.type === 'xls') {
+        return <XlsIcon className="w-5 h-5 text-blue-500 mr-2 flex-shrink-0" title={`XLS 완료: ${localeTimestamp}`} />;
+    }
+    if (order.completedAt) {
+         return <ArchiveBoxIcon className="w-5 h-5 text-gray-500 mr-2 flex-shrink-0" title={`완료: ${localeTimestamp}`} />;
+    }
+    if (hasDraft) {
+        return <PencilSquareIcon className="w-5 h-5 text-orange-500 mr-2 flex-shrink-0" title="임시 저장된 수정사항이 있습니다." />;
+    }
+    return null;
+};
+
+const OrderCard = memo(({
+    order,
+    isHighlighted,
+    isMenuOpen,
+    hasDraft,
+    onCardClick,
+    onMenuToggle,
+    actionMenuItems
+}: {
+    order: Order;
+    isHighlighted: boolean;
+    isMenuOpen: boolean;
+    hasDraft: boolean;
+    onCardClick: () => void;
+    onMenuToggle: (e: React.MouseEvent) => void;
+    actionMenuItems: ActionMenuItem[];
+}) => {
+    const isCompleted = !!order.completedAt || !!order.completionDetails;
+
+    return (
+        <div className={`relative ${isMenuOpen ? 'z-10' : ''}`}>
+            <div
+                id={`order-item-${order.id}`}
+                className={`flex items-center bg-white rounded-xl transition-colors duration-500 ease-in-out ${isHighlighted ? 'bg-yellow-100 ring-2 ring-yellow-300' : 'hover:bg-slate-100'}`}
+            >
+                <div
+                    onClick={onCardClick}
+                    className={`flex-grow p-3 cursor-pointer rounded-l-xl ${isCompleted ? 'opacity-60' : ''}`}
+                    role="button"
+                >
+                    <div className="flex justify-between items-center">
+                        <p className="font-bold text-gray-800 text-lg flex items-center" title={order.customer.name}>
+                            {getStatusIcon(order, hasDraft)}
+                            <span className="truncate">{order.customer.name}</span>
+                            {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
+                        </p>
+                        <p className="font-bold text-gray-700 text-lg tabular-nums">
+                            {order.total.toLocaleString()} 원
+                        </p>
+                    </div>
+                </div>
+                <div className="flex-shrink-0 px-1">
+                    <button onClick={onMenuToggle} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors">
+                        <MoreVerticalIcon className="w-5 h-5" />
+                    </button>
+                </div>
+            </div>
+
+            {isMenuOpen && (
+                <div className="absolute top-12 right-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10 py-1" onClick={(e) => e.stopPropagation()}>
+                    {actionMenuItems.map(item => (
+                        <button
+                            key={item.id}
+                            onClick={item.onClick}
+                            className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 ${item.className || 'text-gray-700'}`}
+                        >
+                            {item.icon}
+                            <span>{item.label}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+});
+
+
 const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
-    const { orders, deleteOrder, updateOrder } = useData();
-    const { openDetailModal, showAlert, lastModifiedOrderId, setLastModifiedOrderId, openDeliveryModal, closeDeliveryModal, isDeliveryModalOpen } = useUI();
+    const { orders } = useDataState();
+    const { deleteOrder, updateOrder } = useDataActions();
+    const { lastModifiedOrderId, isDeliveryModalOpen } = useUIState();
+    const { openDetailModal, showAlert, setLastModifiedOrderId, openDeliveryModal, closeDeliveryModal } = useUIActions();
+
     const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
     const [draftOrderIds, setDraftOrderIds] = useState<Set<number>>(new Set());
 
-
-    // This function correctly gets the 'YYYY-MM-DD' string for the user's LOCAL timezone.
     const getLocalDateString = (date: Date): string => {
         const offset = date.getTimezoneOffset();
         const adjustedDate = new Date(date.getTime() - (offset * 60 * 1000));
@@ -36,7 +124,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         const endDate = getLocalDateString(today);
         
         const weekAgo = new Date();
-        weekAgo.setDate(today.getDate() - 6); // -6 to make it a 7-day period including today
+        weekAgo.setDate(today.getDate() - 6);
         const startDate = getLocalDateString(weekAgo);
 
         return { startDate, endDate };
@@ -60,9 +148,8 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             }
         };
         fetchDrafts();
-    }, [orders, openDetailModal]);
+    }, [orders, isActive]);
     
-    // This effect handles cleaning up state when the page becomes inactive.
     useEffect(() => {
         if (!isActive) {
             setOpenMenuId(null);
@@ -76,7 +163,6 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         if (lastModifiedOrderId) {
             setHighlightedOrderId(lastModifiedOrderId);
 
-            // Scroll into view after a short delay to ensure the element is rendered.
             const scrollTimer = setTimeout(() => {
                 const element = document.getElementById(`order-item-${lastModifiedOrderId}`);
                 if (element) {
@@ -84,11 +170,10 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                 }
             }, 100);
 
-            // Clear the highlight after the animation and effect have completed.
             const highlightTimer = setTimeout(() => {
                 setHighlightedOrderId(null);
-                setLastModifiedOrderId(null); // Reset the global state
-            }, 3000); // Highlight duration: 3 seconds
+                setLastModifiedOrderId(null);
+            }, 3000);
 
             return () => {
                 clearTimeout(scrollTimer);
@@ -97,15 +182,12 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         }
     }, [lastModifiedOrderId, setLastModifiedOrderId]);
 
-    // This effect ensures that whenever the user navigates to this page,
-    // the date filters are reliably reset to the last 7 days.
     useEffect(() => {
         const { startDate, endDate } = getInitialDateRange();
         setStartDate(startDate);
         setEndDate(endDate);
     }, []);
 
-    // This effect will handle closing the menu when interacting outside of it.
     useEffect(() => {
         const scrollableEl = scrollableContainerRef.current;
         const filterEl = filterContainerRef.current;
@@ -131,24 +213,19 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         };
     }, []);
 
-    const { filteredOrders } = useMemo(() => {
-        if (!startDate || !endDate) return { filteredOrders: [] };
+    const filteredOrders = useMemo(() => {
+        if (!startDate || !endDate) return [];
 
-        // Create date objects that represent the start and end of the day in the user's LOCAL timezone.
         const startOfDay = new Date(startDate);
         startOfDay.setHours(0, 0, 0, 0);
 
         const endOfDay = new Date(endDate);
         endOfDay.setHours(23, 59, 59, 999);
         
-        const filtered = orders.filter(order => {
-            // order.date is a UTC ISO string, e.g., "2023-10-27T05:12:34.567Z"
-            const orderDate = new Date(order.date); 
-            // The comparison will correctly place the UTC time within the local time range.
+        return orders.filter(order => {
+            const orderDate = new Date(order.date);
             return orderDate.getTime() >= startOfDay.getTime() && orderDate.getTime() <= endOfDay.getTime();
         }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-        return { filteredOrders: filtered };
     }, [orders, startDate, endDate]);
 
     const groupedByDate = useMemo(() => {
@@ -164,7 +241,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     
     const sortedDates = Object.keys(groupedByDate);
     
-    const handleDelete = (order: Order) => {
+    const handleDelete = useCallback((order: Order) => {
         showAlert(
             `'${order.customer.name}'의 발주 내역을 삭제하시겠습니까?`,
             () => {
@@ -175,36 +252,70 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             '삭제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
-    };
-    
-    const handleBackgroundClick = () => {
+    }, [showAlert, deleteOrder]);
+
+    const handleSmsExport = useCallback(async (order: Order) => {
+        const message = exportToSMS(order);
+        let success = false;
+
+        if (navigator.share) {
+            try {
+                await navigator.share({ text: message });
+                success = true;
+            } catch (error) {
+                if ((error as DOMException).name !== 'AbortError') {
+                    console.error('Share error:', error);
+                    showAlert('공유 기능을 사용할 수 없습니다.');
+                }
+                success = false;
+            }
+        } else {
+            showAlert('문자 앱으로 연결합니다. 발주 내용이 긴 경우 일부가 잘릴 수 있습니다.');
+            window.location.href = `sms:?body=${encodeURIComponent(message)}`;
+            success = true;
+        }
+
+        if (success) {
+            const timestamp = new Date().toISOString();
+            updateOrder({
+                ...order,
+                completedAt: timestamp,
+                completionDetails: { type: 'sms', timestamp }
+            });
+        }
+        setOpenMenuId(null);
+    }, [showAlert, updateOrder]);
+
+    const handleXlsExport = useCallback((order: Order) => {
+        openDeliveryModal(order);
+        setOpenMenuId(null);
+    }, [openDeliveryModal]);
+
+    const handleCancelCompletion = useCallback((order: Order) => {
+        showAlert(
+            '이 발주의 \'완료\' 상태를 취소하시겠습니까?',
+            () => {
+                updateOrder({ ...order, completedAt: null, completionDetails: null });
+                setOpenMenuId(null);
+            },
+            '실행 취소'
+        );
+    }, [showAlert, updateOrder]);
+
+    const handleBackgroundClick = useCallback(() => {
         if (openMenuId !== null) {
             setOpenMenuId(null);
         }
-    };
+    }, [openMenuId]);
     
-    const handleMenuToggle = (e: React.MouseEvent, orderId: number) => {
+    const handleMenuToggle = useCallback((e: React.MouseEvent, orderId: number) => {
         e.stopPropagation();
         setOpenMenuId(prevId => (prevId === orderId ? null : orderId));
-    };
-
-    const getStatusIcon = (order: Order) => {
-        const details = order.completionDetails;
-        const timestamp = details?.timestamp || order.completedAt;
-        const localeTimestamp = timestamp ? new Date(timestamp).toLocaleString() : '';
-
-        if (details?.type === 'sms') {
-            return <SmsIcon className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" title={`SMS 완료: ${localeTimestamp}`} />;
-        }
-        if (details?.type === 'xls') {
-            return <XlsIcon className="w-5 h-5 text-blue-500 mr-2 flex-shrink-0" title={`XLS 완료: ${localeTimestamp}`} />;
-        }
-        // Fallback for old data without completionDetails
-        if (order.completedAt) {
-             return <ArchiveBoxIcon className="w-5 h-5 text-gray-500 mr-2 flex-shrink-0" title={`완료: ${localeTimestamp}`} />;
-        }
-        return null;
-    };
+    }, []);
+    
+    const handleCardClick = useCallback((orderId: number) => {
+        openDetailModal(orderId)
+    }, [openDetailModal]);
 
     return (
         <div className="h-full flex flex-col w-full max-w-3xl mx-auto">
@@ -243,71 +354,19 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                 </div>
                                 <div className="p-2 space-y-px">
                                     {dailyOrders.map(order => {
-                                        const handleSmsExport = async (order: Order) => {
-                                            const message = exportToSMS(order);
-                                            let success = false;
-                                
-                                            if (navigator.share) {
-                                                try {
-                                                    await navigator.share({
-                                                        text: message,
-                                                    });
-                                                    success = true;
-                                                } catch (error) {
-                                                    if ((error as DOMException).name !== 'AbortError') {
-                                                        console.error('Share error:', error);
-                                                        showAlert('공유 기능을 사용할 수 없습니다.');
-                                                    }
-                                                    success = false; // User cancelled or error
-                                                }
-                                            } else {
-                                                showAlert('문자 앱으로 연결합니다. 발주 내용이 긴 경우 일부가 잘릴 수 있습니다.');
-                                                const smsLink = `sms:?body=${encodeURIComponent(message)}`;
-                                                window.location.href = smsLink;
-                                                success = true; // Assume success for sms link
-                                            }
-                                
-                                            if (success) {
-                                                const timestamp = new Date().toISOString();
-                                                updateOrder({
-                                                    ...order,
-                                                    completedAt: timestamp,
-                                                    completionDetails: { type: 'sms', timestamp }
-                                                });
-                                            }
-                                            setOpenMenuId(null);
-                                        };
-
-                                        const handleXlsExport = (order: Order) => {
-                                            openDeliveryModal(order);
-                                            setOpenMenuId(null);
-                                        };
-
-                                        const handleCancelCompletion = (order: Order) => {
-                                            showAlert(
-                                                '이 발주의 \'완료\' 상태를 취소하시겠습니까?',
-                                                () => {
-                                                    updateOrder({ ...order, completedAt: null, completionDetails: null });
-                                                    setOpenMenuId(null);
-                                                },
-                                                '실행 취소'
-                                            );
-                                        };
-                                        
                                         const isCompleted = !!order.completedAt || !!order.completionDetails;
-                                        const hasDraft = draftOrderIds.has(order.id);
                                         
                                         const actionMenuItems: ActionMenuItem[] = isCompleted ? [
                                             {
                                                 id: 'cancel', label: '완료 취소',
                                                 icon: <UndoIcon className="w-5 h-5 text-gray-500" />,
-                                                onClick: () => handleCancelCompletion(order),
+                                                onClick: () => { handleCancelCompletion(order); setOpenMenuId(null); },
                                             },
                                             {
                                                 id: 'delete', label: '삭제',
                                                 icon: <TrashIcon className="w-5 h-5 text-red-500" />,
                                                 className: 'text-red-500 font-medium',
-                                                onClick: () => handleDelete(order),
+                                                onClick: () => { handleDelete(order); setOpenMenuId(null); },
                                             }
                                         ] : [
                                             {
@@ -324,58 +383,21 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                                 id: 'delete', label: '삭제',
                                                 icon: <TrashIcon className="w-5 h-5 text-red-500" />,
                                                 className: 'text-red-500 font-medium',
-                                                onClick: () => handleDelete(order),
+                                                onClick: () => { handleDelete(order); setOpenMenuId(null); },
                                             }
                                         ];
 
                                         return (
-                                            <div key={order.id} className={`relative ${openMenuId === order.id ? 'z-10' : ''}`}>
-                                                <div 
-                                                  id={`order-item-${order.id}`}
-                                                  className={`flex items-center bg-white rounded-xl transition-colors duration-500 ease-in-out ${highlightedOrderId === order.id ? 'bg-yellow-100 ring-2 ring-yellow-300' : 'hover:bg-slate-100'}`}
-                                                >
-                                                    <div
-                                                        onClick={() => openDetailModal(order.id)}
-                                                        className={`flex-grow p-3 cursor-pointer rounded-l-xl ${isCompleted ? 'opacity-60' : ''}`}
-                                                        role="button"
-                                                    >
-                                                        <div className="flex justify-between items-center">
-                                                            <p className="font-bold text-gray-800 text-lg flex items-center" title={order.customer.name}>
-                                                                {getStatusIcon(order)}
-                                                                {hasDraft && <PencilSquareIcon className="w-5 h-5 text-orange-500 mr-2 flex-shrink-0" title="임시 저장된 수정사항이 있습니다." />}
-                                                                <span className="truncate">{order.customer.name}</span>
-                                                                {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
-                                                            </p>
-                                                            <p className="font-bold text-gray-700 text-lg tabular-nums">
-                                                                {order.total.toLocaleString()} 원
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex-shrink-0 px-1">
-                                                        <button onClick={(e) => handleMenuToggle(e, order.id)} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors">
-                                                            <MoreVerticalIcon className="w-5 h-5" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-
-                                                {openMenuId === order.id && (
-                                                    <div className="absolute top-12 right-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10 py-1" onClick={(e) => e.stopPropagation()}>
-                                                        {actionMenuItems.map(item => (
-                                                            <button
-                                                                key={item.id}
-                                                                onClick={() => {
-                                                                    item.onClick();
-                                                                    setOpenMenuId(null);
-                                                                }}
-                                                                className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 ${item.className || 'text-gray-700'}`}
-                                                            >
-                                                                {item.icon}
-                                                                <span>{item.label}</span>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
+                                            <OrderCard
+                                                key={order.id}
+                                                order={order}
+                                                isHighlighted={highlightedOrderId === order.id}
+                                                isMenuOpen={openMenuId === order.id}
+                                                hasDraft={draftOrderIds.has(order.id)}
+                                                onCardClick={() => handleCardClick(order.id)}
+                                                onMenuToggle={(e) => handleMenuToggle(e, order.id)}
+                                                actionMenuItems={actionMenuItems}
+                                            />
                                         )
                                     })}
                                 </div>

@@ -1,13 +1,14 @@
 import React, { useState, lazy, Suspense, useRef, useEffect } from 'react';
-import { AppProvider, useData, useUI } from './context/AppContext';
+import { AppProvider, useDataState, useUIActions, useUIState } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { Order, Page } from './types';
+import { Page } from './types';
 import ScannerModal from './components/ScannerModal';
 import Header from './components/Header';
 import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS } from './services/dataService';
+import { useDataActions } from './context/AppContext';
 
 // Lazy load pages and heavy modals
 const NewOrderPage = lazy(() => import('./pages/NewOrderPage'));
@@ -114,13 +115,15 @@ const AppContent: React.FC = () => {
         isDetailModalOpen, 
         isScannerOpen,
         onScanSuccess,
-        closeScanner,
-        hideAlert,
         isDeliveryModalOpen,
         orderToExport,
+     } = useUIState();
+    const { 
+        closeScanner,
+        hideAlert,
         closeDeliveryModal,
-     } = useUI();
-    const { updateOrder } = useData();
+     } = useUIActions();
+    const { updateOrder } = useDataActions();
 
     const handleExportConfirm = (deliveryType: '일반배송' | '택배배송') => {
         if (orderToExport) {

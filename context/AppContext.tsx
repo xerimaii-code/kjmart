@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext } from 'react';
+import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo } from 'react';
 import { Customer, Product, Order, OrderItem, ScannerContext } from '../types';
 import * as db from '../services/dbService';
 import AlertModal from '../components/AlertModal';
@@ -61,13 +61,20 @@ interface UIActions {
 }
 
 // --- CONTEXT CREATION ---
-export const DataContext = createContext<DataState & DataActions>({} as DataState & DataActions);
-export const UIContext = createContext<UIState & UIActions>({} as UIState & UIActions);
+// For performance optimization, contexts are split into State and Actions.
+// Components that only need actions won't re-render when state changes.
+const DataStateContext = createContext<DataState>({} as DataState);
+const DataActionsContext = createContext<DataActions>({} as DataActions);
+const UIStateContext = createContext<UIState>({} as UIState);
+const UIActionsContext = createContext<UIActions>({} as UIActions);
 
 
 // --- HOOKS for easier context consumption ---
-export const useData = () => useContext(DataContext);
-export const useUI = () => useContext(UIContext);
+export const useDataState = () => useContext(DataStateContext);
+export const useDataActions = () => useContext(DataActionsContext);
+export const useUIState = () => useContext(UIStateContext);
+export const useUIActions = () => useContext(UIActionsContext);
+
 
 // --- MAIN PROVIDER ---
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -105,36 +112,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (scanSuccessCallback) scanSuccessCallback(barcode);
     }, [scanSuccessCallback]);
     
-    const uiActions: UIActions = {
+    const uiActions: UIActions = useMemo(() => ({
         showAlert,
-        hideAlert: useCallback(() => setAlert(prev => ({ ...prev, isOpen: false })), []),
-        openDetailModal: useCallback((orderId: number) => {
+        hideAlert: () => setAlert(prev => ({ ...prev, isOpen: false })),
+        openDetailModal: (orderId: number) => {
             setEditingOrderId(orderId);
             setIsDetailModalOpen(true);
-        }, []),
-        closeDetailModal: useCallback(() => {
+        },
+        closeDetailModal: () => {
             setIsDetailModalOpen(false);
             setEditingOrderId(null);
-        }, []),
-        openScanner: useCallback((context, onScan, continuous = false) => {
+        },
+        openScanner: (context, onScan, continuous = false) => {
             setScannerContext(context);
             setScanSuccessCallback(() => onScan);
             setIsContinuousScan(continuous);
             setIsScannerOpen(true);
-        }, []),
-        closeScanner: useCallback(() => {
+        },
+        closeScanner: () => {
             setIsScannerOpen(false);
             setIsContinuousScan(false);
             setScannerContext(null);
-        }, []),
-        openDeliveryModal: useCallback((order: Order) => {
+        },
+        openDeliveryModal: (order: Order) => {
             setOrderToExport(order);
             setIsDeliveryModalOpen(true);
-        }, []),
-        closeDeliveryModal: useCallback(() => {
+        },
+        closeDeliveryModal: () => {
             setIsDeliveryModalOpen(false);
             setOrderToExport(null);
-        }, []),
+        },
         triggerInstallPrompt: () => {
             if (!installPromptEvent) {
                 showAlert('앱을 설치할 수 없습니다. 브라우저가 이 기능을 지원하는지 확인해주세요.');
@@ -143,10 +150,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             (installPromptEvent as any).prompt();
             setInstallPromptEvent(null);
         },
-        setLastModifiedOrderId: useCallback((id: number | null) => {
+        setLastModifiedOrderId: (id: number | null) => {
             setLastModifiedOrderId(id);
-        }, []),
-    };
+        },
+    }), [showAlert, installPromptEvent]);
 
     const uiState: UIState = {
         alert,
@@ -253,7 +260,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
     const isDataLoading = !!user && Object.values(loadingState).some(status => !status);
 
-    const dataActions: DataActions = {
+    const dataActions: DataActions = useMemo(() => ({
         setCustomers: (customers) => db.replaceAll('customers', customers),
         setProducts: (products) => db.replaceAll('products', products),
         setOrders: (orders) => db.replaceAll('orders', orders),
@@ -267,22 +274,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         deleteOrder: (orderId) => db.deleteByKey('orders', orderId),
         setSelectedCameraId: (id) => db.setSetting('selectedCameraId', id),
         clearOrders: () => db.clearOrders(),
-    };
+    }), []);
 
     return (
-        <UIContext.Provider value={{...uiState, ...uiActions}}>
-            <DataContext.Provider value={{ ...dataState, ...dataActions }}>
-                <AlertModal
-                    isOpen={alert.isOpen}
-                    message={alert.message}
-                    onClose={uiActions.hideAlert}
-                    onConfirm={alert.onConfirm}
-                    onCancel={alert.onCancel}
-                    confirmText={alert.confirmText}
-                    confirmButtonClass={alert.confirmButtonClass}
-                />
-                {isDataLoading ? <LoadingOverlay status={loadingState} /> : children}
-            </DataContext.Provider>
-        </UIContext.Provider>
+        <UIActionsContext.Provider value={uiActions}>
+            <UIStateContext.Provider value={uiState}>
+                <DataActionsContext.Provider value={dataActions}>
+                    <DataStateContext.Provider value={dataState}>
+                        <AlertModal
+                            isOpen={alert.isOpen}
+                            message={alert.message}
+                            onClose={uiActions.hideAlert}
+                            onConfirm={alert.onConfirm}
+                            onCancel={alert.onCancel}
+                            confirmText={alert.confirmText}
+                            confirmButtonClass={alert.confirmButtonClass}
+                        />
+                        {isDataLoading ? <LoadingOverlay status={loadingState} /> : children}
+                    </DataStateContext.Provider>
+                </DataActionsContext.Provider>
+            </UIStateContext.Provider>
+        </UIActionsContext.Provider>
     );
 };

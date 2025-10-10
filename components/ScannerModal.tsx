@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useData, useUI } from '../context/AppContext';
+import { useDataState, useUIActions } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
 import { SpinnerIcon } from './Icons';
 
@@ -16,8 +16,8 @@ interface ScannerModalProps {
 const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSuccess }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const codeReaderRef = useRef<any>(null);
-    const { selectedCameraId } = useData();
-    const { showAlert } = useUI();
+    const { selectedCameraId } = useDataState();
+    const { showAlert } = useUIActions();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
 
     useEffect(() => {

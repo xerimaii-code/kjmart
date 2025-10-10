@@ -132,7 +132,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                 <div className="bg-gray-50 px-4 py-2.5 rounded-b-xl">
                     {isContinuousScan ? (
                         <div className="space-y-2">
-                             <button onClick={handleAddAndScan} className="w-full text-white px-4 h-12 flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base">
+                             <button onClick={handleAddAndScan} className="w-full text-white px-4 h-[4.5rem] flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base">
                                 추가 후 계속 스캔
                             </button>
                             <div className="grid grid-cols-2 gap-2">
@@ -146,10 +146,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">
-                            <button onClick={onClose} className="px-4 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-base">
+                            <button onClick={onClose} className="px-4 h-[4.5rem] flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-base">
                                 취소
                             </button>
-                            <button onClick={handleAdd} className="text-white px-4 h-12 flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base">
+                            <button onClick={handleAdd} className="text-white px-4 h-[4.5rem] flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base">
                                 {existingItem ? '수량 추가' : '품목 추가'}
                             </button>
                         </div>

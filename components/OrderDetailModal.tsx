@@ -1,20 +1,19 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { useData, useUI } from '../context/AppContext';
+import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
+import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { Order, OrderItem, Product, EditedOrderDraft } from '../types';
 import { PlusCircleIcon, RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon } from './Icons';
-import ToggleSwitch from './ToggleSwitch';
+import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import AddItemModal from './AddItemModal';
 import EditItemModal from './EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
-import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
+import MemoModal from './MemoModal';
+import SearchDropdown from './SearchDropdown';
 
 // Helper to ensure item properties are consistent for reliable comparison.
-// This creates a clean object with a defined property order and ensures optional fields are handled consistently.
 const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
     if (!items) return [];
-    // Create a new array of new objects to avoid mutation and ensure consistent property order.
     return items.map(({ barcode, name, price, quantity, unit, memo }) => ({
         barcode,
         name,
@@ -25,107 +24,44 @@ const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
     }));
 };
 
-const MemoModal: React.FC<{
-    isOpen: boolean;
-    onClose: () => void;
-    onSave: (memo: string) => void;
-    initialMemo: string;
-}> = ({ isOpen, onClose, onSave, initialMemo }) => {
-    const [memo, setMemo] = useState('');
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const modalContentRef = useRef<HTMLDivElement>(null);
-    const MAX_CHARS = 200;
-
-    useEffect(() => {
-        if (isOpen) {
-            setMemo(initialMemo);
-            setTimeout(() => {
-                textareaRef.current?.focus();
-            }, 100);
-        }
-    }, [isOpen, initialMemo]);
-
-    useAdjustForKeyboard(modalContentRef, isOpen);
-
-    if (!isOpen) return null;
-
-    const handleSave = () => {
-        onSave(memo);
-    };
-
+const EditedItemRow = memo(({ item, isCompleted, isNew, onEdit, onRemove }: { item: OrderItem; isCompleted: boolean, isNew: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }) => {
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true">
-            <div ref={modalContentRef} className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transition-transform duration-200" onClick={e => e.stopPropagation()}>
-                <div className="p-6">
-                    <h3 className="text-xl font-bold text-gray-800 text-center mb-4">메모 추가/수정</h3>
-                    <div className="relative">
-                        <textarea
-                            ref={textareaRef}
-                            value={memo}
-                            onChange={(e) => setMemo(e.target.value)}
-                            placeholder="내용을 입력하세요..."
-                            maxLength={MAX_CHARS}
-                            className="w-full h-32 p-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition resize-none"
-                        />
-                        <div className="absolute bottom-2 right-2 text-xs text-gray-400">
-                            {memo.length} / {MAX_CHARS}
-                        </div>
-                    </div>
-                </div>
-                <div className="bg-gray-50 p-3 grid grid-cols-2 gap-3">
-                    <button
-                        onClick={onClose}
-                        className="px-6 py-3 rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition"
-                    >
-                        취소
+        <div
+            className={`flex items-center p-3 space-x-2 transition-all duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+            onClick={() => !isCompleted && onEdit(item)}
+        >
+            <div className="flex-grow min-w-0 pr-1">
+                <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
+                    {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5">NEW</span>}
+                    <span>{item.name}</span>
+                </p>
+                {item.memo && (
+                    <p className="text-xs text-blue-600 flex items-start gap-1 mt-0.5">
+                        <ChatBubbleLeftIcon className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                        <span className="break-all">{item.memo}</span>
+                    </p>
+                )}
+                <p className="text-xs text-gray-500 mt-0.5">{item.price.toLocaleString()}원</p>
+            </div>
+            <div className="flex items-center space-x-1.5 flex-shrink-0">
+                <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
+                <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
+                {!isCompleted && (
+                    <button onClick={(e) => onRemove(e, item)} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+                        <RemoveIcon className="w-5 h-5"/>
                     </button>
-                    <button
-                        onClick={handleSave}
-                        className="text-white px-6 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                    >
-                        저장
-                    </button>
-                </div>
+                )}
             </div>
         </div>
     );
-};
-
-interface SearchDropdownProps<T> {
-    items: T[];
-    renderItem: (item: T) => React.ReactNode;
-    show: boolean;
-}
-
-const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>) => {
-    if (!show || items.length === 0) return null;
-    return (
-        <div className="absolute z-40 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-72 overflow-y-auto shadow-lg">
-            {items.map((item, index) => (
-                <React.Fragment key={index}>
-                    {renderItem(item)}
-                </React.Fragment>
-            ))}
-        </div>
-    );
-};
+});
 
 
 const OrderDetailModal: React.FC = () => {
-    const { 
-        orders, 
-        products, 
-        updateOrder,
-    } = useData();
-    
-    const {
-        editingOrderId, 
-        closeDetailModal, 
-        showAlert,
-        openScanner,
-        closeScanner,
-        setLastModifiedOrderId,
-    } = useUI();
+    const { orders, products } = useDataState();
+    const { updateOrder } = useDataActions();
+    const { editingOrderId } = useUIState();
+    const { closeDetailModal, showAlert, openScanner, setLastModifiedOrderId } = useUIActions();
     
     const order = useMemo(() => orders.find(o => o.id === editingOrderId), [orders, editingOrderId]);
     const isCompleted = useMemo(() => !!order?.completedAt || !!order?.completionDetails, [order]);
@@ -138,7 +74,6 @@ const OrderDetailModal: React.FC = () => {
     const [addItemTrigger, setAddItemTrigger] = useState<'scan' | 'search'>('search');
     const [scanSettings, setScanSettings] = useState<{ unit: '개' | '박스' }>({ unit: isBoxUnitDefault ? '박스' : '개' });
     
-    const [highlightedItem, setHighlightedItem] = useState<string | null>(null);
     const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
     const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
     const [memo, setMemo] = useState('');
@@ -172,7 +107,6 @@ const OrderDetailModal: React.FC = () => {
 
     const initialData = useMemo(() => {
         if (!order) return { items: [], memo: '' };
-        // Wait until draft loading is complete to prevent flashing original content
         if (isDraftLoading) return { items: [], memo: '' }; 
         if (draft) return { items: draft.items, memo: draft.memo };
         return { items: order.items, memo: order.memo || '' };
@@ -194,15 +128,12 @@ const OrderDetailModal: React.FC = () => {
 
     const serverStateJSON = useMemo(() => {
         if (!order) return '';
-        // Normalize the original order items before stringifying for a reliable comparison.
         const normalizedOriginalItems = normalizeItemsForComparison(order.items);
         return JSON.stringify({ items: normalizedOriginalItems, memo: order.memo || '' });
     }, [order]);
     
     const hasChanges = useMemo(() => {
         if (isDraftLoading || !serverStateJSON) return false;
-        // The `editedItems` are already normalized by the `useOrderManager` hook.
-        // This comparison is now reliable.
         return JSON.stringify({ items: editedItems, memo }) !== serverStateJSON;
     }, [editedItems, memo, serverStateJSON, isDraftLoading]);
 
@@ -214,7 +145,6 @@ const OrderDetailModal: React.FC = () => {
         if (JSON.stringify(debouncedDraftData) !== serverStateJSON) {
             saveDraft(order.id, debouncedDraftData as EditedOrderDraft);
         } else {
-            // If user reverts changes, draft is same as server state, so delete it.
             deleteDraft(order.id);
         }
     }, [debouncedDraftData, serverStateJSON, order, isDraftLoading]);
@@ -314,14 +244,12 @@ const OrderDetailModal: React.FC = () => {
             return;
         }
 
-        // The `editedItems` from useOrderManager are already normalized and ready for saving.
-        // The previous re-mapping was redundant and introduced a bug by stripping empty memos.
         const updatedOrder: Order = {
             ...order,
-            items: editedItems, // Use the normalized items directly
+            items: editedItems,
             total: totalAmount,
             memo: memo.trim(),
-            date: new Date().toISOString(), // Update the modification date
+            date: new Date().toISOString(),
             createdAt: order.createdAt || order.date,
         };
 
@@ -346,7 +274,7 @@ const OrderDetailModal: React.FC = () => {
         lastItemCount.current = editedItems.length;
     }, [editedItems, quickAddedBarcode]);
     
-    const handleRemoveItem = (e: React.MouseEvent, itemToRemove: OrderItem) => {
+    const handleRemoveItem = useCallback((e: React.MouseEvent, itemToRemove: OrderItem) => {
         e.stopPropagation();
         showAlert(
             `'${itemToRemove.name}' 품목을 삭제하시겠습니까?`,
@@ -354,7 +282,11 @@ const OrderDetailModal: React.FC = () => {
             '삭제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
-    };
+    }, [showAlert, removeItem]);
+
+    const handleEditItem = useCallback((item: OrderItem) => {
+        setEditingItem(item);
+    }, []);
 
     if (!order) return null;
 
@@ -392,7 +324,6 @@ const OrderDetailModal: React.FC = () => {
         );
     };
 
-    // FIX: Add this memoized set of original item barcodes to track newly added items.
     const originalItemBarcodes = useMemo(() => {
         if (!order) {
             return new Set<string>();
@@ -532,45 +463,15 @@ const OrderDetailModal: React.FC = () => {
                                 {editedItems.map((item) => {
                                     const isNew = !originalItemBarcodes.has(item.barcode);
                                     return (
-                                        <div
+                                        <EditedItemRow 
                                             key={item.barcode}
                                             ref={el => { if (el) itemRefs.current.set(item.barcode, el); }}
-                                            className={`flex items-center p-3 space-x-2 transition-all duration-200 ${highlightedItem === item.barcode ? 'bg-blue-50' : ''} ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                                            onClick={() => !isCompleted && setEditingItem(item)}
-                                        >
-                                            <div className="flex-grow min-w-0 pr-1">
-                                                <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
-                                                    {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5">NEW</span>}
-                                                    <span>{item.name}</span>
-                                                </p>
-                                                {item.memo && (
-                                                    <p className="text-xs text-blue-600 flex items-start gap-1 mt-0.5">
-                                                        <ChatBubbleLeftIcon className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
-                                                        <span className="break-all">{item.memo}</span>
-                                                    </p>
-                                                )}
-                                                <p className="text-xs text-gray-500 mt-0.5">{item.price.toLocaleString()}원</p>
-                                            </div>
-                                            <div className="flex items-center space-x-1.5 flex-shrink-0">
-                                                <span
-                                                    className={`w-12 text-center text-gray-600 font-medium select-none text-sm transition-colors`}
-                                                    aria-label={`수량: ${item.name}, 현재 수량: ${item.quantity}`}
-                                                >
-                                                    {item.quantity}
-                                                </span>
-                                                <span
-                                                    className={`w-8 text-center text-gray-600 font-medium select-none text-sm transition-colors`}
-                                                    aria-label={`단위: ${item.name}, 현재 단위: ${item.unit}.`}
-                                                >
-                                                    {item.unit}
-                                                </span>
-                                                {!isCompleted && (
-                                                    <button onClick={(e) => handleRemoveItem(e, item)} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
-                                                        <RemoveIcon className="w-5 h-5"/>
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
+                                            item={item}
+                                            isCompleted={isCompleted}
+                                            isNew={isNew}
+                                            onEdit={handleEditItem}
+                                            onRemove={handleRemoveItem}
+                                        />
                                     );
                                 })}
                             </div>
@@ -628,9 +529,7 @@ const OrderDetailModal: React.FC = () => {
                                 memo,
                             });
                         }
-                        setHighlightedItem(productForModal.barcode);
                         setQuickAddedBarcode(productForModal.barcode);
-                        setTimeout(() => setHighlightedItem(null), 1000);
                         setProductForModal(null);
                         setExistingItemForModal(null);
                     }
@@ -646,8 +545,6 @@ const OrderDetailModal: React.FC = () => {
                 onSave={(updatedDetails) => {
                     if (editingItem) {
                         updateItem(editingItem.barcode, updatedDetails);
-                        setHighlightedItem(editingItem.barcode);
-                        setTimeout(() => setHighlightedItem(null), 1000);
                     }
                     setEditingItem(null);
                 }}

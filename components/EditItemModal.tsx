@@ -113,13 +113,13 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
                 <div className="bg-gray-50 px-4 py-2.5 rounded-b-xl grid grid-cols-2 gap-3">
                     <button
                         onClick={onClose}
-                        className="px-4 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-base"
+                        className="px-4 h-[4.5rem] flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-base"
                     >
                         취소
                     </button>
                     <button
                         onClick={handleSave}
-                        className="text-white px-4 h-12 flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base"
+                        className="text-white px-4 h-[4.5rem] flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base"
                     >
                         저장
                     </button>

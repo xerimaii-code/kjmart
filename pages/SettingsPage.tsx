@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useData, useUI } from '../context/AppContext';
+import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
@@ -19,14 +19,10 @@ interface SettingsPageProps {
 }
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
-    const { 
-        selectedCameraId, 
-        setSelectedCameraId,
-        setCustomers,
-        setProducts,
-        clearOrders,
-    } = useData();
-    const { showAlert, triggerInstallPrompt, isInstallPromptAvailable } = useUI();
+    const { selectedCameraId } = useDataState();
+    const { setSelectedCameraId, setCustomers, setProducts, clearOrders } = useDataActions();
+    const { isInstallPromptAvailable } = useUIState();
+    const { showAlert, triggerInstallPrompt } = useUIActions();
     const { user, logout } = useAuth();
     
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);

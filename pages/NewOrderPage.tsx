@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useData, useUI } from '../context/AppContext';
+import React, { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
+import { useDataState, useDataActions, useUIActions } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
 import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon, ChatBubbleLeftIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
@@ -8,79 +8,14 @@ import AddItemModal from '../components/AddItemModal';
 import EditItemModal from '../components/EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
-import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
+import MemoModal from '../components/MemoModal';
+import SearchDropdown from '../components/SearchDropdown';
 
 const DRAFT_KEY = 'new-order-draft';
 
 interface NewOrderPageProps {
     isActive: boolean;
 }
-
-const MemoModal: React.FC<{
-    isOpen: boolean;
-    onClose: () => void;
-    onSave: (memo: string) => void;
-    initialMemo: string;
-}> = ({ isOpen, onClose, onSave, initialMemo }) => {
-    const [memo, setMemo] = useState('');
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const modalContentRef = useRef<HTMLDivElement>(null);
-    const MAX_CHARS = 200;
-
-    useEffect(() => {
-        if (isOpen) {
-            setMemo(initialMemo);
-            setTimeout(() => {
-                textareaRef.current?.focus();
-            }, 100);
-        }
-    }, [isOpen, initialMemo]);
-
-    useAdjustForKeyboard(modalContentRef, isOpen);
-
-    if (!isOpen) return null;
-
-    const handleSave = () => {
-        onSave(memo);
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true">
-            <div ref={modalContentRef} className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transition-transform duration-200" onClick={e => e.stopPropagation()}>
-                <div className="p-6">
-                    <h3 className="text-xl font-bold text-gray-800 text-center mb-4">메모 추가/수정</h3>
-                    <div className="relative">
-                        <textarea
-                            ref={textareaRef}
-                            value={memo}
-                            onChange={(e) => setMemo(e.target.value)}
-                            placeholder="내용을 입력하세요..."
-                            maxLength={MAX_CHARS}
-                            className="w-full h-32 p-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition resize-none"
-                        />
-                        <div className="absolute bottom-2 right-2 text-xs text-gray-400">
-                            {memo.length} / {MAX_CHARS}
-                        </div>
-                    </div>
-                </div>
-                <div className="bg-gray-50 p-3 grid grid-cols-2 gap-3">
-                    <button
-                        onClick={onClose}
-                        className="px-6 py-3 rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition"
-                    >
-                        취소
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        className="text-white px-6 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                    >
-                        저장
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
 
 const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
     if (!show) return null;
@@ -91,27 +26,40 @@ const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
     );
 };
 
-interface SearchDropdownProps<T> {
-    items: T[];
-    renderItem: (item: T) => React.ReactNode;
-    show: boolean;
-}
-
-const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>) => {
-    if (!show || items.length === 0) return null;
+const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void }) => {
     return (
-        <div className="absolute z-30 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-72 overflow-y-auto shadow-lg">
-            {items.map((item, index) => (
-                <React.Fragment key={index}>{renderItem(item)}</React.Fragment>
-            ))}
+        <div
+            className="flex items-center p-3 space-x-2 cursor-pointer hover:bg-gray-50"
+            onClick={() => onEdit(item)}
+        >
+            <div className="flex-grow min-w-0 pr-1">
+                <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
+                    <span>{item.name}</span>
+                </p>
+                {item.memo && (
+                    <p className="text-xs text-blue-600 flex items-start gap-1 mt-0.5">
+                        <ChatBubbleLeftIcon className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                        <span className="break-all">{item.memo}</span>
+                    </p>
+                )}
+                <p className="text-xs text-gray-500 mt-0.5">{item.price.toLocaleString()}원</p>
+            </div>
+            <div className="flex items-center space-x-1.5 flex-shrink-0">
+                <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
+                <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
+                <button onClick={(e) => { e.stopPropagation(); onRemove(item); }} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+                    <RemoveIcon className="w-5 h-5"/>
+                </button>
+            </div>
         </div>
     );
-};
+});
 
 
 const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
-    const { customers, products, addOrder } = useData();
-    const { showAlert, openScanner, setLastModifiedOrderId } = useUI();
+    const { customers, products } = useDataState();
+    const { addOrder } = useDataActions();
+    const { showAlert, openScanner, setLastModifiedOrderId } = useUIActions();
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
@@ -249,7 +197,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
     }, [resetItems]);
 
-    const handleResetOrder = () => {
+    const handleResetOrder = useCallback(() => {
         showAlert(
             "작성 중인 모든 내용을 초기화하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
             () => {
@@ -259,9 +207,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             '초기화',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
-    };
+    }, [showAlert, resetOrder]);
     
-    const handleSaveOrder = async () => {
+    const handleSaveOrder = useCallback(async () => {
         if (!selectedCustomer) {
             showAlert("거래처를 선택해주세요.");
             return;
@@ -287,7 +235,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             showAlert("발주 저장에 실패했습니다.");
             setIsSaving(false);
         }
-    };
+    }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
     const handleAddProductFromSearch = (product: Product) => {
         setAddItemTrigger('search');
@@ -311,24 +259,24 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
     }, [products, showAlert, items]);
 
-    const handleOpenScanner = () => {
+    const handleOpenScanner = useCallback(() => {
         if (!isCustomerSelected) {
             showAlert("먼저 거래처를 선택해주세요.");
             return;
         }
         openScanner('new-order', handleScanSuccess, true);
-    };
+    }, [isCustomerSelected, showAlert, openScanner, handleScanSuccess]);
 
-    const handleRemoveItem = (item: OrderItem) => {
+    const handleRemoveItem = useCallback((item: OrderItem) => {
         showAlert(
             `'${item.name}' 품목을 삭제하시겠습니까?`,
             () => removeItem(item.barcode),
             '삭제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
-    };
+    }, [showAlert, removeItem]);
 
-    const handleAddItemFromModal = (product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
+    const handleAddItemFromModal = useCallback((product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
         const existingItem = items.find(i => i.barcode === product.barcode);
         if (existingItem) {
             updateItem(product.barcode, {
@@ -346,7 +294,11 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
         setProductForModal(null);
         setExistingItemForModal(null);
-    };
+    }, [items, addItem, updateItem]);
+
+    const handleEditItem = useCallback((item: OrderItem) => {
+        setEditingItem(item);
+    }, []);
 
     if (isDraftLoading) {
         return (
@@ -471,31 +423,12 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                     <div className="bg-white rounded-lg shadow-md border border-gray-200/80 overflow-hidden">
                         <div className="divide-y divide-gray-200">
                             {items.map((item) => (
-                                <div
-                                    key={item.barcode}
-                                    className="flex items-center p-3 space-x-2 cursor-pointer hover:bg-gray-50"
-                                    onClick={() => setEditingItem(item)}
-                                >
-                                    <div className="flex-grow min-w-0 pr-1">
-                                        <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
-                                            <span>{item.name}</span>
-                                        </p>
-                                        {item.memo && (
-                                            <p className="text-xs text-blue-600 flex items-start gap-1 mt-0.5">
-                                                <ChatBubbleLeftIcon className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
-                                                <span className="break-all">{item.memo}</span>
-                                            </p>
-                                        )}
-                                        <p className="text-xs text-gray-500 mt-0.5">{item.price.toLocaleString()}원</p>
-                                    </div>
-                                    <div className="flex items-center space-x-1.5 flex-shrink-0">
-                                        <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
-                                        <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
-                                        <button onClick={(e) => { e.stopPropagation(); handleRemoveItem(item); }} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
-                                            <RemoveIcon className="w-5 h-5"/>
-                                        </button>
-                                    </div>
-                                </div>
+                                <OrderItemRow 
+                                    key={item.barcode} 
+                                    item={item} 
+                                    onEdit={handleEditItem} 
+                                    onRemove={handleRemoveItem} 
+                                />
                             ))}
                         </div>
                     </div>
