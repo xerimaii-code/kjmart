@@ -2,28 +2,18 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
-const registerServiceWorker = () => {
-  if ('serviceWorker' in navigator) {
-    // Use an absolute URL based on the current origin to prevent cross-origin errors.
-    const swUrl = `${window.location.origin}/service-worker.js`;
-    navigator.serviceWorker.register(swUrl)
+// --- PWA Service Worker Registration ---
+if ('serviceWorker' in navigator) {
+  // Defer registration until after the page has loaded to avoid "invalid state" errors.
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js')
       .then(registration => {
         console.log('Service Worker registered successfully with scope:', registration.scope);
       })
       .catch(error => {
         console.error('Service Worker registration failed:', error);
       });
-  }
-};
-
-// --- PWA Service Worker Registration ---
-// This enables the app to be installable and provides offline capabilities.
-// To robustly handle "invalid state" errors, registration is deferred
-// until the document is fully loaded.
-if (document.readyState === 'complete') {
-  registerServiceWorker();
-} else {
-  window.addEventListener('load', registerServiceWorker);
+  });
 }
 // --- End of Service Worker Registration ---
 

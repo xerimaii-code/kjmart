@@ -40,26 +40,23 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         longPressTimeoutRef.current = window.setTimeout(() => {
             isLongPress.current = true;
             
-            // Initial rapid change
-            setQuantity(prev => prev + (delta * 10));
+            setQuantity(prev => Math.max(1, prev + (delta * 5)));
             if (navigator.vibrate) {
                 navigator.vibrate(20);
             }
 
-            // Subsequent rapid changes
             rapidChangeIntervalRef.current = window.setInterval(() => {
-                setQuantity(prev => prev + (delta * 10));
+                setQuantity(prev => Math.max(1, prev + (delta * 5)));
                 if (navigator.vibrate) {
                     navigator.vibrate(20);
                 }
-            }, 500);
+            }, 150);
         }, 500);
     }, [handlePressEnd]);
     
     const handleShortClick = useCallback((delta: number) => {
-        // The click event fires after pressEnd. We check the ref to see if a long press occurred.
         if (!isLongPress.current) {
-            setQuantity(prev => prev + delta);
+            setQuantity(prev => Math.max(1, prev + delta));
         }
     }, []);
 
@@ -73,88 +70,76 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
 
     useEffect(() => {
         // Reset state when a new product is passed in or modal opens
-        if (product) {
+        if (isOpen && product) {
             setQuantity(1); // Always default to adding 1
             // Use initialSettings if available (continuous scan), otherwise use existingItem's settings, or default.
             setUnit(initialSettings?.unit ?? existingItem?.unit ?? '개');
             setMemo(existingItem?.memo || '');
         }
-    }, [product, existingItem, initialSettings]);
+    }, [isOpen, product, existingItem, initialSettings]);
 
     if (!isOpen || !product) return null;
 
-    const handleAddAndClose = () => {
+    const handleAdd = () => {
         onAdd({ quantity, unit, memo: memo.trim() });
-        onClose();
     };
 
-    const handleAddAndNextScan = () => {
+    const handleAddAndScan = () => {
         onAdd({ quantity, unit, memo: memo.trim() });
-        onClose(); // Close current modal before opening scanner
         if (onNextScan) {
             onNextScan();
         }
     };
+    
+    const isContinuousScan = trigger === 'scan' && onNextScan;
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
-                <div className="p-6">
-                    <h3 className="text-xl font-bold text-gray-800 text-center mb-2">{product.name}</h3>
+                <div className="p-4">
+                    <h3 className="text-lg font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
                     <p className="text-center text-gray-500 mb-4">{product.price.toLocaleString()}원</p>
-                    
-                    {/* Duplicate item warning */}
                     {existingItem && (
-                        <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-lg text-center mb-6 shadow-inner">
-                            <p className="font-bold">이미 추가된 상품입니다.</p>
-                            <p className="text-sm mt-1">기존 수량: <span className="font-semibold">{existingItem.quantity} {existingItem.unit}</span></p>
+                        <div className="text-center text-sm text-blue-600 bg-blue-50 p-2 rounded-lg mb-4">
+                            이미 <span className="font-bold">{existingItem.quantity}{existingItem.unit}</span>가 담겨있습니다. 추가 수량을 입력하세요.
                         </div>
                     )}
-                    
-                    <div className="space-y-6">
-                        {/* Quantity Control */}
+
+                    <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-2 text-center">
-                                {existingItem ? '추가할 수량' : '수량'}
-                            </label>
-                            <div className="flex items-center justify-center space-x-4">
-                                <button 
-                                    onClick={() => handleShortClick(-1)}
-                                    onMouseDown={() => handlePressStart(-1)}
-                                    onMouseUp={handlePressEnd}
-                                    onMouseLeave={handlePressEnd}
-                                    onTouchStart={(e) => { e.preventDefault(); handlePressStart(-1); }}
-                                    onTouchEnd={handlePressEnd}
-                                    onContextMenu={(e) => e.preventDefault()}
-                                    className="bg-gray-200 hover:bg-gray-300 border border-gray-300 w-12 h-12 rounded-full font-bold text-2xl text-gray-600 flex items-center justify-center transition-colors select-none"
-                                >-</button>
-                                <input 
-                                    type="number" 
-                                    value={quantity}
-                                    onChange={e => setQuantity(parseInt(e.target.value) || 0)}
-                                    className="w-24 h-16 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-3xl focus:outline-none"
-                                    autoComplete="off"
-                                />
+                            <label className="block text-sm font-bold text-gray-700 mb-1 text-center">수량</label>
+                            <div className="flex items-center justify-center space-x-2">
                                 <button
+                                    onPointerDown={() => handlePressStart(-1)}
+                                    onPointerUp={handlePressEnd}
+                                    onPointerLeave={handlePressEnd}
+                                    onClick={() => handleShortClick(-1)}
+                                    disabled={quantity <= 1}
+                                    className="w-12 h-12 bg-gray-200 text-gray-700 text-3xl font-bold rounded-full disabled:opacity-50 transition"
+                                    aria-label="수량 감소"
+                                >
+                                    -
+                                </button>
+                                <div className="w-24 h-12 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-3xl flex items-center justify-center">
+                                    {quantity}
+                                </div>
+                                <button
+                                    onPointerDown={() => handlePressStart(1)}
+                                    onPointerUp={handlePressEnd}
+                                    onPointerLeave={handlePressEnd}
                                     onClick={() => handleShortClick(1)}
-                                    onMouseDown={() => handlePressStart(1)}
-                                    onMouseUp={handlePressEnd}
-                                    onMouseLeave={handlePressEnd}
-                                    onTouchStart={(e) => { e.preventDefault(); handlePressStart(1); }}
-                                    onTouchEnd={handlePressEnd}
-                                    onContextMenu={(e) => e.preventDefault()}
-                                    className="bg-gray-200 hover:bg-gray-300 border border-gray-300 w-12 h-12 rounded-full font-bold text-2xl text-gray-600 flex items-center justify-center transition-colors select-none"
-                                >+</button>
+                                    className="w-12 h-12 bg-gray-200 text-gray-700 text-3xl font-bold rounded-full transition"
+                                    aria-label="수량 증가"
+                                >
+                                    +
+                                </button>
                             </div>
                         </div>
 
-                        {/* Memo Input */}
                         <div>
-                            <label htmlFor="add-item-memo" className="block text-sm font-bold text-gray-700 mb-2 text-center">
-                                품목 메모 (선택)
-                            </label>
+                            <label htmlFor="item-memo" className="block text-sm font-bold text-gray-700 mb-1 text-center">품목 메모 (선택)</label>
                             <input
-                                id="add-item-memo"
+                                id="item-memo"
                                 type="text"
                                 value={memo}
                                 onChange={(e) => setMemo(e.target.value)}
@@ -163,12 +148,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                 maxLength={50}
                             />
                         </div>
-
-
-                        {/* Toggles */}
-                        <div className="flex justify-end items-center pt-4 border-t border-gray-200 space-x-4">
+                        
+                        <div className="flex justify-end items-center pt-3 border-t border-gray-200">
                             <ToggleSwitch
-                                id="add-item-unit"
+                                id="item-unit"
                                 label="박스"
                                 checked={unit === '박스'}
                                 onChange={(checked) => setUnit(checked ? '박스' : '개')}
@@ -177,47 +160,29 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                         </div>
                     </div>
                 </div>
-
-                <div className="bg-gray-50 p-3">
-                    {trigger === 'scan' ? (
-                        <div className="grid grid-cols-3 gap-2">
-                             <button
-                                onClick={onClose}
-                                className="px-4 py-3 rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm"
-                            >
-                                취소
-                            </button>
-                             <button
-                                onClick={() => {
-                                    onClose();
-                                    if (onNextScan) {
-                                        onNextScan();
-                                    }
-                                }}
-                                className="text-white px-4 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-sm"
-                            >
-                                취소후계속
-                            </button>
-                            <button
-                                onClick={handleAddAndNextScan}
-                                className="text-white px-4 py-3 rounded-lg font-bold bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition text-sm"
-                            >
-                                추가후계속
+                
+                <div className="bg-gray-50 p-2">
+                    {isContinuousScan ? (
+                        <div className="flex flex-col gap-2">
+                            <div className="grid grid-cols-2 gap-2">
+                                <button onClick={onClose} className="px-4 py-3 rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition">
+                                    스캔 종료
+                                </button>
+                                <button onClick={() => { if (onNextScan) { onClose(); onNextScan(); } }} className="px-4 py-3 rounded-lg font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition">
+                                    건너뛰기
+                                </button>
+                            </div>
+                            <button onClick={handleAddAndScan} className="w-full text-white px-4 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+                                추가 후 계속 스캔
                             </button>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={onClose}
-                                className="px-6 py-3 rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition"
-                            >
+                        <div className="grid grid-cols-2 gap-2">
+                            <button onClick={onClose} className="px-4 py-2 rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition">
                                 취소
                             </button>
-                            <button
-                                onClick={handleAddAndClose}
-                                className="text-white px-6 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                            >
-                                {existingItem ? '수량 추가' : '상품 추가'}
+                            <button onClick={handleAdd} className="text-white px-4 py-2 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+                                {existingItem ? '수량 추가' : '품목 추가'}
                             </button>
                         </div>
                     )}

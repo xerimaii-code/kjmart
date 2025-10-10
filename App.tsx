@@ -1,12 +1,13 @@
-import React, { useState, lazy, Suspense } from 'react';
-import { AppProvider, DataProvider, useUI } from './context/AppContext';
+import React, { useState, lazy, Suspense, useRef, useEffect } from 'react';
+import { AppProvider, useData, useUI } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { Page } from './types';
-import BottomNav from './components/BottomNav';
+import { Order, Page } from './types';
 import ScannerModal from './components/ScannerModal';
 import Header from './components/Header';
-import { SpinnerIcon } from './components/Icons';
+import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
+import DeliveryTypeModal from './components/DeliveryTypeModal';
+import { exportToXLS } from './services/dataService';
 
 // Lazy load pages and heavy modals
 const NewOrderPage = lazy(() => import('./pages/NewOrderPage'));
@@ -14,12 +15,98 @@ const OrderHistoryPage = lazy(() => import('./pages/OrderHistoryPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
 
+// Page component mapping for dynamic rendering
+const pageComponents: { [key in Page]: React.LazyExoticComponent<React.FC<{ isActive: boolean }>> } = {
+    'history': OrderHistoryPage,
+    'new-order': NewOrderPage,
+    'settings': SettingsPage,
+};
+
+
 // Fallback UI for suspense
 const PageSuspenseFallback: React.FC = () => (
     <div className="w-full h-full flex items-center justify-center bg-gray-50">
         <SpinnerIcon className="w-10 h-10 text-blue-500" />
     </div>
 );
+
+// --- Top Tab Bar Component ---
+interface TopTabBarProps {
+    activePage: Page;
+    setActivePage: (page: Page) => void;
+}
+
+const TabButton: React.FC<{
+    page: Page;
+    label: string;
+    Icon: React.FC<{className?: string}>;
+    isActive: boolean;
+    onClick: (page: Page) => void;
+}> = ({ page, label, Icon, isActive, onClick }) => (
+    <button
+        onClick={() => onClick(page)}
+        className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:bg-gray-100 ${
+            isActive 
+                ? 'text-blue-600' 
+                : 'text-gray-500 hover:text-gray-800'
+        }`}
+        aria-current={isActive ? 'page' : undefined}
+    >
+        <Icon className="w-5 h-5" />
+        <span>{label}</span>
+    </button>
+);
+
+const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
+    const navRef = useRef<HTMLElement>(null);
+    const [indicatorStyle, setIndicatorStyle] = useState({});
+
+    useEffect(() => {
+        if (navRef.current) {
+            const activeTabElement = navRef.current.querySelector(`button[aria-current="page"]`) as HTMLButtonElement;
+            if (activeTabElement) {
+                const { offsetLeft, clientWidth } = activeTabElement;
+                setIndicatorStyle({
+                    left: `${offsetLeft + clientWidth * 0.2}px`, // Center the 60% width indicator
+                    width: `${clientWidth * 0.6}px`,
+                });
+            }
+        }
+    }, [activePage]);
+    
+    return (
+        <nav ref={navRef} className="relative w-full bg-white flex justify-around items-center flex-shrink-0 shadow-sm">
+            <TabButton
+                page="history"
+                label="발주내역"
+                Icon={HistoryIcon}
+                isActive={activePage === 'history'}
+                onClick={setActivePage}
+            />
+            <TabButton
+                page="new-order"
+                label="신규발주"
+                Icon={NewOrderIcon}
+                isActive={activePage === 'new-order'}
+                onClick={setActivePage}
+            />
+            <TabButton
+                page="settings"
+                label="설정"
+                Icon={SettingsIcon}
+                isActive={activePage === 'settings'}
+                onClick={setActivePage}
+            />
+            {/* Sliding Indicator */}
+            <div 
+                className="absolute bottom-0 h-1 bg-blue-500 rounded-full transition-all duration-300 ease-in-out"
+                style={indicatorStyle}
+            />
+        </nav>
+    );
+};
+// --- End Top Tab Bar Component ---
+
 
 const AppContent: React.FC = () => {
     const [activePage, setActivePage] = useState<Page>('new-order');
@@ -29,7 +116,34 @@ const AppContent: React.FC = () => {
         onScanSuccess,
         closeScanner,
         hideAlert,
+        isDeliveryModalOpen,
+        orderToExport,
+        closeDeliveryModal,
      } = useUI();
+    const { updateOrder } = useData();
+
+    const handleExportConfirm = (deliveryType: '일반배송' | '택배배송') => {
+        if (orderToExport) {
+            exportToXLS(orderToExport, deliveryType);
+            const timestamp = new Date().toISOString();
+            updateOrder({
+                ...orderToExport,
+                completedAt: timestamp,
+                completionDetails: { type: 'xls', timestamp }
+            });
+        }
+        closeDeliveryModal();
+    };
+
+    const pages: Page[] = ['history', 'new-order', 'settings'];
+    const currentPageIndex = pages.indexOf(activePage);
+
+    const swipeContainerRef = useRef<HTMLDivElement>(null);
+    const isDragging = useRef(false);
+    const dragStartCoords = useRef({ x: 0, y: 0 });
+    const currentTranslate = useRef(0);
+    const dragDirection = useRef<'horizontal' | 'vertical' | 'none'>('none');
+
 
     const handleNavigation = (targetPage: Page) => {
         if (targetPage === activePage) return;
@@ -37,35 +151,127 @@ const AppContent: React.FC = () => {
         setActivePage(targetPage);
     };
 
-
-    const renderPage = () => {
-        switch (activePage) {
-            case 'new-order':
-                return <NewOrderPage />;
-            case 'history':
-                return <OrderHistoryPage />;
-            case 'settings':
-                return <SettingsPage />;
-            default:
-                return <NewOrderPage />;
+    const getPositionX = (event: React.TouchEvent) => event.touches[0].clientX;
+    
+    const setPosition = (x: number, animate = false) => {
+        if (swipeContainerRef.current) {
+            swipeContainerRef.current.style.transition = animate ? 'transform 0.3s ease-out' : 'none';
+            swipeContainerRef.current.style.transform = `translateX(${x}px)`;
         }
     };
+
+    const onTouchStart = (e: React.TouchEvent) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('button, input, a, select, textarea, [role="dialog"]')) {
+            return;
+        }
+
+        dragStartCoords.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        dragDirection.current = 'none';
+        isDragging.current = true;
+    };
+    
+    const onTouchMove = (e: React.TouchEvent) => {
+        if (!isDragging.current) return;
+    
+        if (dragDirection.current === 'none') {
+            const deltaX = Math.abs(e.touches[0].clientX - dragStartCoords.current.x);
+            const deltaY = Math.abs(e.touches[0].clientY - dragStartCoords.current.y);
+            
+            if (deltaX > 5 || deltaY > 5) {
+                dragDirection.current = deltaX > deltaY ? 'horizontal' : 'vertical';
+            }
+        }
+        
+        if (dragDirection.current === 'horizontal') {
+            e.preventDefault();
+            const currentPos = getPositionX(e);
+            const delta = currentPos - dragStartCoords.current.x;
+            
+            if (swipeContainerRef.current) {
+                const parentWidth = swipeContainerRef.current.parentElement!.clientWidth;
+                const baseTranslate = -currentPageIndex * parentWidth;
+                currentTranslate.current = baseTranslate + delta;
+                setPosition(currentTranslate.current);
+            }
+        }
+    };
+
+    const onTouchEnd = () => {
+        if (!isDragging.current || !swipeContainerRef.current || dragDirection.current !== 'horizontal') {
+            isDragging.current = false;
+            return;
+        }
+        isDragging.current = false;
+
+        const containerWidth = swipeContainerRef.current.parentElement!.clientWidth;
+        const movedBy = currentTranslate.current - (-currentPageIndex * containerWidth);
+        const threshold = containerWidth / 4;
+    
+        let newIndex = currentPageIndex;
+        if (movedBy < -threshold && currentPageIndex < pages.length - 1) {
+            newIndex = currentPageIndex + 1;
+        } else if (movedBy > threshold && currentPageIndex > 0) {
+            newIndex = currentPageIndex - 1;
+        }
+    
+        if (newIndex !== currentPageIndex) {
+            handleNavigation(pages[newIndex]);
+        } else {
+            setPosition(-currentPageIndex * containerWidth, true);
+        }
+    };
+
+    useEffect(() => {
+        if (swipeContainerRef.current && !isDragging.current) {
+            const containerWidth = swipeContainerRef.current.parentElement!.clientWidth;
+            const newTranslate = -currentPageIndex * containerWidth;
+            currentTranslate.current = newTranslate;
+            setPosition(newTranslate, true);
+        }
+    }, [currentPageIndex]);
 
     return (
         <div className="h-full w-full flex flex-col bg-gray-50">
             <Header />
-            <main className="main-content flex-grow relative overflow-y-auto">
-                <Suspense fallback={<PageSuspenseFallback />}>
-                    {renderPage()}
-                </Suspense>
+            <TopTabBar activePage={activePage} setActivePage={handleNavigation} />
+            <main
+                className="main-content flex-grow relative overflow-x-hidden"
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
+            >
+                <div
+                    ref={swipeContainerRef}
+                    className="h-full flex absolute top-0 left-0"
+                    style={{
+                        width: `${pages.length * 100}%`,
+                        transform: `translateX(${-currentPageIndex * (100 / pages.length)}%)`
+                    }}
+                >
+                    {pages.map(page => {
+                        const PageComponent = pageComponents[page];
+                        return (
+                            <div key={page} className="h-full" style={{ width: `${100 / pages.length}%` }}>
+                                <Suspense fallback={<PageSuspenseFallback />}>
+                                    <PageComponent isActive={activePage === page} />
+                                </Suspense>
+                            </div>
+                        );
+                    })}
+                </div>
             </main>
-            <BottomNav activePage={activePage} setActivePage={handleNavigation} />
 
             {/* Global Modals */}
             <Suspense fallback={null}>
               {isDetailModalOpen && <OrderDetailModal />}
             </Suspense>
             <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />
+            <DeliveryTypeModal
+                isOpen={isDeliveryModalOpen}
+                onClose={closeDeliveryModal}
+                onConfirm={handleExportConfirm}
+            />
         </div>
     );
 };
@@ -101,20 +307,16 @@ const AppRouter: React.FC = () => {
         return <AccessDeniedPage />;
     }
     
-    return (
-        <DataProvider>
-            <AppContent />
-        </DataProvider>
-    );
+    return <AppContent />;
 };
 
 const App: React.FC = () => {
     return (
-        <AppProvider>
-            <AuthProvider>
+        <AuthProvider>
+            <AppProvider>
                 <AppRouter />
-            </AuthProvider>
-        </AppProvider>
+            </AppProvider>
+        </AuthProvider>
     );
 };
 

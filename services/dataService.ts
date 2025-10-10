@@ -234,7 +234,7 @@ const base64ToArrayBuffer = (base64: string) => {
 
 export const exportToSMS = (order: Order): string => {
     const itemsBody = order.items.map(item => {
-        const memoText = item.memo ? item.memo : '';
+        const memoText = item.memo ? `(${item.memo})` : '';
         return `${item.name}/${item.quantity}${item.unit}${memoText}`;
     }).join('\n');
 

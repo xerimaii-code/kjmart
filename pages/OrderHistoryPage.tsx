@@ -3,7 +3,6 @@ import { useData, useUI } from '../context/AppContext';
 import { Order } from '../types';
 import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon } from '../components/Icons';
 import { exportToSMS, exportToXLS } from '../services/dataService';
-import DeliveryTypeModal from '../components/DeliveryTypeModal';
 import { getAllDraftKeys } from '../services/draftDbService';
 
 interface ActionMenuItem {
@@ -14,9 +13,13 @@ interface ActionMenuItem {
     onClick: () => void;
 }
 
-const OrderHistoryPage: React.FC = () => {
+interface OrderHistoryPageProps {
+    isActive: boolean;
+}
+
+const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const { orders, deleteOrder, updateOrder } = useData();
-    const { openDetailModal, showAlert, lastModifiedOrderId, setLastModifiedOrderId } = useUI();
+    const { openDetailModal, showAlert, lastModifiedOrderId, setLastModifiedOrderId, openDeliveryModal, closeDeliveryModal, isDeliveryModalOpen } = useUI();
     const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
     const [draftOrderIds, setDraftOrderIds] = useState<Set<number>>(new Set());
 
@@ -42,8 +45,6 @@ const OrderHistoryPage: React.FC = () => {
     const [startDate, setStartDate] = useState(() => getInitialDateRange().startDate);
     const [endDate, setEndDate] = useState(() => getInitialDateRange().endDate);
     const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-    const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
-    const [orderToExport, setOrderToExport] = useState<Order | null>(null);
 
     const scrollableContainerRef = useRef<HTMLDivElement>(null);
     const filterContainerRef = useRef<HTMLDivElement>(null);
@@ -59,7 +60,17 @@ const OrderHistoryPage: React.FC = () => {
             }
         };
         fetchDrafts();
-    }, [orders, openDetailModal]); // Re-check when orders list or modal state changes.
+    }, [orders, openDetailModal]);
+    
+    // This effect handles cleaning up state when the page becomes inactive.
+    useEffect(() => {
+        if (!isActive) {
+            setOpenMenuId(null);
+            if (isDeliveryModalOpen) {
+                closeDeliveryModal();
+            }
+        }
+    }, [isActive, isDeliveryModalOpen, closeDeliveryModal]);
     
     useEffect(() => {
         if (lastModifiedOrderId) {
@@ -268,8 +279,7 @@ const OrderHistoryPage: React.FC = () => {
                                         };
 
                                         const handleXlsExport = (order: Order) => {
-                                            setOrderToExport(order);
-                                            setIsDeliveryModalOpen(true);
+                                            openDeliveryModal(order);
                                             setOpenMenuId(null);
                                         };
 
@@ -374,23 +384,6 @@ const OrderHistoryPage: React.FC = () => {
                     </div>
                 )}
             </div>
-            <DeliveryTypeModal
-                isOpen={isDeliveryModalOpen}
-                onClose={() => setIsDeliveryModalOpen(false)}
-                onConfirm={(deliveryType) => {
-                    if (orderToExport) {
-                        exportToXLS(orderToExport, deliveryType);
-                        const timestamp = new Date().toISOString();
-                        updateOrder({
-                            ...orderToExport,
-                            completedAt: timestamp,
-                            completionDetails: { type: 'xls', timestamp }
-                        });
-                    }
-                    setIsDeliveryModalOpen(false);
-                    setOrderToExport(null);
-                }}
-            />
         </div>
     );
 };

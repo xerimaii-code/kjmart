@@ -14,7 +14,11 @@ const LoadingSpinner: React.FC = () => (
     </div>
 );
 
-const SettingsPage: React.FC = () => {
+interface SettingsPageProps {
+    isActive: boolean;
+}
+
+const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { 
         selectedCameraId, 
         setSelectedCameraId,

@@ -8,15 +8,16 @@ let dbInitialized = false;
 
 export const isInitialized = () => dbInitialized;
 
-export const initDB = (): Promise<boolean> => {
-    return new Promise((resolve) => {
+export const initDB = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
         if (dbInitialized) {
-            resolve(true);
+            resolve();
             return;
         }
         if (!firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('YOUR_')) {
-            console.warn("Firebase config is not set. The app will not connect to a database. Please update firebaseConfig.ts");
-            resolve(true); // Resolve so the app doesn't hang, but it won't have db functionality.
+            const errorMsg = "Firebase config is not set. The app will not connect to a database. Please update firebaseConfig.ts";
+            console.warn(errorMsg);
+            reject(new Error(errorMsg));
             return;
         }
         try {
@@ -24,10 +25,11 @@ export const initDB = (): Promise<boolean> => {
             db = getDatabase(app);
             dbInitialized = true;
             console.log("Firebase initialized successfully.");
+            resolve();
         } catch (e) {
             console.error("Firebase initialization failed:", e);
+            reject(e as Error);
         }
-        resolve(true);
     });
 };
 

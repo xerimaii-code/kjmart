@@ -21,7 +21,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     useEffect(() => {
         const initialize = async () => {
-            await initDB();
+            try {
+                await initDB();
+            } catch (error) {
+                console.error("DB init failed in AuthContext:", error);
+                // The error is already handled and shown to the user by AppContext.
+                // We just need to stop the loading state here so the login page can be shown.
+                setLoading(false);
+                return () => {}; // Return a no-op unsubscribe function
+            }
             const auth = getAuth();
             const unsubscribe = onAuthStateChanged(auth, (user) => {
                 setUser(user);

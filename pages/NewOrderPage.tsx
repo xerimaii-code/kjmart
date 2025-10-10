@@ -11,6 +11,10 @@ import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 
 const DRAFT_KEY = 'new-order-draft';
 
+interface NewOrderPageProps {
+    isActive: boolean;
+}
+
 const MemoModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
@@ -101,7 +105,7 @@ const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>)
 };
 
 
-const NewOrderPage: React.FC = () => {
+const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const { customers, products, addOrder } = useData();
     const { showAlert, openScanner, setLastModifiedOrderId } = useUI();
 
@@ -223,7 +227,7 @@ const NewOrderPage: React.FC = () => {
         setTimeout(() => customerSearchInputRef.current?.focus(), 0);
     };
 
-    const resetOrder = useCallback(() => {
+    const resetOrder = useCallback((options?: { preventFocus?: boolean }) => {
         setSelectedCustomer(null);
         setCustomerSearch('');
         setProductSearch('');
@@ -231,7 +235,14 @@ const NewOrderPage: React.FC = () => {
         setMemo('');
         setIsBoxUnitDefault(false);
         setIsSaving(false);
-        customerSearchInputRef.current?.focus();
+
+        if (options?.preventFocus) {
+             if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+        } else {
+            customerSearchInputRef.current?.focus();
+        }
     }, [resetItems]);
 
     const handleResetOrder = () => {
@@ -266,7 +277,7 @@ const NewOrderPage: React.FC = () => {
             });
             setLastModifiedOrderId(newOrderId);
             await deleteDraft(DRAFT_KEY);
-            showAlert("신규 발주가 저장되었습니다.", resetOrder);
+            resetOrder({ preventFocus: true });
         } catch (error) {
             console.error("Failed to save order:", error);
             showAlert("발주 저장에 실패했습니다.");
