@@ -8,6 +8,7 @@ import AddItemModal from './AddItemModal';
 import EditItemModal from './EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
+import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 // Helper to ensure item properties are consistent for reliable comparison.
 // This creates a clean object with a defined property order and ensures optional fields are handled consistently.
@@ -32,6 +33,7 @@ const MemoModal: React.FC<{
 }> = ({ isOpen, onClose, onSave, initialMemo }) => {
     const [memo, setMemo] = useState('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const modalContentRef = useRef<HTMLDivElement>(null);
     const MAX_CHARS = 200;
 
     useEffect(() => {
@@ -43,6 +45,8 @@ const MemoModal: React.FC<{
         }
     }, [isOpen, initialMemo]);
 
+    useAdjustForKeyboard(modalContentRef, isOpen);
+
     if (!isOpen) return null;
 
     const handleSave = () => {
@@ -51,7 +55,7 @@ const MemoModal: React.FC<{
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div ref={modalContentRef} className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transition-transform duration-200" onClick={e => e.stopPropagation()}>
                 <div className="p-6">
                     <h3 className="text-xl font-bold text-gray-800 text-center mb-4">메모 추가/수정</h3>
                     <div className="relative">
