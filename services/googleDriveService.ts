@@ -66,18 +66,14 @@ export const initGoogleClient = async () => {
     // before proceeding. This is a robust way to avoid race conditions.
     await Promise.all([window.gapiLoadedPromise, window.gsiLoadedPromise]);
 
-    // Now that gapi is guaranteed to be loaded, load the specific 'client' and 'picker' modules.
+    // Now that gapi is guaranteed to be loaded, load only the 'picker' module,
+    // as the 'client' module is not used and may cause initialization conflicts.
     await new Promise<void>((resolve, reject) => {
-        gapi.load('client:picker', {
-            callback: () => {
-                // The libraries are loaded. We don't need to call gapi.client.init()
-                // for the Picker API to work or for our fetch-based calls, so we resolve directly
-                // to avoid potential side-effects from the init call.
-                resolve();
-            },
+        gapi.load('picker', {
+            callback: resolve,
             onerror: (error: any) => {
-                console.error("GAPI module loading failed:", error);
-                reject(new Error("Failed to load Google API modules."));
+                console.error("GAPI module 'picker' loading failed:", error);
+                reject(new Error("Failed to load Google Picker API module."));
             },
         });
     });
@@ -149,7 +145,11 @@ export const signOut = (accessToken: string): Promise<void> => {
 export const showPicker = (accessToken: string): Promise<{id: string, name: string}> => {
     return new Promise((resolve, reject) => {
         if (typeof gapi === 'undefined' || !gapi.picker || !gapi.picker.ViewId) {
-            return reject(new Error("Google Picker API가 완전히 로드되지 않았습니다. 잠시 후 다시 시도해주세요."));
+            const gapiExists = typeof gapi !== 'undefined';
+            const pickerExists = gapiExists && typeof gapi.picker !== 'undefined';
+            const debugInfo = `(gapi: ${gapiExists}, gapi.picker: ${pickerExists})`;
+            console.error(`Picker API not ready. ${debugInfo}`);
+            return reject(new Error(`Google Picker API가 완전히 로드되지 않았습니다. ${debugInfo}`));
         }
 
         try {
