@@ -1,13 +1,10 @@
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo } from 'react';
-import { Customer, Product, Order, OrderItem, ScannerContext, SyncFile } from '../types';
+import { Customer, Product, Order, OrderItem, ScannerContext } from '../types';
 import * as db from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { useAuth } from './AuthContext';
-import * as googleDriveService from '../services/googleDriveService';
-import { processProductData } from '../services/dataService';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 
 // --- TYPE DEFINITIONS ---
 interface DataState {
@@ -83,7 +80,6 @@ export const useUIActions = () => useContext(UIActionsContext);
 // --- MAIN PROVIDER ---
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const { user } = useAuth();
-    const [lastSync, setLastSync] = useLocalStorage('google-drive-last-sync', '');
 
     // --- UI STATE & ACTIONS ---
     const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
@@ -350,70 +346,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedCameraId: (id) => db.setSetting('selectedCameraId', id),
         clearOrders: () => db.clearOrders(),
     }), []);
-
-    // --- Google Drive Auto-Sync Logic ---
-    useEffect(() => {
-        if (!user || isDataLoading) return;
-
-        const runAutoSync = async () => {
-            if ((navigator as any).connection && (navigator as any).connection.type !== 'wifi') {
-                console.log('Auto-sync skipped: Not on a Wi-Fi connection.');
-                return;
-            }
-
-            const syncFile = JSON.parse(localStorage.getItem('google-drive-sync-file') || 'null') as SyncFile | null;
-            const token = JSON.parse(localStorage.getItem('google-auth-token') || 'null');
-
-            if (!syncFile?.id || !token) {
-                console.log('Auto-sync skipped: Google Drive sync not configured.');
-                return;
-            }
-
-            console.log(`Attempting auto-sync from ${syncFile.name}...`);
-            try {
-                await googleDriveService.initClient();
-                const sheetData = await googleDriveService.getSheetData(syncFile.id);
-                const { valid, invalidCount } = processProductData(sheetData);
-
-                if (valid.length > 0) {
-                    await dataActions.setProducts(valid);
-                    const syncTime = new Date().toISOString();
-                    setLastSync(syncTime);
-                    console.log(`Auto-sync successful at ${syncTime}. Updated ${valid.length} products.`);
-                }
-                if (invalidCount > 0) {
-                    console.warn(`Auto-sync completed with ${invalidCount} invalid rows.`);
-                }
-            } catch (error) {
-                console.error("Auto-sync failed:", error);
-                if (error instanceof Error && error.message.includes("Authorization expired")) {
-                    localStorage.removeItem('google-auth-token');
-                    showAlert("Google Drive 연동이 만료되었습니다. 설정에서 다시 로그인해주세요.");
-                }
-            }
-        };
-
-        runAutoSync();
-
-        const handleConnectionChange = () => {
-            if ((navigator as any).connection?.type === 'wifi') {
-                console.log('Wi-Fi connection detected. Triggering auto-sync.');
-                runAutoSync();
-            }
-        };
-
-        if ('connection' in navigator) {
-            ((navigator as any).connection as EventTarget).addEventListener('change', handleConnectionChange);
-        }
-
-        return () => {
-            if ('connection' in navigator) {
-                ((navigator as any).connection as EventTarget).removeEventListener('change', handleConnectionChange);
-            }
-        };
-
-    }, [user, isDataLoading, dataActions, showAlert, setLastSync]);
-
 
     return (
         <UIActionsContext.Provider value={uiActions}>

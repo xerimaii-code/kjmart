@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import { useDataState, useUIActions } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
@@ -51,25 +52,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             codeReaderRef.current = new ZXing.BrowserMultiFormatReader(hints);
             
             const startScanning = async () => {
-                const baseVideoConstraints: MediaTrackConstraints = {
-                    deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
-                };
-                
-                // A list of constraints to try, from most desirable to least.
-                const constraintsToTry: MediaStreamConstraints[] = [
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any },
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous' } as any },
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment' } },
-                    { audio: false, video: { ...baseVideoConstraints } },
-                ];
-
-                for (const constraints of constraintsToTry) {
+                const attemptStream = async (constraints: MediaStreamConstraints) => {
                     try {
                         await codeReaderRef.current.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
                             if (result) {
                                 if (navigator.vibrate) navigator.vibrate(100);
-                                const barcode = result.getText();                             
+                                const barcode = result.getText();
                                 onScanSuccess(barcode);
                                 onClose();
                             }
@@ -78,13 +66,48 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                             }
                         });
                         console.log('Successfully started camera with constraints:', constraints);
-                        return; // Success, exit the loop.
+                        return true; // Success!
                     } catch (e) {
                         console.warn(`Failed to start camera with constraints: ${JSON.stringify(constraints)}`, e);
+                        return false; // Failure
+                    }
+                };
+            
+                // Define ideal constraints, in order of preference.
+                const baseConstraintOptions: MediaTrackConstraints[] = [
+                    { facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any,
+                    { facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1920 }, height: { ideal: 1080 } } as any,
+                    { facingMode: 'environment', focusMode: 'continuous' } as any,
+                    { facingMode: 'environment' },
+                    {}, // Generic video request
+                ];
+            
+                // Attempt 1: Try with the user's selected camera ID.
+                if (selectedCameraId) {
+                    for (const videoOptions of baseConstraintOptions) {
+                        const constraints: MediaStreamConstraints = {
+                            audio: false,
+                            video: { ...videoOptions, deviceId: { exact: selectedCameraId } }
+                        };
+                        if (await attemptStream(constraints)) {
+                            return; // Success, exit.
+                        }
+                    }
+                    console.warn(`Saved camera (${selectedCameraId}) not found or failed to start. Trying other available cameras.`);
+                }
+            
+                // Attempt 2: If the selected camera failed (or wasn't set), try with any available camera.
+                for (const videoOptions of baseConstraintOptions) {
+                    const constraints: MediaStreamConstraints = {
+                        audio: false,
+                        video: videoOptions
+                    };
+                    if (await attemptStream(constraints)) {
+                        return; // Success, exit.
                     }
                 }
                 
-                showAlert('카메라를 시작할 수 없습니다. 권한을 확인해 주세요.');
+                showAlert('카메라를 시작할 수 없습니다. 설정 페이지에서 다른 카메라를 선택하거나 브라우저의 카메라 권한을 확인해주세요.');
                 onClose();
             };
 

@@ -1,153 +1,205 @@
-import { API_KEY, CLIENT_ID, SCOPES } from '../googleApiConfig';
 
-// Make gapi and google types available
-// FIX: The `declare global` block was causing a "Duplicate identifier" error.
-// Declaring gapi and google as `any` at the module level is a safer way to
-// inform TypeScript about these globally available variables from external scripts,
-// and it overrides any potentially incorrect ambient type definitions.
-declare var gapi: any;
-declare var google: any;
 
-let gapiClientInited = false;
-let gisClientInited = false;
-let tokenClient: any;
+import { GOOGLE_API_CONFIG } from '../googleApiConfig';
 
-// A promise that resolves when the GAPI script and client are ready
-const gapiReadyPromise = new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://apis.google.com/js/api.js';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-        gapi.load('client:picker', async () => {
-            try {
-                await gapi.client.init({
-                    apiKey: API_KEY,
-                    discoveryDocs: [
-                        "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
-                        "https://sheets.googleapis.com/$discovery/rest?version=v4"
-                    ],
-                });
-                gapiClientInited = true;
-                resolve();
-            } catch (error) {
-                reject(error);
-            }
-        });
-    };
-    script.onerror = () => reject(new Error('Failed to load GAPI script.'));
-    document.head.appendChild(script);
-});
-
-// A promise that resolves when the Google Identity Services script and client are ready
-const gisReadyPromise = new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-        try {
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                callback: '', // Will be handled by the promise in signIn
-            });
-            gisClientInited = true;
-            resolve();
-        } catch (error) {
-            reject(error);
-        }
-    };
-    script.onerror = () => reject(new Error('Failed to load Google Identity Services script.'));
-    document.head.appendChild(script);
-});
-
-export async function initClient(): Promise<void> {
-    if (API_KEY.startsWith('YOUR_') || CLIENT_ID.startsWith('YOUR_')) {
-        console.warn("Google API Key or Client ID is not configured in googleApiConfig.ts. Drive Sync will be disabled.");
-        throw new Error("Google API credentials are not configured.");
-    }
-    await Promise.all([gapiReadyPromise, gisReadyPromise]);
+// --- Type Definitions for Google APIs ---
+// These are simplified types for what we get back from the APIs.
+interface Gapi {
+  client: {
+    init: (config: object) => Promise<void>;
+    request: (args: { path: string }) => Promise<{ result: { files: any[] }, body: string }>;
+    getToken: () => { access_token: string } | null;
+    setToken: (token: { access_token: string } | null) => void;
+  };
+  load: (apiName: string, callback: () => void) => void;
+  picker: any; // picker is a complex object
 }
 
-export function signIn(): Promise<any> {
-    return new Promise(async (resolve, reject) => {
-        await initClient();
-        
-        tokenClient.callback = (resp: any) => {
-            if (resp.error) {
-                return reject(resp);
-            }
-            gapi.client.setToken({ access_token: resp.access_token });
-            resolve(gapi.client.getToken());
-        };
-        
-        if (gapi.client.getToken() === null) {
-            tokenClient.requestAccessToken({ prompt: 'consent' });
-        } else {
-            tokenClient.requestAccessToken({ prompt: '' });
+interface GsiClient {
+  requestAccessToken: (overrideConfig?: { prompt?: string }) => void;
+  revoke: (accessToken: string, done: () => void) => void;
+}
+
+// FIX: Expanded TokenResponse to better match the actual API response.
+interface TokenResponse {
+  access_token: string;
+  expires_in: number;
+  scope: string;
+  token_type: string;
+  error?: string;
+  error_description?: string;
+  error_uri?: string;
+}
+
+interface PickerCallback {
+  docs: { id: string, name: string }[];
+  action: 'picked' | 'cancel' | 'error';
+}
+
+// --- Module-level variables to hold the client instances ---
+declare const gapi: Gapi;
+declare const google: { accounts: {oauth2: { initTokenClient: (config: object) => GsiClient }}};
+
+// Implement a promise resolver pattern to bridge the callback-based GSI API with promises.
+let signInPromiseResolve: ((token: TokenResponse) => void) | null = null;
+let signInPromiseReject: ((reason?: any) => void) | null = null;
+
+let tokenClient: GsiClient;
+let isInitialized = false;
+
+// Helper to load a script and return a promise
+const loadScript = (src: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+        const existingScript = document.querySelector(`script[src="${src}"]`);
+        if (existingScript) {
+            return resolve();
         }
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.defer = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+        document.body.appendChild(script);
     });
-}
+};
 
-export function signOut() {
-    const token = gapi.client.getToken();
-    if (token) {
-        google.accounts.oauth2.revoke(token.access_token, () => {
-            gapi.client.setToken(null);
-        });
-    }
-}
+/**
+ * Initializes the Google API client (gapi) and Google Identity Services client (gsi).
+ * This must be called before any other functions in this module.
+ */
+export const initGoogleClient = async () => {
+    if (isInitialized) return;
 
-export function showPicker(callback: (file: any) => void): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-        await initClient();
-        const token = gapi.client.getToken();
-        if (!token) {
-            return reject(new Error("Not signed in"));
+    // Wait for GSI to be available (loaded from index.html)
+    const gsiPromise = new Promise<void>((resolve) => {
+        const checkGsi = setInterval(() => {
+            if (typeof google !== 'undefined' && google.accounts) {
+                clearInterval(checkGsi);
+                resolve();
+            }
+        }, 100);
+    });
+
+    await Promise.all([
+        loadScript('https://apis.google.com/js/api.js'),
+        gsiPromise,
+    ]);
+
+    await new Promise<void>(resolve => gapi.load('client:picker', resolve));
+
+    await gapi.client.init({
+        apiKey: GOOGLE_API_CONFIG.API_KEY,
+        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+    });
+
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_API_CONFIG.CLIENT_ID,
+        scope: GOOGLE_API_CONFIG.SCOPES,
+        callback: (tokenResponse: TokenResponse) => {
+            if (tokenResponse && tokenResponse.access_token) {
+                // Set the token on the gapi client for any subsequent gapi calls.
+                gapi.client.setToken({ access_token: tokenResponse.access_token });
+                if (signInPromiseResolve) signInPromiseResolve(tokenResponse);
+            } else {
+                if (signInPromiseReject) signInPromiseReject(new Error("Sign-in failed or was cancelled."));
+            }
+            signInPromiseResolve = null;
+            signInPromiseReject = null;
+        },
+    });
+
+    isInitialized = true;
+};
+
+
+/**
+ * Initiates the Google Sign-In flow.
+ * @returns A promise that resolves with the access token.
+ */
+export const signIn = (): Promise<TokenResponse> => {
+    return new Promise((resolve, reject) => {
+        if (!tokenClient) {
+            return reject(new Error("Google client not initialized."));
         }
+        
+        signInPromiseResolve = resolve;
+        signInPromiseReject = reject;
 
-        const view = new google.picker.View(google.picker.ViewId.SPREADSHEETS);
-        const picker = new google.picker.PickerBuilder()
-            .setAppId(CLIENT_ID.split('-')[0])
-            .setOAuthToken(token.access_token)
+        // By explicitly setting `prompt: ''`, we ask Google not to show a consent screen
+        // if the user has already granted permissions. This is more explicit than relying
+        // on the default behavior and can help resolve 'invalid_request' errors in
+        // stricter environments like PWAs or embedded webviews.
+        tokenClient.requestAccessToken({ prompt: '' });
+    });
+};
+
+/**
+ * Signs the user out by revoking the current access token.
+ * @param accessToken The access token to revoke.
+ * @returns A promise that resolves when sign-out is complete.
+ */
+export const signOut = (accessToken: string): Promise<void> => {
+    return new Promise((resolve) => {
+        if (!tokenClient) return resolve();
+        // Also clear the token from the GAPI client for clean state management.
+        gapi.client.setToken(null);
+        tokenClient.revoke(accessToken, () => {
+             console.log('Google access token revoked.');
+             resolve();
+        });
+    });
+};
+
+/**
+ * Displays the Google Picker UI for selecting a spreadsheet file.
+ * @param accessToken The user's current OAuth2 access token.
+ * @returns A promise that resolves with the selected file's ID and name.
+ */
+export const showPicker = (accessToken: string): Promise<{id: string, name: string}> => {
+    return new Promise((resolve, reject) => {
+        const view = new gapi.picker.View(gapi.picker.ViewId.SPREADSHEETS);
+        view.setMimeTypes("application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/x-vnd.ms-excel");
+        
+        const picker = new gapi.picker.PickerBuilder()
             .addView(view)
-            .setDeveloperKey(API_KEY)
-            .setCallback((data: any) => {
-                if (data.action === google.picker.Action.PICKED) {
-                    const file = data.docs[0];
-                    callback({ id: file.id, name: file.name });
-                    resolve();
-                } else if (data.action === google.picker.Action.CANCEL) {
-                    resolve();
+            .setOAuthToken(accessToken)
+            .setDeveloperKey(GOOGLE_API_CONFIG.API_KEY)
+            .setCallback((data: PickerCallback) => {
+                if (data.action === 'picked' && data.docs && data.docs.length > 0) {
+                    resolve({ id: data.docs[0].id, name: data.docs[0].name });
+                } else if (data.action === 'cancel') {
+                    reject(new Error("Picker was cancelled."));
+                } else {
+                    reject(new Error("Error picking file."));
                 }
             })
             .build();
         picker.setVisible(true);
     });
-}
+};
 
-export async function getSheetData(spreadsheetId: string): Promise<any[]> {
-    await initClient();
-    const token = gapi.client.getToken();
-    if (!token) {
-        throw new Error("Not signed in");
+/**
+ * Downloads the content of a Google Drive file as an ArrayBuffer.
+ * This is designed for XLS files by exporting them as .xlsx format.
+ * @param fileId The ID of the file to download.
+ * @param accessToken The user's current OAuth2 access token.
+ * @returns A promise that resolves with the file content as an ArrayBuffer.
+ */
+export const getFileContent = async (fileId: string, accessToken: string): Promise<ArrayBuffer> => {
+    if (!accessToken) {
+        throw new Error("Google authentication token not found. Please sign in again.");
     }
-
-    try {
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: spreadsheetId,
-            range: 'A:C', // Assume Barcode, Name, Price are in the first 3 columns
-        });
-        // Remove header row if it exists
-        const values = response.result.values || [];
-        return values.length > 0 ? values.slice(1) : [];
-    } catch (err: any) {
-        if (err.status === 401) {
-             signOut();
-             throw new Error("Authorization expired. Please sign in again.");
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet`, {
+        headers: {
+            'Authorization': `Bearer ${accessToken}`
         }
-        console.error("Error fetching sheet data:", err);
-        throw new Error(`Failed to fetch data from Google Sheet. Error: ${err.result?.error?.message || 'Unknown'}`);
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`Failed to download file: ${error.error?.message || response.statusText}`);
     }
-}
+
+    return response.arrayBuffer();
+};

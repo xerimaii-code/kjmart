@@ -49,7 +49,7 @@ export interface EditedOrderDraft {
     memo: string;
 }
 
-export interface SyncFile {
+export interface GoogleDriveFile {
     id: string;
     name: string;
 }
