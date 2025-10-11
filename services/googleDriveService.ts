@@ -1,5 +1,4 @@
 
-
 import { GOOGLE_API_CONFIG } from '../googleApiConfig';
 
 // --- Type Definitions for Google APIs ---
@@ -161,8 +160,13 @@ export const showPicker = (accessToken: string): Promise<{id: string, name: stri
         const view = new gapi.picker.View(gapi.picker.ViewId.SPREADSHEETS);
         view.setMimeTypes("application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/x-vnd.ms-excel");
         
+        // Extract the App ID from the Client ID for the Picker. This is a numeric part.
+        const APP_ID = GOOGLE_API_CONFIG.CLIENT_ID.split('-')[0];
+
         const picker = new gapi.picker.PickerBuilder()
             .addView(view)
+            .setAppId(APP_ID)
+            .setOrigin(window.location.origin)
             .setOAuthToken(accessToken)
             .setDeveloperKey(GOOGLE_API_CONFIG.API_KEY)
             .setCallback((data: PickerCallback) => {

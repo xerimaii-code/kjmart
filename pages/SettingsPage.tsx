@@ -141,7 +141,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 setProductFile(file);
             }
         } catch (error) {
-            console.log("Picker was closed or failed.", error);
+            // Don't show an alert if the user just cancelled the picker.
+            if (error instanceof Error && error.message.includes("cancelled")) {
+                console.log("Picker was cancelled by the user.");
+            } else {
+                console.error("Failed to open Google Picker:", error);
+                showAlert("파일 선택기를 여는 데 실패했습니다. Google Cloud 설정에서 Picker API가 활성화되어 있는지, API 키가 올바른지 확인해주세요.");
+            }
         }
     }, [googleToken, showAlert, setCustomerFile, setProductFile]);
 
