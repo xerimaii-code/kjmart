@@ -34,6 +34,16 @@ interface PickerCallback {
   action: 'picked' | 'cancel' | 'error';
 }
 
+// Add global declarations for the promises and callbacks we defined in index.html
+declare global {
+  interface Window {
+    gapiLoadedPromise: Promise<void>;
+    gsiLoadedPromise: Promise<void>;
+    gapiLoaded: () => void;
+    gsiLoaded: () => void;
+  }
+}
+
 // --- Module-level variables to hold the client instances ---
 declare const gapi: Gapi;
 declare const google: { accounts: {oauth2: { initTokenClient: (config: object) => GsiClient }}};
@@ -52,33 +62,18 @@ let isInitialized = false;
 export const initGoogleClient = async () => {
     if (isInitialized) return;
 
-    // Create a promise that waits for both the GAPI and GSI clients to be loaded
-    // by the script tags in index.html.
-    const apiReadyPromise = new Promise<void>((resolve) => {
-        const checkApis = setInterval(() => {
-            if (typeof google !== 'undefined' && google.accounts && typeof gapi !== 'undefined' && gapi.load) {
-                clearInterval(checkApis);
-                resolve();
-            }
-        }, 100);
-    });
+    // Await the promises set up in index.html to ensure scripts are fully loaded
+    // before proceeding. This is a robust way to avoid race conditions.
+    await Promise.all([window.gapiLoadedPromise, window.gsiLoadedPromise]);
 
-    await apiReadyPromise;
-
-    // Now that the base gapi object is loaded, load the specific 'client' and 'picker'
-    // modules, and initialize the client library inside the callback for safety.
+    // Now that gapi is guaranteed to be loaded, load the specific 'client' and 'picker' modules.
     await new Promise<void>((resolve, reject) => {
         gapi.load('client:picker', {
-            callback: async () => {
-                try {
-                    await gapi.client.init({
-                        apiKey: GOOGLE_API_CONFIG.API_KEY,
-                        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-                    });
-                    resolve();
-                } catch (error) {
-                    reject(error);
-                }
+            callback: () => {
+                // The libraries are loaded. We don't need to call gapi.client.init()
+                // for the Picker API to work or for our fetch-based calls, so we resolve directly
+                // to avoid potential side-effects from the init call.
+                resolve();
             },
             onerror: (error: any) => {
                 console.error("GAPI module loading failed:", error);
@@ -87,6 +82,7 @@ export const initGoogleClient = async () => {
         });
     });
 
+    // Initialize the token client now that GSI is also guaranteed to be loaded.
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_API_CONFIG.CLIENT_ID,
         scope: GOOGLE_API_CONFIG.SCOPES,

@@ -27,9 +27,17 @@
 
     <!-- es-module-shims polyfill must be loaded synchronously (blocking) before any import maps or modules. -->
     <script src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+    
     <!-- Google Identity Services -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <script>
+      // Create promises that will resolve when the Google API scripts have loaded.
+      // This is more robust than polling for the global objects.
+      window.gapiLoadedPromise = new Promise(resolve => { window.gapiLoaded = resolve; });
+      window.gsiLoadedPromise = new Promise(resolve => { window.gsiLoaded = resolve; });
+    </script>
+    <script src="https://accounts.google.com/gsi/client" onload="gsiLoaded()" async></script>
+    <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()" async></script>
+
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
