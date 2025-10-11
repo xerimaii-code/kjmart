@@ -139,47 +139,61 @@ export const signOut = (accessToken: string): Promise<void> => {
 
 /**
  * Displays the Google Picker UI for selecting a spreadsheet file.
+ * This function includes a retry mechanism to handle GAPI initialization race conditions.
  * @param accessToken The user's current OAuth2 access token.
  * @returns A promise that resolves with the selected file's ID and name.
  */
 export const showPicker = (accessToken: string): Promise<{id: string, name: string}> => {
     return new Promise((resolve, reject) => {
-        if (typeof gapi === 'undefined' || !gapi.picker || !gapi.picker.ViewId) {
-            const gapiExists = typeof gapi !== 'undefined';
-            const pickerExists = gapiExists && typeof gapi.picker !== 'undefined';
-            const debugInfo = `(gapi: ${gapiExists}, gapi.picker: ${pickerExists})`;
-            console.error(`Picker API not ready. ${debugInfo}`);
-            return reject(new Error(`Google Picker API가 완전히 로드되지 않았습니다. ${debugInfo}`));
-        }
+        const maxRetries = 10; // Try for 1 second (10 * 100ms)
+        let attempt = 0;
 
-        try {
-            const view = new gapi.picker.View(gapi.picker.ViewId.SPREADSHEETS);
-            view.setMimeTypes("application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/x-vnd.ms-excel");
-            
-            const APP_ID = GOOGLE_API_CONFIG.CLIENT_ID.split('-')[0];
+        const tryShowPicker = () => {
+            // Check if the Picker API's core components are ready. This is more reliable
+            // than just checking for `gapi.picker`.
+            if (typeof gapi?.picker?.ViewId?.SPREADSHEETS !== 'undefined') {
+                try {
+                    const view = new gapi.picker.View(gapi.picker.ViewId.SPREADSHEETS);
+                    view.setMimeTypes("application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/x-vnd.ms-excel");
+                    
+                    const APP_ID = GOOGLE_API_CONFIG.CLIENT_ID.split('-')[0];
 
-            const picker = new gapi.picker.PickerBuilder()
-                .addView(view)
-                .setAppId(APP_ID)
-                .setOrigin(window.location.origin)
-                .setOAuthToken(accessToken)
-                .setDeveloperKey(GOOGLE_API_CONFIG.API_KEY)
-                .setCallback((data: PickerCallback) => {
-                    if (data.action === 'picked' && data.docs && data.docs.length > 0) {
-                        resolve({ id: data.docs[0].id, name: data.docs[0].name });
-                    } else if (data.action === 'cancel') {
-                        reject(new Error("사용자가 파일 선택을 취소했습니다."));
-                    } else {
-                        // This case handles errors reported by the picker itself, like auth issues.
-                        reject(new Error("파일 선택 중 오류가 발생했습니다. 권한을 확인해주세요."));
-                    }
-                })
-                .build();
-            picker.setVisible(true);
-        } catch (e) {
-            console.error("Error creating or showing Google Picker:", e);
-            reject(new Error("Picker를 생성하는 데 실패했습니다. 브라우저 콘솔을 확인해주세요."));
-        }
+                    const picker = new gapi.picker.PickerBuilder()
+                        .addView(view)
+                        .setAppId(APP_ID)
+                        .setOrigin(window.location.origin)
+                        .setOAuthToken(accessToken)
+                        .setDeveloperKey(GOOGLE_API_CONFIG.API_KEY)
+                        .setCallback((data: PickerCallback) => {
+                            if (data.action === 'picked' && data.docs && data.docs.length > 0) {
+                                resolve({ id: data.docs[0].id, name: data.docs[0].name });
+                            } else if (data.action === 'cancel') {
+                                reject(new Error("사용자가 파일 선택을 취소했습니다."));
+                            } else {
+                                reject(new Error("파일 선택 중 오류가 발생했습니다. 권한을 확인해주세요."));
+                            }
+                        })
+                        .build();
+                    picker.setVisible(true);
+                } catch (e) {
+                    console.error("Error creating or showing Google Picker:", e);
+                    reject(new Error("Picker를 생성하는 데 실패했습니다. 브라우저 콘솔을 확인해주세요."));
+                }
+            } else {
+                // If not ready, wait and retry.
+                attempt++;
+                if (attempt < maxRetries) {
+                    setTimeout(tryShowPicker, 100);
+                } else {
+                    const gapiExists = typeof gapi !== 'undefined';
+                    const pickerExists = gapiExists && typeof gapi.picker !== 'undefined';
+                    const debugInfo = `(gapi: ${gapiExists}, gapi.picker: ${pickerExists}, gapi.picker.ViewId: ${gapiExists && pickerExists ? String(gapi.picker.ViewId) : 'N/A'})`;
+                    reject(new Error(`Google Picker API가 완전히 로드되지 않았습니다. ${debugInfo}`));
+                }
+            }
+        };
+
+        tryShowPicker();
     });
 };
 

@@ -23,3 +23,16 @@ export const GOOGLE_API_CONFIG = {
   // drive.readonly: Google Picker API 사용에 필요
   SCOPES: "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly",
 };
+// Vite, Astro 등 import.meta.env를 사용하는 경우
+const API_KEY = import.meta.env.REACT_APP_GOOGLE_API_KEY as string;
+const CLIENT_ID = import.meta.env.REACT_APP_GOOGLE_CLIENT_ID as string;
+
+// Create React App 등 process.env를 사용하는 경우
+// const API_KEY = process.env.REACT_APP_GOOGLE_API_KEY as string;
+// const CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID as string;
+
+export const GOOGLE_API_CONFIG = {
+  API_KEY: API_KEY,
+  CLIENT_ID: CLIENT_ID,
+  SCOPES: "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly",
+};
