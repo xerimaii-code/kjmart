@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 interface QuantityInputModalProps {
     isOpen: boolean;
@@ -25,8 +24,6 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
         }
     }, [isOpen, initialQuantity]);
 
-    useAdjustForKeyboard(modalContentRef, isOpen);
-
     if (!isOpen) return null;
 
     const handleConfirm = () => {
@@ -45,9 +42,9 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true">
-            <div ref={modalContentRef} className="bg-white rounded-xl shadow-2xl w-full max-w-xs overflow-hidden transition-transform duration-200" onClick={e => e.stopPropagation()}>
-                <div className="p-2">
-                    <h3 className="text-base font-semibold text-gray-800 text-center mb-1 truncate" title={itemName}>{itemName}</h3>
+            <div ref={modalContentRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transition-transform duration-200" onClick={e => e.stopPropagation()}>
+                <div className="p-6">
+                    <h3 className="text-lg font-bold text-gray-800 text-center mb-4 truncate" title={itemName}>{itemName}</h3>
                     
                     <div className="flex items-center justify-center">
                          <input 
@@ -64,23 +61,26 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
                                 }
                             }}
                             onKeyDown={handleKeyDown}
-                            className="w-full h-10 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-xl focus:outline-none"
+                            className="w-full h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-2xl focus:outline-none"
                             autoComplete="off"
                             pattern="-?\d*"
                         />
                     </div>
                 </div>
 
-                <div className="bg-gray-50 p-2 grid grid-cols-2 gap-2">
+                <div
+                    className="bg-gray-50 p-3 flex gap-3"
+                    style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+                >
                     <button
                         onClick={onClose}
-                        className="px-4 h-10 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm"
+                        className="w-1/3 px-4 h-16 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-lg"
                     >
                         취소
                     </button>
                     <button
                         onClick={handleConfirm}
-                        className="text-white px-4 h-10 flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-sm"
+                        className="flex-grow text-white px-4 h-16 flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg"
                     >
                         확인
                     </button>

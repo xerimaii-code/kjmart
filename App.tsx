@@ -172,7 +172,7 @@ const AppContent: React.FC = () => {
                     className="h-full flex absolute top-0 left-0"
                     style={{
                         width: `${pages.length * 100}%`,
-                        transform: `translateX(${-currentPageIndex * (100 / pages.length)}%)`
+                        // transform is now managed by useSwipeNavigation hook
                     }}
                 >
                     {pages.map(page => {

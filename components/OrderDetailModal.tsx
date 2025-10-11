@@ -26,12 +26,21 @@ const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
 
 // FIX: Wrap EditedItemRow in React.forwardRef to allow it to receive a ref.
 // This is necessary to scroll to the item when it's added.
-const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; isCompleted: boolean, isNew: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, isCompleted, isNew, onEdit, onRemove }, ref) => {
+const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; isCompleted: boolean, isNew: boolean, onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void; }>(({ item, isCompleted, isNew, onEdit, onRemove }, ref) => {
+    const handleEdit = useCallback(() => {
+        if (!isCompleted) onEdit(item);
+    }, [isCompleted, onEdit, item]);
+    
+    const handleRemove = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!isCompleted) onRemove(item);
+    }, [isCompleted, onRemove, item]);
+
     return (
         <div
             ref={ref}
             className={`flex items-center p-3 space-x-2 transition-all duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-            onClick={() => !isCompleted && onEdit(item)}
+            onClick={handleEdit}
         >
             <div className="flex-grow min-w-0 pr-1">
                 <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
@@ -50,7 +59,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; i
                 <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
                 <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
                 {!isCompleted && (
-                    <button onClick={(e) => onRemove(e, item)} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+                    <button onClick={handleRemove} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
                         <RemoveIcon className="w-5 h-5"/>
                     </button>
                 )}
@@ -71,6 +80,7 @@ const OrderDetailModal: React.FC = () => {
     const isCompleted = useMemo(() => !!order?.completedAt || !!order?.completionDetails, [order]);
     
     const [productSearch, setProductSearch] = useState('');
+    const debouncedProductSearch = useDebounce(productSearch, 300);
     const [showDropdown, setShowDropdown] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     const [productForModal, setProductForModal] = useState<Product | null>(null);
@@ -92,10 +102,12 @@ const OrderDetailModal: React.FC = () => {
     const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
     const lastItemCount = useRef(0);
+    const initialLoad = useRef(true);
 
     // --- State and Draft Logic ---
     useEffect(() => {
         if (order) {
+            initialLoad.current = true; // Reset scroll flag when a new order is viewed
             setIsDraftLoading(true);
             getDraft<EditedOrderDraft>(order.id)
                 .then(setDraft)
@@ -157,7 +169,7 @@ const OrderDetailModal: React.FC = () => {
         closeDetailModal();
     }, [closeDetailModal]);
     
-    const handleCancelAndDiscard = () => {
+    const handleCancelAndDiscard = useCallback(() => {
         if (hasChanges) {
              showAlert(
                 "수정사항을 저장하지 않고 취소하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
@@ -173,7 +185,7 @@ const OrderDetailModal: React.FC = () => {
         } else {
             closeDetailModal();
         }
-    };
+    }, [hasChanges, showAlert, order, closeDetailModal]);
 
     useEffect(() => {
         if (order) {
@@ -223,25 +235,25 @@ const OrderDetailModal: React.FC = () => {
         }
     }, [products, showAlert, editedItems]);
     
-    const handleNextScan = () => {
+    const handleNextScan = useCallback(() => {
         openScanner('modal', handleScanSuccess, true);
-    };
+    }, [openScanner, handleScanSuccess]);
 
     const filteredProducts = useMemo(() => {
-        const searchTerm = productSearch.trim().toLowerCase();
+        const searchTerm = debouncedProductSearch.trim().toLowerCase();
         if (!searchTerm) return [];
         return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm));
-    }, [products, productSearch]);
+    }, [products, debouncedProductSearch]);
 
-    const handleProductSelect = (product: Product) => {
+    const handleProductSelect = useCallback((product: Product) => {
         setAddItemTrigger('search');
         handleAddProduct(product);
         setProductSearch('');
         setShowDropdown(false);
         productSearchInputRef.current?.blur();
-    };
+    }, [handleAddProduct]);
 
-    const handleSave = () => {
+    const handleSave = useCallback(() => {
         if (!order) return;
         if (editedItems.length === 0) {
             showAlert("품목이 없습니다. 발주를 저장할 수 없습니다.");
@@ -262,24 +274,33 @@ const OrderDetailModal: React.FC = () => {
         deleteDraft(order.id);
         closeDetailModal();
         showAlert("발주 내역이 수정되었습니다.");
-    };
+    }, [order, editedItems, totalAmount, memo, updateOrder, setLastModifiedOrderId, closeDetailModal, showAlert]);
     
 
     useEffect(() => {
-        if (scrollableContainerRef.current && quickAddedBarcode) {
-            const itemElement = itemRefs.current.get(quickAddedBarcode);
-            if (itemElement) {
-                itemElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (scrollableContainerRef.current) {
+            if (initialLoad.current && editedItems.length > 0) {
+                // On initial load, jump to the bottom after a short delay
+                setTimeout(() => {
+                    if (scrollableContainerRef.current) {
+                        scrollableContainerRef.current.scrollTop = scrollableContainerRef.current.scrollHeight;
+                        initialLoad.current = false;
+                    }
+                }, 50);
+            } else if (quickAddedBarcode) {
+                const itemElement = itemRefs.current.get(quickAddedBarcode);
+                if (itemElement) {
+                    itemElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                setQuickAddedBarcode(null);
+            } else if (editedItems.length > lastItemCount.current) {
+                scrollableContainerRef.current.scrollTo({ top: scrollableContainerRef.current.scrollHeight, behavior: 'smooth' });
             }
-            setQuickAddedBarcode(null);
-        } else if (scrollableContainerRef.current && editedItems.length > lastItemCount.current) {
-            scrollableContainerRef.current.scrollTo({ top: scrollableContainerRef.current.scrollHeight, behavior: 'smooth' });
         }
         lastItemCount.current = editedItems.length;
     }, [editedItems, quickAddedBarcode]);
     
-    const handleRemoveItem = useCallback((e: React.MouseEvent, itemToRemove: OrderItem) => {
-        e.stopPropagation();
+    const handleRemoveItem = useCallback((itemToRemove: OrderItem) => {
         showAlert(
             `'${itemToRemove.name}' 품목을 삭제하시겠습니까?`,
             () => removeItem(itemToRemove.barcode),

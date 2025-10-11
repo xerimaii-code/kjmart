@@ -57,8 +57,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 
                 // A list of constraints to try, from most desirable to least.
                 const constraintsToTry: MediaStreamConstraints[] = [
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any },
+                    // Prioritize higher resolutions for better scanning quality as requested.
                     { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
+                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any },
+                    // Fallback to a standard, lower resolution if high-res fails.
+                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 640 }, height: { ideal: 480 } } as any },
+                    // Fallback to simpler constraints if specific resolutions fail.
                     { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous' } as any },
                     { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment' } },
                     { audio: false, video: { ...baseVideoConstraints } },

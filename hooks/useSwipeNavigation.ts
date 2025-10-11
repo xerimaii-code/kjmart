@@ -1,4 +1,5 @@
-import { useRef, useCallback, useEffect }from 'react';
+// FIX: Add 'React' to the import from 'react' to fix 'Cannot find namespace React' errors.
+import React, { useRef, useCallback, useEffect }from 'react';
 
 interface UseSwipeNavigationOptions<T> {
     items: T[];
@@ -17,7 +18,7 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
     
     const setPosition = useCallback((x: number, animate = false) => {
         if (containerRef.current) {
-            containerRef.current.style.transition = animate ? 'transform 0.3s ease-out' : 'none';
+            containerRef.current.style.transition = animate ? 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none';
             containerRef.current.style.transform = `translateX(${x}px)`;
         }
     }, [containerRef]);

@@ -27,10 +27,17 @@ const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
 };
 
 const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void }) => {
+    const handleEdit = useCallback(() => onEdit(item), [onEdit, item]);
+    
+    const handleRemove = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        onRemove(item);
+    }, [onRemove, item]);
+
     return (
         <div
             className="flex items-center p-3 space-x-2 cursor-pointer hover:bg-gray-50"
-            onClick={() => onEdit(item)}
+            onClick={handleEdit}
         >
             <div className="flex-grow min-w-0 pr-1">
                 <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
@@ -47,7 +54,7 @@ const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit
             <div className="flex items-center space-x-1.5 flex-shrink-0">
                 <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
                 <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
-                <button onClick={(e) => { e.stopPropagation(); onRemove(item); }} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+                <button onClick={handleRemove} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
                     <RemoveIcon className="w-5 h-5"/>
                 </button>
             </div>
@@ -67,6 +74,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const [productSearch, setProductSearch] = useState('');
     const [memo, setMemo] = useState('');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
+    
+    const debouncedCustomerSearch = useDebounce(customerSearch, 300);
+    const debouncedProductSearch = useDebounce(productSearch, 300);
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
@@ -156,29 +166,29 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     }, [items.length]);
     
     const filteredCustomers = useMemo(() => {
-        const searchTerm = customerSearch.trim().toLowerCase();
+        const searchTerm = debouncedCustomerSearch.trim().toLowerCase();
         if (!searchTerm || isCustomerSelected) return [];
         return customers.filter(c => c.name.toLowerCase().includes(searchTerm) || c.comcode.includes(searchTerm));
-    }, [customers, customerSearch, isCustomerSelected]);
+    }, [customers, debouncedCustomerSearch, isCustomerSelected]);
 
     const filteredProducts = useMemo(() => {
-        const searchTerm = productSearch.trim().toLowerCase();
+        const searchTerm = debouncedProductSearch.trim().toLowerCase();
         if (!searchTerm) return [];
         return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm));
-    }, [products, productSearch]);
+    }, [products, debouncedProductSearch]);
 
-    const handleSelectCustomer = (customer: Customer) => {
+    const handleSelectCustomer = useCallback((customer: Customer) => {
         setSelectedCustomer(customer);
         setCustomerSearch(customer.name);
         setShowCustomerDropdown(false);
         productSearchInputRef.current?.focus();
-    };
+    }, []);
 
-    const handleClearCustomer = () => {
+    const handleClearCustomer = useCallback(() => {
         setSelectedCustomer(null);
         setCustomerSearch('');
         setTimeout(() => customerSearchInputRef.current?.focus(), 0);
-    };
+    }, []);
 
     const resetOrder = useCallback((options?: { preventFocus?: boolean }) => {
         setSelectedCustomer(null);
@@ -238,7 +248,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
-    const handleAddProductFromSearch = (product: Product) => {
+    const handleAddProductFromSearch = useCallback((product: Product) => {
         setAddItemTrigger('search');
         const existingItem = items.find(item => item.barcode === product.barcode);
         setProductForModal(product);
@@ -246,7 +256,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         setProductSearch('');
         setShowProductDropdown(false);
         productSearchInputRef.current?.blur();
-    };
+    }, [items]);
 
     const handleScanSuccess = useCallback((barcode: string) => {
         const product = products.find(p => p.barcode === barcode);

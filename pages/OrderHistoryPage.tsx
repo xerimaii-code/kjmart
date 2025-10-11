@@ -44,17 +44,70 @@ const OrderCard = memo(({
     hasDraft,
     onCardClick,
     onMenuToggle,
-    actionMenuItems
+    onSmsExport,
+    onXlsExport,
+    onDelete,
+    onCancelCompletion,
 }: {
     order: Order;
     isHighlighted: boolean;
     isMenuOpen: boolean;
     hasDraft: boolean;
-    onCardClick: () => void;
-    onMenuToggle: (e: React.MouseEvent) => void;
-    actionMenuItems: ActionMenuItem[];
+    onCardClick: (id: number) => void;
+    onMenuToggle: (id: number) => void;
+    onSmsExport: (order: Order) => void;
+    onXlsExport: (order: Order) => void;
+    onDelete: (order: Order) => void;
+    onCancelCompletion: (order: Order) => void;
 }) => {
     const isCompleted = !!order.completedAt || !!order.completionDetails;
+
+    const handleInternalCardClick = useCallback(() => {
+        onCardClick(order.id);
+    }, [onCardClick, order.id]);
+
+    const handleInternalMenuToggle = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        onMenuToggle(order.id);
+    }, [onMenuToggle, order.id]);
+
+    const actionMenuItems: ActionMenuItem[] = useMemo(() => {
+        const commonDeleteAction = {
+            id: 'delete',
+            label: '삭제',
+            icon: <TrashIcon className="w-5 h-5 text-red-500" />,
+            className: 'text-red-500 font-medium',
+            onClick: () => onDelete(order),
+        };
+
+        if (isCompleted) {
+            return [
+                {
+                    id: 'cancel',
+                    label: '완료 취소',
+                    icon: <UndoIcon className="w-5 h-5 text-gray-500" />,
+                    onClick: () => onCancelCompletion(order),
+                },
+                commonDeleteAction,
+            ];
+        }
+
+        return [
+            {
+                id: 'sms',
+                label: 'SMS 내보내기',
+                icon: <SmsIcon className="w-5 h-5 text-gray-500" />,
+                onClick: () => onSmsExport(order),
+            },
+            {
+                id: 'xls',
+                label: 'XLS 내보내기',
+                icon: <XlsIcon className="w-5 h-5 text-gray-500" />,
+                onClick: () => onXlsExport(order),
+            },
+            commonDeleteAction,
+        ];
+    }, [isCompleted, order, onCancelCompletion, onDelete, onSmsExport, onXlsExport]);
 
     return (
         <div className={`relative ${isMenuOpen ? 'z-10' : ''}`}>
@@ -63,7 +116,7 @@ const OrderCard = memo(({
                 className={`flex items-center bg-white rounded-xl transition-colors duration-500 ease-in-out ${isHighlighted ? 'bg-yellow-100 ring-2 ring-yellow-300' : 'hover:bg-slate-100'}`}
             >
                 <div
-                    onClick={onCardClick}
+                    onClick={handleInternalCardClick}
                     className={`flex-grow p-3 cursor-pointer rounded-l-xl ${isCompleted ? 'opacity-60' : ''}`}
                     role="button"
                 >
@@ -79,7 +132,7 @@ const OrderCard = memo(({
                     </div>
                 </div>
                 <div className="flex-shrink-0 px-1">
-                    <button onClick={onMenuToggle} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors">
+                    <button onClick={handleInternalMenuToggle} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors">
                         <MoreVerticalIcon className="w-5 h-5" />
                     </button>
                 </div>
@@ -242,6 +295,21 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     
     const sortedDates = Object.keys(groupedByDate);
     
+    // Scroll to bottom when the page becomes active and orders are loaded.
+    useEffect(() => {
+        const scrollToBottom = () => {
+            if (scrollableContainerRef.current) {
+                scrollableContainerRef.current.scrollTop = scrollableContainerRef.current.scrollHeight;
+            }
+        };
+        
+        if (isActive && filteredOrders.length > 0) {
+            // A short timeout can help ensure layout is complete before scrolling.
+            const timer = setTimeout(scrollToBottom, 50);
+            return () => clearTimeout(timer);
+        }
+    }, [isActive, filteredOrders.length]);
+
     const handleDelete = useCallback((order: Order) => {
         showAlert(
             `'${order.customer.name}'의 발주 내역을 삭제하시겠습니까?`,
@@ -309,8 +377,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         }
     }, [openMenuId]);
     
-    const handleMenuToggle = useCallback((e: React.MouseEvent, orderId: number) => {
-        e.stopPropagation();
+    const handleMenuToggle = useCallback((orderId: number) => {
         setOpenMenuId(prevId => (prevId === orderId ? null : orderId));
     }, []);
     
@@ -355,39 +422,6 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                 </div>
                                 <div className="p-2 space-y-px">
                                     {dailyOrders.map(order => {
-                                        const isCompleted = !!order.completedAt || !!order.completionDetails;
-                                        
-                                        const actionMenuItems: ActionMenuItem[] = isCompleted ? [
-                                            {
-                                                id: 'cancel', label: '완료 취소',
-                                                icon: <UndoIcon className="w-5 h-5 text-gray-500" />,
-                                                onClick: () => { handleCancelCompletion(order); setOpenMenuId(null); },
-                                            },
-                                            {
-                                                id: 'delete', label: '삭제',
-                                                icon: <TrashIcon className="w-5 h-5 text-red-500" />,
-                                                className: 'text-red-500 font-medium',
-                                                onClick: () => { handleDelete(order); setOpenMenuId(null); },
-                                            }
-                                        ] : [
-                                            {
-                                                id: 'sms', label: 'SMS 내보내기',
-                                                icon: <SmsIcon className="w-5 h-5 text-gray-500" />,
-                                                onClick: () => handleSmsExport(order)
-                                            },
-                                            {
-                                                id: 'xls', label: 'XLS 내보내기',
-                                                icon: <XlsIcon className="w-5 h-5 text-gray-500" />,
-                                                onClick: () => handleXlsExport(order)
-                                            },
-                                            {
-                                                id: 'delete', label: '삭제',
-                                                icon: <TrashIcon className="w-5 h-5 text-red-500" />,
-                                                className: 'text-red-500 font-medium',
-                                                onClick: () => { handleDelete(order); setOpenMenuId(null); },
-                                            }
-                                        ];
-
                                         return (
                                             <OrderCard
                                                 key={order.id}
@@ -395,9 +429,12 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                                 isHighlighted={highlightedOrderId === order.id}
                                                 isMenuOpen={openMenuId === order.id}
                                                 hasDraft={draftOrderIds.has(order.id)}
-                                                onCardClick={() => handleCardClick(order.id)}
-                                                onMenuToggle={(e) => handleMenuToggle(e, order.id)}
-                                                actionMenuItems={actionMenuItems}
+                                                onCardClick={handleCardClick}
+                                                onMenuToggle={handleMenuToggle}
+                                                onSmsExport={handleSmsExport}
+                                                onXlsExport={handleXlsExport}
+                                                onDelete={handleDelete}
+                                                onCancelCompletion={handleCancelCompletion}
                                             />
                                         )
                                     })}

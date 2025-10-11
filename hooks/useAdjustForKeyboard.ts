@@ -15,47 +15,62 @@ export function useAdjustForKeyboard(modalContentRef: React.RefObject<HTMLElemen
         const modalElement = modalContentRef.current;
         const visualViewport = window.visualViewport;
 
-        // Exit if the visualViewport API is not supported.
         if (!visualViewport) return;
+        
+        const originalCSSTransition = modalElement.style.transition || '';
+        
+        // Capture the initial transform style only once.
+        if (originalTransform.current === '') {
+            const computedTransform = getComputedStyle(modalElement).transform;
+            // 'none' is the computed value for no transform, which we treat as an empty string.
+            originalTransform.current = computedTransform === 'none' ? '' : computedTransform;
+        }
+        
+        // Use a variable within the effect's scope to track the keyboard state across resize events.
+        let wasKeyboardOpen = window.innerHeight > visualViewport.height;
 
         const handleResize = () => {
             if (!modalElement) return;
 
-            // Save the original transform style on the first run, if it's not already set.
-            if (originalTransform.current === '') {
-                originalTransform.current = modalElement.style.transform;
-            }
+            const isKeyboardOpen = window.innerHeight > visualViewport.height;
 
-            const { height: viewportHeight } = visualViewport;
-            const modalRect = modalElement.getBoundingClientRect();
-            
-            // Check if the keyboard is likely open by comparing visual viewport height to the window's inner height.
-            const isKeyboardOpen = window.innerHeight > viewportHeight;
-            
-            // If the keyboard is open and the bottom of the modal is below the visible part of the viewport...
-            if (isKeyboardOpen && modalRect.bottom > viewportHeight) {
-                const padding = 8; // 8px padding between modal and keyboard
-                const requiredUpwardShift = modalRect.bottom - viewportHeight + padding;
-                // Apply a transform to move the modal up.
-                modalElement.style.transform = `translateY(-${requiredUpwardShift}px)`;
-            } else {
-                // Otherwise (keyboard is closed or modal is not obscured), restore the original transform.
+            if (isKeyboardOpen) {
+                // Keyboard is opening or is currently open.
+                // We move the modal instantly (transition: 'none') to prevent visual stuttering
+                // as multiple resize events fire during the keyboard's animation.
+                modalElement.style.transition = 'none';
+
+                const modalRect = modalElement.getBoundingClientRect();
+                // Check if the bottom of the modal is obscured by the keyboard.
+                if (modalRect.bottom > visualViewport.height) {
+                    const padding = 8; // A small gap between the modal and the keyboard.
+                    const requiredUpwardShift = modalRect.bottom - visualViewport.height + padding;
+                    modalElement.style.transform = `translateY(-${requiredUpwardShift}px)`;
+                }
+            } else if (wasKeyboardOpen) {
+                // This condition is true only on the first resize event after the keyboard closes.
+                // We restore the original CSS transition to animate the modal back to its place.
+                modalElement.style.transition = originalCSSTransition;
                 modalElement.style.transform = originalTransform.current;
             }
+            
+            // Update the state for the next resize event.
+            wasKeyboardOpen = isKeyboardOpen;
         };
 
         visualViewport.addEventListener('resize', handleResize);
         
-        // Run once initially in case the keyboard is already open when the modal appears.
+        // Run once initially to position correctly if keyboard is already open.
         handleResize();
 
         return () => {
             visualViewport.removeEventListener('resize', handleResize);
-            // On cleanup, ensure the transform is reset to its original state.
+            // On cleanup (modal closes), ensure all styles are reset to their original state.
             if (modalElement) {
+                modalElement.style.transition = originalCSSTransition;
                 modalElement.style.transform = originalTransform.current;
             }
-            originalTransform.current = '';
+            originalTransform.current = ''; // Reset for the next time the modal opens.
         };
     }, [isOpen, modalContentRef]);
 }

@@ -255,6 +255,47 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             />
             <div className="max-w-3xl mx-auto w-full p-4 md:p-6 space-y-8">
 
+                {/* --- 앱 및 기기 설정 (App & Device Settings) --- */}
+                <div>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">앱 및 기기 설정</h2>
+                    <div className="space-y-4">
+                        <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50">
+                            <div className="p-4 flex items-center">
+                                <div className="flex-shrink-0 w-10 h-10 bg-slate-200 text-slate-600 rounded-lg flex items-center justify-center">
+                                    <CameraIcon className="w-6 h-6"/>
+                                </div>
+                                <div className="flex-grow ml-4">
+                                    <h3 className="font-semibold text-slate-800">바코드 스캔 카메라</h3>
+                                    <p className="text-sm text-slate-500">스캔에 사용할 카메라를 선택하세요.</p>
+                                </div>
+                            </div>
+                            <div className="px-4 pb-4 space-y-3">
+                                <select 
+                                    id="camera-select" 
+                                    value={currentCameraSelection} 
+                                    onChange={e => setCurrentCameraSelection(e.target.value)} 
+                                    className="block w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-sky-500 bg-slate-50 shadow-inner shadow-gray-200/80"
+                                    aria-label="사용할 카메라를 선택하세요"
+                                >
+                                    {cameras.length === 0 && <option value="">사용 가능한 카메라 없음</option>}
+                                    {cameras.map((camera, index) => (
+                                        <option key={camera.deviceId} value={camera.deviceId}>
+                                            {camera.label || `카메라 ${index + 1}`}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button 
+                                    onClick={handleSaveCamera} 
+                                    className="w-full bg-gradient-to-b from-sky-400 to-sky-500 text-white p-3 rounded-md font-bold hover:from-sky-500 hover:to-sky-600 transition shadow-sm disabled:bg-slate-300 disabled:from-slate-300 disabled:to-slate-300"
+                                    disabled={!currentCameraSelection}
+                                >
+                                    선택 카메라로 저장
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {/* --- 초기 데이터 설정 (Initial Data Setup) --- */}
                 <div>
                     <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">초기 데이터 설정</h2>
@@ -310,47 +351,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 <TrashIcon className="w-5 h-5"/>
                                 <span>모든 발주 내역 삭제</span>
                              </button>
-                        </div>
-                    </div>
-                </div>
-                
-                {/* --- 앱 및 기기 설정 (App & Device Settings) --- */}
-                <div>
-                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">앱 및 기기 설정</h2>
-                    <div className="space-y-4">
-                        <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50">
-                            <div className="p-4 flex items-center">
-                                <div className="flex-shrink-0 w-10 h-10 bg-slate-200 text-slate-600 rounded-lg flex items-center justify-center">
-                                    <CameraIcon className="w-6 h-6"/>
-                                </div>
-                                <div className="flex-grow ml-4">
-                                    <h3 className="font-semibold text-slate-800">바코드 스캔 카메라</h3>
-                                    <p className="text-sm text-slate-500">스캔에 사용할 카메라를 선택하세요.</p>
-                                </div>
-                            </div>
-                            <div className="px-4 pb-4 space-y-3">
-                                <select 
-                                    id="camera-select" 
-                                    value={currentCameraSelection} 
-                                    onChange={e => setCurrentCameraSelection(e.target.value)} 
-                                    className="block w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-sky-500 bg-slate-50 shadow-inner shadow-gray-200/80"
-                                    aria-label="사용할 카메라를 선택하세요"
-                                >
-                                    {cameras.length === 0 && <option value="">사용 가능한 카메라 없음</option>}
-                                    {cameras.map((camera, index) => (
-                                        <option key={camera.deviceId} value={camera.deviceId}>
-                                            {camera.label || `카메라 ${index + 1}`}
-                                        </option>
-                                    ))}
-                                </select>
-                                <button 
-                                    onClick={handleSaveCamera} 
-                                    className="w-full bg-gradient-to-b from-sky-400 to-sky-500 text-white p-3 rounded-md font-bold hover:from-sky-500 hover:to-sky-600 transition shadow-sm disabled:bg-slate-300 disabled:from-slate-300 disabled:to-slate-300"
-                                    disabled={!currentCameraSelection}
-                                >
-                                    선택 카메라로 저장
-                                </button>
-                            </div>
                         </div>
                     </div>
                 </div>
