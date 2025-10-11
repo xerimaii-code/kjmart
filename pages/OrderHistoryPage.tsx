@@ -102,6 +102,7 @@ const OrderCard = memo(({
         </div>
     );
 });
+OrderCard.displayName = 'OrderCard';
 
 
 const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {

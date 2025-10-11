@@ -54,6 +54,7 @@ const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit
         </div>
     );
 });
+OrderItemRow.displayName = 'OrderItemRow';
 
 
 const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {

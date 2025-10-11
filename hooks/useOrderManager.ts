@@ -30,8 +30,12 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
     // Synchronize the internal state with the initialItems prop when it changes
     // (e.g., when a draft is loaded or a different order is displayed).
     useEffect(() => {
-        setItems(normalizeItems(initialItems));
-    }, [initialItems]);
+        const normalizedNewItems = normalizeItems(initialItems);
+        // Deep comparison to prevent unnecessary state updates and re-renders
+        if (JSON.stringify(normalizedNewItems) !== JSON.stringify(items)) {
+            setItems(normalizedNewItems);
+        }
+    }, [initialItems, items]);
 
     useEffect(() => {
         // Notify parent component of any changes to the managed items.

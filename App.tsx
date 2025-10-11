@@ -1,5 +1,5 @@
 import React, { useState, lazy, Suspense, useRef, useEffect } from 'react';
-import { AppProvider, useDataState, useUIActions, useUIState } from './context/AppContext';
+import { AppProvider, useUIActions, useUIState } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import ScannerModal from './components/ScannerModal';
@@ -9,6 +9,7 @@ import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS } from './services/dataService';
 import { useDataActions } from './context/AppContext';
+import { useSwipeNavigation } from './hooks/useSwipeNavigation';
 
 // Lazy load pages and heavy modals
 const NewOrderPage = lazy(() => import('./pages/NewOrderPage'));
@@ -140,13 +141,7 @@ const AppContent: React.FC = () => {
 
     const pages: Page[] = ['history', 'new-order', 'settings'];
     const currentPageIndex = pages.indexOf(activePage);
-
     const swipeContainerRef = useRef<HTMLDivElement>(null);
-    const isDragging = useRef(false);
-    const dragStartCoords = useRef({ x: 0, y: 0 });
-    const currentTranslate = useRef(0);
-    const dragDirection = useRef<'horizontal' | 'vertical' | 'none'>('none');
-
 
     const handleNavigation = (targetPage: Page) => {
         if (targetPage === activePage) return;
@@ -154,85 +149,13 @@ const AppContent: React.FC = () => {
         setActivePage(targetPage);
     };
 
-    const getPositionX = (event: React.TouchEvent) => event.touches[0].clientX;
-    
-    const setPosition = (x: number, animate = false) => {
-        if (swipeContainerRef.current) {
-            swipeContainerRef.current.style.transition = animate ? 'transform 0.3s ease-out' : 'none';
-            swipeContainerRef.current.style.transform = `translateX(${x}px)`;
-        }
-    };
+    const { onTouchStart, onTouchMove, onTouchEnd } = useSwipeNavigation({
+        items: pages,
+        activeIndex: currentPageIndex,
+        onNavigate: (page) => handleNavigation(page),
+        containerRef: swipeContainerRef,
+    });
 
-    const onTouchStart = (e: React.TouchEvent) => {
-        const target = e.target as HTMLElement;
-        if (target.closest('button, input, a, select, textarea, [role="dialog"]')) {
-            return;
-        }
-
-        dragStartCoords.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        dragDirection.current = 'none';
-        isDragging.current = true;
-    };
-    
-    const onTouchMove = (e: React.TouchEvent) => {
-        if (!isDragging.current) return;
-    
-        if (dragDirection.current === 'none') {
-            const deltaX = Math.abs(e.touches[0].clientX - dragStartCoords.current.x);
-            const deltaY = Math.abs(e.touches[0].clientY - dragStartCoords.current.y);
-            
-            if (deltaX > 5 || deltaY > 5) {
-                dragDirection.current = deltaX > deltaY ? 'horizontal' : 'vertical';
-            }
-        }
-        
-        if (dragDirection.current === 'horizontal') {
-            e.preventDefault();
-            const currentPos = getPositionX(e);
-            const delta = currentPos - dragStartCoords.current.x;
-            
-            if (swipeContainerRef.current) {
-                const parentWidth = swipeContainerRef.current.parentElement!.clientWidth;
-                const baseTranslate = -currentPageIndex * parentWidth;
-                currentTranslate.current = baseTranslate + delta;
-                setPosition(currentTranslate.current);
-            }
-        }
-    };
-
-    const onTouchEnd = () => {
-        if (!isDragging.current || !swipeContainerRef.current || dragDirection.current !== 'horizontal') {
-            isDragging.current = false;
-            return;
-        }
-        isDragging.current = false;
-
-        const containerWidth = swipeContainerRef.current.parentElement!.clientWidth;
-        const movedBy = currentTranslate.current - (-currentPageIndex * containerWidth);
-        const threshold = containerWidth / 4;
-    
-        let newIndex = currentPageIndex;
-        if (movedBy < -threshold && currentPageIndex < pages.length - 1) {
-            newIndex = currentPageIndex + 1;
-        } else if (movedBy > threshold && currentPageIndex > 0) {
-            newIndex = currentPageIndex - 1;
-        }
-    
-        if (newIndex !== currentPageIndex) {
-            handleNavigation(pages[newIndex]);
-        } else {
-            setPosition(-currentPageIndex * containerWidth, true);
-        }
-    };
-
-    useEffect(() => {
-        if (swipeContainerRef.current && !isDragging.current) {
-            const containerWidth = swipeContainerRef.current.parentElement!.clientWidth;
-            const newTranslate = -currentPageIndex * containerWidth;
-            currentTranslate.current = newTranslate;
-            setPosition(newTranslate, true);
-        }
-    }, [currentPageIndex]);
 
     return (
         <div className="h-full w-full flex flex-col bg-gray-50">

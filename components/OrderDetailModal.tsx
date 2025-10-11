@@ -58,6 +58,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; i
         </div>
     );
 }));
+EditedItemRow.displayName = 'EditedItemRow';
 
 
 const OrderDetailModal: React.FC = () => {

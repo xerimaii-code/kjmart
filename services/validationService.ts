@@ -1,43 +1,41 @@
 import { Customer, Order, Product, OrderItem } from "../types";
 
-const isObject = (value: any): value is object => value !== null && typeof value === 'object' && !Array.isArray(value);
+const isObject = (value: unknown): value is object => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-// FIX: Cast `item` to access properties, as `isObject` narrows its type to `object`.
-export const validateCustomer = (item: any): item is Customer => {
-    return isObject(item) &&
-           typeof (item as Customer).comcode === 'string' &&
-           typeof (item as Customer).name === 'string';
+export const validateCustomer = (item: unknown): item is Customer => {
+    if (!isObject(item)) return false;
+    const maybeCustomer = item as Customer;
+    return typeof maybeCustomer.comcode === 'string' &&
+           typeof maybeCustomer.name === 'string';
 };
 
-// FIX: Cast `item` to access properties, as `isObject` narrows its type to `object`.
-export const validateProduct = (item: any): item is Product => {
-    return isObject(item) &&
-           typeof (item as Product).barcode === 'string' &&
-           typeof (item as Product).name === 'string' &&
-           typeof (item as Product).price === 'number';
+export const validateProduct = (item: unknown): item is Product => {
+    if (!isObject(item)) return false;
+    const maybeProduct = item as Product;
+    return typeof maybeProduct.barcode === 'string' &&
+           typeof maybeProduct.name === 'string' &&
+           typeof maybeProduct.price === 'number';
 };
 
-// FIX: Cast `item` to `OrderItem` to access properties not present on the `Product` type, which `item` is narrowed to by `validateProduct`.
-export const validateOrderItem = (item: any): item is OrderItem => {
-    const typedItem = item as OrderItem;
-    return validateProduct(item) &&
-           typeof typedItem.quantity === 'number' &&
+export const validateOrderItem = (item: unknown): item is OrderItem => {
+    if (!validateProduct(item)) return false;
+    const typedItem = item as OrderItem; // We know it's at least a Product
+    return typeof typedItem.quantity === 'number' &&
            (typedItem.unit === '개' || typedItem.unit === '박스') &&
-           // FIX: The property 'isPromotion' does not exist on 'OrderItem'. Replaced with a check for the optional 'memo' property.
            (typeof typedItem.memo === 'string' || typeof typedItem.memo === 'undefined');
 };
 
-// FIX: Cast `item` to access properties, as `isObject` narrows its type to `object`.
-export const validateOrder = (item: any): item is Order => {
-    return isObject(item) &&
-           typeof (item as Order).id === 'number' &&
-           typeof (item as Order).date === 'string' &&
-           (typeof (item as Order).createdAt === 'string' || typeof (item as Order).createdAt === 'undefined') &&
-           validateCustomer((item as Order).customer) &&
-           Array.isArray((item as Order).items) &&
-           (item as Order).items.every(validateOrderItem) &&
-           typeof (item as Order).total === 'number' &&
-           (typeof (item as Order).completedAt === 'string' || (item as Order).completedAt === null || typeof (item as Order).completedAt === 'undefined');
+export const validateOrder = (item: unknown): item is Order => {
+    if (!isObject(item)) return false;
+    const maybeOrder = item as Order;
+    return typeof maybeOrder.id === 'number' &&
+           typeof maybeOrder.date === 'string' &&
+           (typeof maybeOrder.createdAt === 'string' || typeof maybeOrder.createdAt === 'undefined') &&
+           validateCustomer(maybeOrder.customer) &&
+           Array.isArray(maybeOrder.items) &&
+           maybeOrder.items.every(validateOrderItem) &&
+           typeof maybeOrder.total === 'number' &&
+           (typeof maybeOrder.completedAt === 'string' || maybeOrder.completedAt === null || typeof maybeOrder.completedAt === 'undefined');
 };
 
 export const validateCustomers = (data: any[]): Customer[] => {

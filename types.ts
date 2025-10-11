@@ -48,8 +48,3 @@ export interface EditedOrderDraft {
     items: OrderItem[];
     memo: string;
 }
-
-export interface GoogleDriveFile {
-    id: string;
-    name: string;
-}
