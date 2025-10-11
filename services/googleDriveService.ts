@@ -1,4 +1,3 @@
-
 import { GOOGLE_API_CONFIG } from '../googleApiConfig';
 
 // --- Type Definitions for Google APIs ---
@@ -10,7 +9,7 @@ interface Gapi {
     getToken: () => { access_token: string } | null;
     setToken: (token: { access_token: string } | null) => void;
   };
-  load: (apiName: string, callback: () => void) => void;
+  load: (apiName: string, config: object) => void;
   picker: any; // picker is a complex object
 }
 
@@ -46,23 +45,6 @@ let signInPromiseReject: ((reason?: any) => void) | null = null;
 let tokenClient: GsiClient;
 let isInitialized = false;
 
-// Helper to load a script and return a promise
-const loadScript = (src: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-        const existingScript = document.querySelector(`script[src="${src}"]`);
-        if (existingScript) {
-            return resolve();
-        }
-        const script = document.createElement('script');
-        script.src = src;
-        script.async = true;
-        script.defer = true;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
-        document.body.appendChild(script);
-    });
-};
-
 /**
  * Initializes the Google API client (gapi) and Google Identity Services client (gsi).
  * This must be called before any other functions in this module.
@@ -70,26 +52,39 @@ const loadScript = (src: string): Promise<void> => {
 export const initGoogleClient = async () => {
     if (isInitialized) return;
 
-    // Wait for GSI to be available (loaded from index.html)
-    const gsiPromise = new Promise<void>((resolve) => {
-        const checkGsi = setInterval(() => {
-            if (typeof google !== 'undefined' && google.accounts) {
-                clearInterval(checkGsi);
+    // Create a promise that waits for both the GAPI and GSI clients to be loaded
+    // by the script tags in index.html.
+    const apiReadyPromise = new Promise<void>((resolve) => {
+        const checkApis = setInterval(() => {
+            if (typeof google !== 'undefined' && google.accounts && typeof gapi !== 'undefined' && gapi.load) {
+                clearInterval(checkApis);
                 resolve();
             }
         }, 100);
     });
 
-    await Promise.all([
-        loadScript('https://apis.google.com/js/api.js'),
-        gsiPromise,
-    ]);
+    await apiReadyPromise;
 
-    await new Promise<void>(resolve => gapi.load('client:picker', resolve));
-
-    await gapi.client.init({
-        apiKey: GOOGLE_API_CONFIG.API_KEY,
-        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+    // Now that the base gapi object is loaded, load the specific 'client' and 'picker'
+    // modules, and initialize the client library inside the callback for safety.
+    await new Promise<void>((resolve, reject) => {
+        gapi.load('client:picker', {
+            callback: async () => {
+                try {
+                    await gapi.client.init({
+                        apiKey: GOOGLE_API_CONFIG.API_KEY,
+                        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+                    });
+                    resolve();
+                } catch (error) {
+                    reject(error);
+                }
+            },
+            onerror: (error: any) => {
+                console.error("GAPI module loading failed:", error);
+                reject(new Error("Failed to load Google API modules."));
+            },
+        });
     });
 
     tokenClient = google.accounts.oauth2.initTokenClient({
@@ -157,29 +152,38 @@ export const signOut = (accessToken: string): Promise<void> => {
  */
 export const showPicker = (accessToken: string): Promise<{id: string, name: string}> => {
     return new Promise((resolve, reject) => {
-        const view = new gapi.picker.View(gapi.picker.ViewId.SPREADSHEETS);
-        view.setMimeTypes("application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/x-vnd.ms-excel");
-        
-        // Extract the App ID from the Client ID for the Picker. This is a numeric part.
-        const APP_ID = GOOGLE_API_CONFIG.CLIENT_ID.split('-')[0];
+        if (typeof gapi === 'undefined' || !gapi.picker || !gapi.picker.ViewId) {
+            return reject(new Error("Google Picker API가 완전히 로드되지 않았습니다. 잠시 후 다시 시도해주세요."));
+        }
 
-        const picker = new gapi.picker.PickerBuilder()
-            .addView(view)
-            .setAppId(APP_ID)
-            .setOrigin(window.location.origin)
-            .setOAuthToken(accessToken)
-            .setDeveloperKey(GOOGLE_API_CONFIG.API_KEY)
-            .setCallback((data: PickerCallback) => {
-                if (data.action === 'picked' && data.docs && data.docs.length > 0) {
-                    resolve({ id: data.docs[0].id, name: data.docs[0].name });
-                } else if (data.action === 'cancel') {
-                    reject(new Error("Picker was cancelled."));
-                } else {
-                    reject(new Error("Error picking file."));
-                }
-            })
-            .build();
-        picker.setVisible(true);
+        try {
+            const view = new gapi.picker.View(gapi.picker.ViewId.SPREADSHEETS);
+            view.setMimeTypes("application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/x-vnd.ms-excel");
+            
+            const APP_ID = GOOGLE_API_CONFIG.CLIENT_ID.split('-')[0];
+
+            const picker = new gapi.picker.PickerBuilder()
+                .addView(view)
+                .setAppId(APP_ID)
+                .setOrigin(window.location.origin)
+                .setOAuthToken(accessToken)
+                .setDeveloperKey(GOOGLE_API_CONFIG.API_KEY)
+                .setCallback((data: PickerCallback) => {
+                    if (data.action === 'picked' && data.docs && data.docs.length > 0) {
+                        resolve({ id: data.docs[0].id, name: data.docs[0].name });
+                    } else if (data.action === 'cancel') {
+                        reject(new Error("사용자가 파일 선택을 취소했습니다."));
+                    } else {
+                        // This case handles errors reported by the picker itself, like auth issues.
+                        reject(new Error("파일 선택 중 오류가 발생했습니다. 권한을 확인해주세요."));
+                    }
+                })
+                .build();
+            picker.setVisible(true);
+        } catch (e) {
+            console.error("Error creating or showing Google Picker:", e);
+            reject(new Error("Picker를 생성하는 데 실패했습니다. 브라우저 콘솔을 확인해주세요."));
+        }
     });
 };
 

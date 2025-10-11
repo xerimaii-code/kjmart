@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
@@ -31,10 +31,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [currentCameraSelection, setCurrentCameraSelection] = useState<string>(selectedCameraId || '');
     const [isLoading, setIsLoading] = useState(false);
-    
-    const restoreInputRef = useRef<HTMLInputElement>(null);
-    const customerInputRef = useRef<HTMLInputElement>(null);
-    const productInputRef = useRef<HTMLInputElement>(null);
 
     // --- Google Drive State ---
     const [isGapiReady, setIsGapiReady] = useState(false);
@@ -45,8 +41,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [customerFile, setCustomerFile] = useLocalStorage<GoogleDriveFile | null>('googleDriveCustomerFile', null);
     const [productFile, setProductFile] = useLocalStorage<GoogleDriveFile | null>('googleDriveProductFile', null);
     const [syncInterval, setSyncInterval] = useLocalStorage<number>('googleDriveSyncInterval', 0); // 0 = disabled
-    // FIX: Replace NodeJS.Timeout with ReturnType<typeof setInterval> for browser compatibility.
-    const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const syncIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Initialize Google API Client
     useEffect(() => {
@@ -71,12 +66,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
 
         if (isActive && isGapiReady && googleToken && syncInterval > 0) {
             const runAutoSync = () => {
-                // Don't auto-sync if a manual sync is already in progress
                 if (!isSyncing) {
                     handleSync();
                 }
             };
-            // Run once on setup, then set interval
             runAutoSync(); 
             syncIntervalRef.current = setInterval(runAutoSync, syncInterval * 60 * 1000);
         }
@@ -141,12 +134,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 setProductFile(file);
             }
         } catch (error) {
-            // Don't show an alert if the user just cancelled the picker.
-            if (error instanceof Error && error.message.includes("cancelled")) {
-                console.log("Picker was cancelled by the user.");
+            const defaultMessage = "파일 선택기를 여는 데 실패했습니다.\nGoogle Cloud 설정에서 다음을 확인해주세요:\n1. Google Picker API 사용 설정\n2. OAuth 클라이언트 ID의 '승인된 자바스크립트 원본'에 현재 URL 포함";
+            
+            if (error instanceof Error) {
+                if (error.message.includes("취소했습니다")) {
+                    console.log("Picker was cancelled by the user.");
+                } else {
+                    console.error("Failed to open Google Picker:", error);
+                    showAlert(`${defaultMessage}\n\n오류: ${error.message}`);
+                }
             } else {
-                console.error("Failed to open Google Picker:", error);
-                showAlert("파일 선택기를 여는 데 실패했습니다. Google Cloud 설정에서 Picker API가 활성화되어 있는지, API 키가 올바른지 확인해주세요.");
+                console.error("Failed to open Google Picker with unknown error:", error);
+                showAlert(defaultMessage);
             }
         }
     }, [googleToken, showAlert, setCustomerFile, setProductFile]);
@@ -158,22 +157,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         }
         setIsSyncing(true);
         try {
-            // Sync Customers
             const customerContent = await gDrive.getFileContent(customerFile.id, googleToken.access_token);
             const customerRows = await parseExcelFile(new Blob([customerContent]));
             const { valid: customers, errors: customerErrors } = processCustomerData(customerRows);
-            if (customerErrors.length > 0) {
-                 console.warn("Customer sync errors:", customerErrors);
-            }
+            if (customerErrors.length > 0) console.warn("Customer sync errors:", customerErrors);
             if (customers.length > 0) await setCustomers(customers);
 
-            // Sync Products
             const productContent = await gDrive.getFileContent(productFile.id, googleToken.access_token);
             const productRows = await parseExcelFile(new Blob([productContent]));
             const { valid: products, errors: productErrors } = processProductData(productRows);
-             if (productErrors.length > 0) {
-                 console.warn("Product sync errors:", productErrors);
-            }
+            if (productErrors.length > 0) console.warn("Product sync errors:", productErrors);
             if (products.length > 0) await setProducts(products);
 
             const syncTime = new Date().toLocaleString('ko-KR');
@@ -220,70 +213,78 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
 
     const handleRestoreFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
+        const inputElement = event.target;
         if (!file) return;
-        setIsLoading(true);
-        try {
-            const jsonString = await file.text();
-            await db.restoreFromBackup(jsonString);
-            showAlert('데이터가 성공적으로 복원되었습니다. 변경 사항을 적용하려면 앱을 새로고침합니다.', () => window.location.reload());
-        } catch (error) {
-            console.error("Restore failed:", error);
-            showAlert(error instanceof Error ? error.message : '데이터 복원에 실패했습니다.');
-        } finally {
-            if (event.target) event.target.value = '';
-            setIsLoading(false);
-        }
-    };
-    
-    const triggerRestore = () => {
-        showAlert("백업 파일로 복원하시겠습니까? 현재 앱의 모든 데이터가 백업 파일의 데이터로 대체됩니다. 이 작업은 되돌릴 수 없습니다.", () => {
-            restoreInputRef.current?.click();
-        }, "복원하기", 'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500');
+
+        showAlert(
+            `'${file.name}' 파일로 데이터를 복원하시겠습니까?\n현재 앱의 모든 데이터가 대체됩니다. 이 작업은 되돌릴 수 없습니다.`,
+            async () => {
+                setIsLoading(true);
+                try {
+                    const jsonString = await file.text();
+                    await db.restoreFromBackup(jsonString);
+                    showAlert('데이터가 성공적으로 복원되었습니다. 변경 사항을 적용하려면 앱을 새로고침합니다.', () => window.location.reload());
+                } catch (error) {
+                    console.error("Restore failed:", error);
+                    showAlert(error instanceof Error ? error.message : '데이터 복원에 실패했습니다.');
+                } finally {
+                    if (inputElement) inputElement.value = '';
+                    setIsLoading(false);
+                }
+            },
+            "복원하기",
+            'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500',
+            () => { // onCancel
+                if (inputElement) inputElement.value = '';
+            }
+        );
     };
     
     const handleMasterFileSelected = async (event: React.ChangeEvent<HTMLInputElement>, dataType: 'customer' | 'product') => {
         const file = event.target.files?.[0];
+        const inputElement = event.target;
         if (!file) return;
-        setIsLoading(true);
-        try {
-            const rows = await parseExcelFile(file);
-            let resultMessage = '';
-            if (dataType === 'customer') {
-                const { valid, invalidCount, errors } = processCustomerData(rows);
-                if (valid.length > 0) await setCustomers(valid);
-                resultMessage = `거래처 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
-                if (invalidCount > 0) {
-                    resultMessage += `\n\n[오류 예시]\n${errors.slice(0, 3).join('\n')}`;
-                    if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
-                }
-                showAlert(resultMessage);
-            } else {
-                const { valid, invalidCount, errors } = processProductData(rows);
-                if (valid.length > 0) await setProducts(valid);
-                resultMessage = `상품 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
-                 if (invalidCount > 0) {
-                    resultMessage += `\n\n[오류 예시]\n${errors.slice(0, 3).join('\n')}`;
-                    if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
-                }
-                showAlert(resultMessage);
-            }
-        } catch (error) {
-            console.error("Error during file import process:", error);
-            showAlert(`파일 처리 중 오류 발생: ${error instanceof Error ? error.message : String(error)}`);
-        } finally {
-            if (event.target) event.target.value = '';
-            setIsLoading(false);
-        }
-    };
 
-    const triggerMasterFileUpload = (type: 'customer' | 'product') => {
-        showAlert(`XLS 파일로 ${type === 'customer' ? '거래처' : '상품'} 데이터를 가져옵니다. 현재 기기의 데이터는 덮어쓰기 됩니다. 계속하시겠습니까?`, () => {
-            if (type === 'customer') {
-                customerInputRef.current?.click();
-            } else {
-                productInputRef.current?.click();
+        showAlert(
+            `'${file.name}' 파일로 ${dataType === 'customer' ? '거래처' : '상품'} 데이터를 가져옵니다.\n현재 데이터는 덮어쓰기 됩니다. 계속하시겠습니까?`,
+            async () => {
+                setIsLoading(true);
+                try {
+                    const rows = await parseExcelFile(file);
+                    let resultMessage = '';
+                    if (dataType === 'customer') {
+                        const { valid, invalidCount, errors } = processCustomerData(rows);
+                        if (valid.length > 0) await setCustomers(valid);
+                        resultMessage = `거래처 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
+                        if (invalidCount > 0) {
+                            resultMessage += `\n\n[오류 예시]\n${errors.slice(0, 3).join('\n')}`;
+                            if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
+                        }
+                        showAlert(resultMessage);
+                    } else {
+                        const { valid, invalidCount, errors } = processProductData(rows);
+                        if (valid.length > 0) await setProducts(valid);
+                        resultMessage = `상품 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
+                        if (invalidCount > 0) {
+                            resultMessage += `\n\n[오류 예시]\n${errors.slice(0, 3).join('\n')}`;
+                            if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
+                        }
+                        showAlert(resultMessage);
+                    }
+                } catch (error) {
+                    console.error("Error during file import process:", error);
+                    showAlert(`파일 처리 중 오류 발생: ${error instanceof Error ? error.message : String(error)}`);
+                } finally {
+                    setIsLoading(false);
+                    if (inputElement) inputElement.value = '';
+                }
+            },
+            "가져오기",
+            'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500',
+            () => { // onCancel
+                if (inputElement) inputElement.value = '';
             }
-        }, "가져오기", 'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500');
+        );
     };
 
     const handleLogout = () => {
@@ -308,9 +309,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     return (
         <div className="h-full overflow-y-auto bg-gray-200 relative pb-10">
             {isLoading && <LoadingSpinner />}
-            <input type="file" ref={customerInputRef} className="hidden" accept=".xlsx, .xls" onChange={(e) => handleMasterFileSelected(e, 'customer')} />
-            <input type="file" ref={productInputRef} className="hidden" accept=".xlsx, .xls" onChange={(e) => handleMasterFileSelected(e, 'product')} />
-            <input type="file" ref={restoreInputRef} className="hidden" accept="application/json" onChange={handleRestoreFileSelected} />
             
             <div className="max-w-3xl mx-auto w-full p-4 md:p-6 space-y-8">
                 {/* --- Google Drive Sync --- */}
@@ -366,15 +364,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4 divide-y divide-slate-200">
                         <div className="py-4 first:pt-0 last:pb-0">
                             <h3 className="font-semibold text-slate-800">거래처 자료 등록</h3>
-                            <button onClick={() => triggerMasterFileUpload('customer')} className="w-full mt-2 flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white p-3 rounded-md font-bold transition shadow-sm">
-                                <UploadIcon className="w-5 h-5"/><span>거래처 파일 선택</span>
-                            </button>
+                            <label className="w-full mt-2 flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white p-3 rounded-md font-bold transition shadow-sm cursor-pointer">
+                                <UploadIcon className="w-5 h-5"/>
+                                <span>거래처 파일 선택</span>
+                                <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => handleMasterFileSelected(e, 'customer')} />
+                            </label>
                         </div>
                         <div className="py-4 first:pt-0 last:pb-0">
                             <h3 className="font-semibold text-slate-800">상품 마스터 등록</h3>
-                            <button onClick={() => triggerMasterFileUpload('product')} className="w-full mt-2 flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white p-3 rounded-md font-bold transition shadow-sm">
-                                <UploadIcon className="w-5 h-5"/><span>상품 파일 선택</span>
-                            </button>
+                             <label className="w-full mt-2 flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white p-3 rounded-md font-bold transition shadow-sm cursor-pointer">
+                                <UploadIcon className="w-5 h-5"/>
+                                <span>상품 파일 선택</span>
+                                <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => handleMasterFileSelected(e, 'product')} />
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -391,9 +393,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         </div>
                         <div className="py-4 first:pt-0 last:pb-0">
                             <h3 className="font-semibold text-slate-800">백업에서 복원</h3>
-                             <button onClick={triggerRestore} className="w-full mt-2 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white p-3 rounded-md font-bold transition shadow-sm">
-                                <UploadIcon className="w-5 h-5"/><span>파일에서 복원</span>
-                             </button>
+                             <label className="w-full mt-2 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white p-3 rounded-md font-bold transition shadow-sm cursor-pointer">
+                                <UploadIcon className="w-5 h-5"/>
+                                <span>파일에서 복원</span>
+                                <input type="file" className="hidden" accept="application/json" onChange={handleRestoreFileSelected} />
+                             </label>
                         </div>
                         <div className="py-4 first:pt-0 last:pb-0">
                             <h3 className="font-semibold text-slate-800 text-red-600">발주 내역 초기화</h3>
