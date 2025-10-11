@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 interface QuantityInputModalProps {
     isOpen: boolean;
@@ -24,6 +25,8 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
         }
     }, [isOpen, initialQuantity]);
 
+    useAdjustForKeyboard(modalContentRef, isOpen);
+
     if (!isOpen) return null;
 
     const handleConfirm = () => {
@@ -42,7 +45,7 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true">
-            <div ref={modalContentRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transition-transform duration-200" onClick={e => e.stopPropagation()}>
+            <div ref={modalContentRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transition-transform duration-200" onClick={e => e.stopPropagation()}>
                 <div className="p-6">
                     <h3 className="text-lg font-bold text-gray-800 text-center mb-4 truncate" title={itemName}>{itemName}</h3>
                     
@@ -61,7 +64,7 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
                                 }
                             }}
                             onKeyDown={handleKeyDown}
-                            className="w-full h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-2xl focus:outline-none"
+                            className="w-24 h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-2xl focus:outline-none"
                             autoComplete="off"
                             pattern="-?\d*"
                         />

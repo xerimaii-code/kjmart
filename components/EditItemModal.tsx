@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { OrderItem } from '../types';
 import ToggleSwitch from './ToggleSwitch';
+import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 interface EditItemModalProps {
     isOpen: boolean;
@@ -27,6 +28,8 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
             }, 150);
         }
     }, [isOpen, item]);
+
+    useAdjustForKeyboard(modalContentRef, isOpen);
 
     if (!isOpen || !item) return null;
 
@@ -65,7 +68,7 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="editItemModalTitle">
-            <div ref={modalContentRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-md transition-transform duration-200 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div ref={modalContentRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-transform duration-200 overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="p-6">
                     <h3 id="editItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={item.name}>{item.name}</h3>
                     <p className="text-center text-sm text-gray-500 mb-4">{item.price.toLocaleString()}원</p>

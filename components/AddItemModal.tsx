@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, OrderItem } from '../types';
 import ToggleSwitch from './ToggleSwitch';
+import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 interface AddItemModalProps {
     isOpen: boolean;
@@ -34,6 +35,8 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
             }
         }
     }, [isOpen, product, existingItem, initialSettings, trigger]);
+
+    useAdjustForKeyboard(modalContentRef, isOpen);
 
     if (!isOpen || !product) return null;
 
@@ -81,7 +84,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
-            <div ref={modalContentRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-md transition-transform duration-200 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div ref={modalContentRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-transform duration-200 overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="p-6">
                     <h3 id="addItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
                     <p className="text-center text-sm text-gray-500 mb-4">{product.price.toLocaleString()}원</p>
