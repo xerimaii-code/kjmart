@@ -77,7 +77,7 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
     }, [activePage]);
     
     return (
-        <nav ref={navRef} className="relative w-full bg-white flex justify-around items-center flex-shrink-0 shadow-sm">
+        <nav ref={navRef} className="relative w-full bg-slate-50 flex justify-around items-center flex-shrink-0 shadow-sm">
             <TabButton
                 page="history"
                 label="발주내역"

@@ -167,6 +167,18 @@ export const setSetting = (key: string, value: any): Promise<void> => {
     return put('settings', { key, value });
 };
 
+export const getValue = async <T>(path: string, defaultValue: T): Promise<T> => {
+    if (!dbInitialized) return defaultValue;
+    const snapshot = await get(ref(db, path));
+    const data = snapshot.val();
+    return data ?? defaultValue;
+};
+
+export const setValue = (path: string, value: any): Promise<void> => {
+    if (!dbInitialized) return Promise.resolve();
+    return set(ref(db, path), value);
+};
+
 
 // --- Backup & Restore & Data Management ---
 

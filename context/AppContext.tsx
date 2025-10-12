@@ -61,6 +61,21 @@ interface UIActions {
     setLastModifiedOrderId: (id: number | null) => void;
 }
 
+const getDeviceId = (): string => {
+    const DEVICE_ID_KEY = 'app-device-id';
+    let storedId = localStorage.getItem(DEVICE_ID_KEY);
+    if (!storedId) {
+        // Simple UUID v4 generator
+        storedId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = (Math.random() * 16) | 0,
+                v = c === 'x' ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+        });
+        localStorage.setItem(DEVICE_ID_KEY, storedId);
+    }
+    return storedId;
+};
+
 // --- CONTEXT CREATION ---
 // For performance optimization, contexts are split into State and Actions.
 // Components that only need actions won't re-render when state changes.
@@ -242,8 +257,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             
             // 3. Fetch dynamic data and listen for realtime updates
             try {
+                const deviceId = getDeviceId();
+                const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
+
                 // Fetch initial non-cached data
-                const selectedCameraId = await db.getSetting<string | null>('selectedCameraId', null);
+                const selectedCameraId = await db.getValue<string | null>(cameraSettingPath, null);
                 if (isMounted) { setDataState(prev => ({ ...prev, selectedCameraId })); setLoadingState(prev => ({ ...prev, settings: true })); }
 
                 // Listen for realtime updates for master data, and update cache when new data arrives
@@ -306,7 +324,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     }
                 });
                 
-                unsubscribers.push(db.listenToSetting<string | null>('selectedCameraId', (id) => isMounted && setDataState(prev => ({ ...prev, selectedCameraId: id }))));
+                unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => isMounted && setDataState(prev => ({ ...prev, selectedCameraId: id }))));
 
             } catch (error) {
                 console.error("Failed to fetch initial data from Firebase:", error);
@@ -345,7 +363,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         },
         updateOrder: (updatedOrder) => db.put('orders', updatedOrder),
         deleteOrder: (orderId) => db.deleteByKey('orders', orderId),
-        setSelectedCameraId: (id) => db.setSetting('selectedCameraId', id),
+        setSelectedCameraId: (id) => {
+            const deviceId = getDeviceId();
+            const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
+            return db.setValue(cameraSettingPath, id);
+        },
         clearOrders: () => db.clearOrders(),
     }), []);
 

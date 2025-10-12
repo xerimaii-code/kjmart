@@ -91,8 +91,8 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
         const baseTranslate = -activeIndex * containerWidth;
         const movedBy = translateX - baseTranslate;
         
-        // Change page if swipe is more than 50% of the screen width
-        const threshold = containerWidth / 2;
+        // Change page if swipe is more than 40% of the screen width
+        const threshold = containerWidth * 0.4;
 
         let newIndex = activeIndex;
         if (movedBy < -threshold && activeIndex < items.length - 1) {
