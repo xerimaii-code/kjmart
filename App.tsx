@@ -101,8 +101,11 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
             />
             {/* Sliding Indicator */}
             <div 
-                className="absolute bottom-0 h-1 bg-blue-500 rounded-full transition-all duration-300 ease-in-out"
-                style={indicatorStyle}
+                className="absolute bottom-0 h-1 bg-blue-500 rounded-full"
+                style={{
+                    ...indicatorStyle,
+                    transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                }}
             />
         </nav>
     );

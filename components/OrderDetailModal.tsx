@@ -92,6 +92,15 @@ const OrderDetailModal: React.FC = () => {
     const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
     const lastItemCount = useRef(0);
+    
+    const [isRendered, setIsRendered] = useState(false);
+
+    useEffect(() => {
+        // Animate in
+        const timer = setTimeout(() => setIsRendered(true), 10);
+        return () => clearTimeout(timer);
+    }, []);
+
 
     // --- State and Draft Logic ---
     useEffect(() => {
@@ -158,8 +167,11 @@ const OrderDetailModal: React.FC = () => {
         }
     }, [debouncedDraftData, serverStateJSON, order, isDraftLoading]);
     
-    const handleCloseAndKeepDraft = useCallback(() => {
-        closeDetailModal();
+    const handleAnimatedClose = useCallback(() => {
+        setIsRendered(false);
+        setTimeout(() => {
+            closeDetailModal();
+        }, 500); // Match animation duration
     }, [closeDetailModal]);
     
     const handleCancelAndDiscard = () => {
@@ -170,13 +182,13 @@ const OrderDetailModal: React.FC = () => {
                     if (order) {
                         deleteDraft(order.id);
                     }
-                    closeDetailModal();
+                    handleAnimatedClose();
                 },
                 '변경사항 폐기',
                 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
             );
         } else {
-            closeDetailModal();
+            handleAnimatedClose();
         }
     };
 
@@ -195,7 +207,7 @@ const OrderDetailModal: React.FC = () => {
         const handlePopState = (event: PopStateEvent) => {
             if (editingOrderId !== null) {
                 event.preventDefault();
-                handleCloseAndKeepDraft();
+                handleAnimatedClose();
             }
         };
 
@@ -208,7 +220,7 @@ const OrderDetailModal: React.FC = () => {
                 window.history.back();
             }
         };
-    }, [editingOrderId, handleCloseAndKeepDraft]);
+    }, [editingOrderId, handleAnimatedClose]);
 
     const handleAddProduct = useCallback((product: Product) => {
         const existingItem = editedItems.find(item => item.barcode === product.barcode);
@@ -265,7 +277,7 @@ const OrderDetailModal: React.FC = () => {
         updateOrder(updatedOrder);
         setLastModifiedOrderId(order.id);
         deleteDraft(order.id);
-        closeDetailModal();
+        handleAnimatedClose();
         showAlert("발주 내역이 수정되었습니다.");
     };
     
@@ -349,8 +361,11 @@ const OrderDetailModal: React.FC = () => {
     }, [order]);
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-30 flex items-end justify-center">
-            <div className="bg-gray-50 h-[95%] w-full max-w-3xl rounded-t-2xl flex flex-col relative">
+        <div className={`fixed inset-0 bg-black z-30 flex items-end justify-center transition-opacity duration-500 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}>
+            <div
+                className={`bg-gray-50 h-[95%] w-full max-w-3xl rounded-t-2xl flex flex-col relative ${isRendered ? 'translate-y-0' : 'translate-y-full'}`}
+                style={{ transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+            >
                 <header className="p-4 bg-white border-b border-gray-200 flex-shrink-0 z-10">
                     <div className="flex justify-between items-center">
                         <div className="flex-1 min-w-0">
@@ -383,7 +398,7 @@ const OrderDetailModal: React.FC = () => {
                                 )}
                             </div>
                         </div>
-                        <button onClick={handleCloseAndKeepDraft} className="text-gray-500 hover:text-gray-800 transition-colors">
+                        <button onClick={handleAnimatedClose} className="text-gray-500 hover:text-gray-800 transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                     </div>

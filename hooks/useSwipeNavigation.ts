@@ -112,7 +112,7 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
     // Style object to be applied to the swipeable container
     const containerStyle: React.CSSProperties = {
         transform: `translateX(${translateX}px)`,
-        transition: isAnimating ? 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none',
+        transition: isAnimating ? 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none',
     };
 
     return { onTouchStart, onTouchMove, onTouchEnd, containerStyle };

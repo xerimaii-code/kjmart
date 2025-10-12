@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface AlertModalProps {
     isOpen: boolean;
@@ -11,6 +11,18 @@ interface AlertModalProps {
 }
 
 const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onConfirm, onCancel, confirmText, confirmButtonClass }) => {
+    const [isRendered, setIsRendered] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            // Delay to allow initial (invisible) styles to be applied before transitioning to visible state
+            const timer = setTimeout(() => setIsRendered(true), 10);
+            return () => clearTimeout(timer);
+        } else {
+            setIsRendered(false);
+        }
+    }, [isOpen]);
+    
     if (!isOpen) return null;
 
     const handleConfirm = () => {
@@ -28,8 +40,11 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
-            <div className="bg-white rounded-lg shadow-2xl w-full max-w-sm overflow-hidden border border-gray-200">
+        <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-400 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
+            <div
+                className={`bg-white rounded-lg shadow-2xl w-full max-w-sm overflow-hidden border border-gray-200 transition-all ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                style={{ transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+            >
                 <div className="p-6 text-center">
                     <p id="alert-dialog-title" className="text-lg text-slate-700 whitespace-pre-line">{message}</p>
                 </div>
