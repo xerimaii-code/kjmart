@@ -62,12 +62,11 @@ EditedItemRow.displayName = 'EditedItemRow';
 
 
 const OrderDetailModal: React.FC = () => {
-    const { orders, products } = useDataState();
+    const { products } = useDataState();
     const { updateOrder } = useDataActions();
-    const { editingOrderId } = useUIState();
+    const { editingOrder: order } = useUIState();
     const { closeDetailModal, showAlert, openScanner, setLastModifiedOrderId } = useUIActions();
     
-    const order = useMemo(() => orders.find(o => o.id === editingOrderId), [orders, editingOrderId]);
     const isCompleted = useMemo(() => !!order?.completedAt || !!order?.completionDetails, [order]);
     
     const [productSearch, setProductSearch] = useState('');
@@ -101,7 +100,6 @@ const OrderDetailModal: React.FC = () => {
         return () => clearTimeout(timer);
     }, []);
 
-
     // --- State and Draft Logic ---
     useEffect(() => {
         if (order) {
@@ -122,7 +120,8 @@ const OrderDetailModal: React.FC = () => {
         if (!order) return { items: [], memo: '' };
         if (isDraftLoading) return { items: [], memo: '' }; 
         if (draft) return { items: draft.items, memo: draft.memo };
-        return { items: order.items, memo: order.memo || '' };
+        // Defensive fix: ensure order.items is treated as an empty array if it's missing.
+        return { items: order.items || [], memo: order.memo || '' };
     }, [order, draft, isDraftLoading]);
     
     const {
@@ -152,7 +151,7 @@ const OrderDetailModal: React.FC = () => {
     
     const hasChanges = useMemo(() => {
         if (isDraftLoading || !serverStateJSON) return false;
-        return JSON.stringify({ items: editedItems, memo }) !== serverStateJSON;
+        return JSON.stringify({ items: normalizeItemsForComparison(editedItems), memo }) !== serverStateJSON;
     }, [editedItems, memo, serverStateJSON, isDraftLoading]);
 
     const debouncedDraftData = useDebounce({ items: editedItems, memo }, 500);
@@ -160,7 +159,7 @@ const OrderDetailModal: React.FC = () => {
     useEffect(() => {
         if (isDraftLoading || !order) return;
 
-        if (JSON.stringify(debouncedDraftData) !== serverStateJSON) {
+        if (JSON.stringify({ items: normalizeItemsForComparison(debouncedDraftData.items), memo: debouncedDraftData.memo }) !== serverStateJSON) {
             saveDraft(order.id, debouncedDraftData as EditedOrderDraft);
         } else {
             deleteDraft(order.id);
@@ -205,7 +204,7 @@ const OrderDetailModal: React.FC = () => {
 
     useEffect(() => {
         const handlePopState = (event: PopStateEvent) => {
-            if (editingOrderId !== null) {
+            if (order !== null) {
                 event.preventDefault();
                 handleAnimatedClose();
             }
@@ -220,7 +219,7 @@ const OrderDetailModal: React.FC = () => {
                 window.history.back();
             }
         };
-    }, [editingOrderId, handleAnimatedClose]);
+    }, [order, handleAnimatedClose]);
 
     const handleAddProduct = useCallback((product: Product) => {
         const existingItem = editedItems.find(item => item.barcode === product.barcode);
@@ -265,16 +264,15 @@ const OrderDetailModal: React.FC = () => {
             return;
         }
 
-        const updatedOrder: Order = {
+        const orderToUpdate: Order = {
             ...order,
             items: editedItems,
             total: totalAmount,
             memo: memo.trim(),
             date: new Date().toISOString(),
-            createdAt: order.createdAt || order.date,
         };
 
-        updateOrder(updatedOrder);
+        updateOrder(orderToUpdate);
         setLastModifiedOrderId(order.id);
         deleteDraft(order.id);
         handleAnimatedClose();
@@ -353,12 +351,9 @@ const OrderDetailModal: React.FC = () => {
         );
     };
 
-    const originalItemBarcodes = useMemo(() => {
-        if (!order) {
-            return new Set<string>();
-        }
-        return new Set(order.items.map(item => item.barcode));
-    }, [order]);
+    const originalItemBarcodes = useMemo(() => new Set((order?.items || []).map(item => item.barcode)), [order]);
+
+    const showLoadingSpinner = isDraftLoading;
 
     return (
         <div className={`fixed inset-0 bg-black z-30 flex items-end justify-center transition-opacity duration-500 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}>
@@ -479,7 +474,7 @@ const OrderDetailModal: React.FC = () => {
                 )}
                 
                 <div ref={scrollableContainerRef} className="scrollable-content p-2 pb-32 relative">
-                     {isDraftLoading ? (
+                     {showLoadingSpinner ? (
                         <div className="absolute inset-0 bg-gray-50/80 flex items-center justify-center z-20">
                             <SpinnerIcon className="w-8 h-8 text-blue-500" />
                         </div>

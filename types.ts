@@ -1,5 +1,4 @@
 
-
 export interface Customer {
     comcode: string;
     name: string;
@@ -22,7 +21,7 @@ export interface Order {
     date: string;
     createdAt?: string;
     customer: Customer;
-    items: OrderItem[];
+    itemCount: number;
     total: number;
     memo?: string;
     completedAt?: string | null; // For backward compatibility
@@ -30,6 +29,9 @@ export interface Order {
         type: 'sms' | 'xls';
         timestamp: string;
     } | null;
+    // This is an optional property used to temporarily attach items after fetching them
+    // from the separate /order-items/ path for specific UI operations like exports or modals.
+    items?: OrderItem[];
 }
 
 export type Page = 'new-order' | 'history' | 'settings';

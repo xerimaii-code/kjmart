@@ -266,7 +266,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 </div>
                                 <div className="flex-grow ml-4">
                                     <h3 className="font-semibold text-slate-800">바코드 스캔 카메라</h3>
-                                    <p className="text-sm text-slate-500">스캔에 사용할 카메라를 선택하세요.</p>
+                                    <p className="text-sm text-slate-500">현재 기기에서 스캔에 사용할 카메라를 선택하세요.</p>
                                 </div>
                             </div>
                             <div className="px-4 pb-4 space-y-3">

@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
-import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
+import { useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { Order } from '../types';
-import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon } from '../components/Icons';
+import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon, SpinnerIcon } from '../components/Icons';
 import { exportToSMS } from '../services/dataService';
 import { getAllDraftKeys } from '../services/draftDbService';
+import * as db from '../services/dbService';
 
 interface ActionMenuItem {
     id: string;
@@ -37,14 +38,14 @@ const getStatusIcon = (order: Order, hasDraft: boolean) => {
     return null;
 };
 
-const OrderCard = memo(({
+const OrderRow = memo(({
     order,
     isHighlighted,
     isMenuOpen,
     hasDraft,
     onCardClick,
     onMenuToggle,
-    actionMenuItems
+    actionMenuItems,
 }: {
     order: Order;
     isHighlighted: boolean;
@@ -60,33 +61,37 @@ const OrderCard = memo(({
         <div className={`relative ${isMenuOpen ? 'z-10' : ''}`}>
             <div
                 id={`order-item-${order.id}`}
-                className={`flex items-center bg-white rounded-xl transition-colors duration-500 ease-in-out ${isHighlighted ? 'bg-yellow-100 ring-2 ring-yellow-300' : 'hover:bg-slate-100'}`}
+                className={`flex items-center bg-white transition-all duration-300 ease-in-out border-b border-gray-200 last:border-b-0 ${isHighlighted ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}
             >
                 <div
                     onClick={onCardClick}
-                    className={`flex-grow p-3 cursor-pointer rounded-l-xl ${isCompleted ? 'opacity-60' : ''}`}
+                    className={`flex-grow p-4 cursor-pointer ${isCompleted ? 'opacity-60' : ''}`}
                     role="button"
+                    aria-label={`${order.customer.name} 주문 보기`}
                 >
-                    <div className="flex justify-between items-center">
-                        <p className="font-bold text-gray-800 text-lg flex items-center" title={order.customer.name}>
-                            {getStatusIcon(order, hasDraft)}
-                            <span className="truncate">{order.customer.name}</span>
-                            {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
-                        </p>
-                        <p className="font-bold text-gray-700 text-lg tabular-nums">
+                    <div className="flex justify-between items-center gap-2">
+                        <div className="flex-grow min-w-0">
+                            <p className="font-bold text-gray-800 text-base flex items-center" title={order.customer.name}>
+                                {getStatusIcon(order, hasDraft)}
+                                <span className="truncate">{order.customer.name}</span>
+                                {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                        </div>
+                        <p className="font-semibold text-gray-700 text-base tabular-nums flex-shrink-0">
                             {order.total.toLocaleString()} 원
                         </p>
                     </div>
                 </div>
-                <div className="flex-shrink-0 px-1">
-                    <button onClick={onMenuToggle} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors">
+                <div className="flex-shrink-0 pr-2">
+                    <button onClick={onMenuToggle} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors" aria-label="추가 옵션">
                         <MoreVerticalIcon className="w-5 h-5" />
                     </button>
                 </div>
             </div>
 
             {isMenuOpen && (
-                <div className="absolute top-12 right-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10 py-1" onClick={(e) => e.stopPropagation()}>
+                <div className="absolute top-12 right-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-20 py-1" onClick={(e) => e.stopPropagation()}>
                     {actionMenuItems.map(item => (
                         <button
                             key={item.id}
@@ -102,309 +107,214 @@ const OrderCard = memo(({
         </div>
     );
 });
-OrderCard.displayName = 'OrderCard';
+OrderRow.displayName = 'OrderRow';
 
 
 const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
-    const { orders } = useDataState();
-    const { deleteOrder, updateOrder } = useDataActions();
-    const { lastModifiedOrderId, isDeliveryModalOpen } = useUIState();
-    const { openDetailModal, showAlert, setLastModifiedOrderId, openDeliveryModal, closeDeliveryModal } = useUIActions();
+    const { deleteOrder, updateOrderStatus } = useDataActions();
+    const { lastModifiedOrderId } = useUIState();
+    const { openDetailModal, showAlert, setLastModifiedOrderId, openDeliveryModal } = useUIActions();
 
-    const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
-    const [draftOrderIds, setDraftOrderIds] = useState<Set<number>>(new Set());
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
+    const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
+    const listRef = useRef<HTMLDivElement>(null);
 
-    const getLocalDateString = (date: Date): string => {
-        const offset = date.getTimezoneOffset();
-        const adjustedDate = new Date(date.getTime() - (offset * 60 * 1000));
-        return adjustedDate.toISOString().split('T')[0];
-    };
-
-    const getInitialDateRange = () => {
-        const today = new Date();
-        const endDate = getLocalDateString(today);
-        
-        const weekAgo = new Date();
-        weekAgo.setDate(today.getDate() - 6);
-        const startDate = getLocalDateString(weekAgo);
-
-        return { startDate, endDate };
-    };
-
-    const [startDate, setStartDate] = useState(() => getInitialDateRange().startDate);
-    const [endDate, setEndDate] = useState(() => getInitialDateRange().endDate);
-    const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-
-    const scrollableContainerRef = useRef<HTMLDivElement>(null);
-    const filterContainerRef = useRef<HTMLDivElement>(null);
-
-     useEffect(() => {
-        const fetchDrafts = async () => {
-            try {
-                const keys = await getAllDraftKeys();
-                const numericKeys = keys.filter(key => typeof key === 'number') as number[];
-                setDraftOrderIds(new Set(numericKeys));
-            } catch (error) {
-                console.error("Failed to fetch draft keys:", error);
-            }
-        };
-        fetchDrafts();
-    }, [orders, isActive]);
-    
+    // Fetch orders and drafts when page is active
     useEffect(() => {
         if (!isActive) {
-            setOpenMenuId(null);
-            if (isDeliveryModalOpen) {
-                closeDeliveryModal();
-            }
+            setActiveMenuOrderId(null);
+            return;
         }
-    }, [isActive, isDeliveryModalOpen, closeDeliveryModal]);
-    
+        
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(endDate.getDate() - 30);
+        
+        setIsLoading(true);
+        const unsubscribe = db.listenToOrdersByDateRange(
+            startDate,
+            endDate,
+            (fetchedOrders) => {
+                const sortedOrders = fetchedOrders.sort((a, b) => b.id - a.id);
+                setOrders(sortedOrders);
+                setIsLoading(false);
+            }
+        );
+
+        getAllDraftKeys().then(keys => setDraftKeys(new Set(keys)));
+        
+        return () => unsubscribe();
+    }, [isActive]);
+
+    // Group orders by date
+    const groupedOrders = useMemo(() => {
+        const groups: { [key: string]: { orders: Order[]; total: number } } = {};
+
+        orders.forEach(order => {
+            const dateKey = new Date(order.date).toISOString().slice(0, 10);
+            if (!groups[dateKey]) {
+                groups[dateKey] = { orders: [], total: 0 };
+            }
+            groups[dateKey].orders.push(order);
+            groups[dateKey].total += order.total;
+        });
+
+        return Object.keys(groups)
+            .sort((a, b) => b.localeCompare(a)) // Sort dates descending
+            .map(dateKey => ({
+                date: dateKey,
+                ...groups[dateKey]
+            }));
+    }, [orders]);
+
     useEffect(() => {
         if (lastModifiedOrderId) {
-            setHighlightedOrderId(lastModifiedOrderId);
-
-            const scrollTimer = setTimeout(() => {
-                const element = document.getElementById(`order-item-${lastModifiedOrderId}`);
-                if (element) {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            }, 100);
-
-            const highlightTimer = setTimeout(() => {
-                setHighlightedOrderId(null);
-                setLastModifiedOrderId(null);
-            }, 3000);
-
-            return () => {
-                clearTimeout(scrollTimer);
-                clearTimeout(highlightTimer);
-            };
+            const el = document.getElementById(`order-item-${lastModifiedOrderId}`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const timer = setTimeout(() => setLastModifiedOrderId(null), 3000);
+                return () => clearTimeout(timer);
+            }
         }
     }, [lastModifiedOrderId, setLastModifiedOrderId]);
 
     useEffect(() => {
-        const { startDate, endDate } = getInitialDateRange();
-        setStartDate(startDate);
-        setEndDate(endDate);
-    }, []);
-
-    useEffect(() => {
-        const scrollableEl = scrollableContainerRef.current;
-        const filterEl = filterContainerRef.current;
-
-        const closeAnyOpenMenu = () => {
-            setOpenMenuId(null);
+        const handleClickOutside = (event: MouseEvent) => {
+            if (activeMenuOrderId !== null && !(event.target as HTMLElement).closest('.relative.z-10')) {
+                setActiveMenuOrderId(null);
+            }
         };
 
-        if (scrollableEl) {
-            scrollableEl.addEventListener('scroll', closeAnyOpenMenu, { passive: true });
+        if (activeMenuOrderId !== null) {
+            document.addEventListener('click', handleClickOutside, true);
         }
-        if (filterEl) {
-            filterEl.addEventListener('pointerdown', closeAnyOpenMenu);
-        }
-
         return () => {
-            if (scrollableEl) {
-                scrollableEl.removeEventListener('scroll', closeAnyOpenMenu);
-            }
-            if (filterEl) {
-                filterEl.removeEventListener('pointerdown', closeAnyOpenMenu);
-            }
+            document.removeEventListener('click', handleClickOutside, true);
         };
-    }, []);
+    }, [activeMenuOrderId]);
 
-    const filteredOrders = useMemo(() => {
-        if (!startDate || !endDate) return [];
-
-        const startOfDay = new Date(startDate);
-        startOfDay.setHours(0, 0, 0, 0);
-
-        const endOfDay = new Date(endDate);
-        endOfDay.setHours(23, 59, 59, 999);
-        
-        return orders.filter(order => {
-            const orderDate = new Date(order.date);
-            return orderDate.getTime() >= startOfDay.getTime() && orderDate.getTime() <= endOfDay.getTime();
-        }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [orders, startDate, endDate]);
-
-    const groupedByDate = useMemo(() => {
-        return filteredOrders.reduce((acc, order) => {
-            const dateStr = new Date(order.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'});
-            if (!acc[dateStr]) {
-                acc[dateStr] = [];
-            }
-            acc[dateStr].push(order);
-            return acc;
-        }, {} as Record<string, Order[]>);
-    }, [filteredOrders]);
-    
-    const sortedDates = Object.keys(groupedByDate);
-    
-    const handleDelete = useCallback((order: Order) => {
-        showAlert(
-            `'${order.customer.name}'의 발주 내역을 삭제하시겠습니까?`,
-            () => {
-                deleteOrder(order.id);
-                setOpenMenuId(null);
-                showAlert('발주 내역이 삭제되었습니다.');
-            },
-            '삭제',
-            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
-        );
-    }, [showAlert, deleteOrder]);
-
-    const handleSmsExport = useCallback(async (order: Order) => {
-        const message = exportToSMS(order);
-        let success = false;
-
-        if (navigator.share) {
-            try {
-                await navigator.share({ text: message });
-                success = true;
-            } catch (error) {
-                if ((error as DOMException).name !== 'AbortError') {
-                    console.error('Share error:', error);
-                    showAlert('공유 기능을 사용할 수 없습니다.');
-                }
-                success = false;
-            }
-        } else {
-            showAlert('문자 앱으로 연결합니다. 발주 내용이 긴 경우 일부가 잘릴 수 있습니다.');
-            window.location.href = `sms:?body=${encodeURIComponent(message)}`;
-            success = true;
-        }
-
-        if (success) {
-            const timestamp = new Date().toISOString();
-            updateOrder({
-                ...order,
-                completedAt: timestamp,
-                completionDetails: { type: 'sms', timestamp }
-            });
-        }
-        setOpenMenuId(null);
-    }, [showAlert, updateOrder]);
-
-    const handleXlsExport = useCallback((order: Order) => {
-        openDeliveryModal(order);
-        setOpenMenuId(null);
-    }, [openDeliveryModal]);
-
-    const handleCancelCompletion = useCallback((order: Order) => {
-        showAlert(
-            '이 발주의 \'완료\' 상태를 취소하시겠습니까?',
-            () => {
-                updateOrder({ ...order, completedAt: null, completionDetails: null });
-                setOpenMenuId(null);
-            },
-            '실행 취소'
-        );
-    }, [showAlert, updateOrder]);
-
-    const handleBackgroundClick = useCallback(() => {
-        if (openMenuId !== null) {
-            setOpenMenuId(null);
-        }
-    }, [openMenuId]);
-    
-    const handleMenuToggle = useCallback((e: React.MouseEvent, orderId: number) => {
+    const handleMenuToggle = (e: React.MouseEvent, orderId: number) => {
         e.stopPropagation();
-        setOpenMenuId(prevId => (prevId === orderId ? null : orderId));
-    }, []);
+        setActiveMenuOrderId(prev => (prev === orderId ? null : orderId));
+    };
+
+    const getActionMenuItems = useCallback((order: Order): ActionMenuItem[] => {
+        const isCompleted = !!order.completedAt || !!order.completionDetails;
+
+        const closeMenuAnd = (fn: () => void) => () => {
+            setActiveMenuOrderId(null);
+            fn();
+        };
+
+        const handleDelete = closeMenuAnd(() => {
+            showAlert(
+                `'${order.customer.name}'의 발주 내역을 삭제하시겠습니까?`,
+                () => deleteOrder(order.id),
+                '삭제',
+                'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+            );
+        });
+
+        const handleUndoCompletion = closeMenuAnd(() => {
+            showAlert(
+                `'${order.customer.name}'의 발주를 완료 취소하시겠습니까?`,
+                () => updateOrderStatus(order.id, null)
+            );
+        });
+        
+        const handleSms = closeMenuAnd(async () => {
+            const orderWithItems = { ...order, items: await db.getOrderItems(order.id) };
+            if(orderWithItems.items.length === 0){
+                showAlert("품목이 없어 내보낼 수 없습니다.");
+                return;
+            }
+            const smsBody = exportToSMS(orderWithItems);
+            const encodedSmsBody = encodeURIComponent(smsBody);
+            window.location.href = `sms:?body=${encodedSmsBody}`;
+            const timestamp = new Date().toISOString();
+            updateOrderStatus(order.id, { type: 'sms', timestamp });
+        });
+
+        const handleXls = closeMenuAnd(() => openDeliveryModal(order));
+        
+        const menuItems: ActionMenuItem[] = [];
+
+        if (isCompleted) {
+            menuItems.push({ id: 'undo', label: '완료 취소', icon: <UndoIcon className="w-5 h-5" />, onClick: handleUndoCompletion });
+        } else {
+            menuItems.push({ id: 'sms', label: 'SMS로 내보내기', icon: <SmsIcon className="w-5 h-5" />, onClick: handleSms });
+            menuItems.push({ id: 'xls', label: 'XLS로 내보내기', icon: <XlsIcon className="w-5 h-5" />, onClick: handleXls });
+        }
+        
+        menuItems.push({ id: 'delete', label: '삭제', icon: <TrashIcon className="w-5 h-5" />, className: 'text-red-600', onClick: handleDelete });
+
+        return menuItems;
+    }, [showAlert, deleteOrder, updateOrderStatus, openDeliveryModal]);
     
-    const handleCardClick = useCallback((orderId: number) => {
-        openDetailModal(orderId)
-    }, [openDetailModal]);
+    const handleCardClick = useCallback(async (order: Order) => {
+        setIsLoading(true);
+        try {
+            const items = await db.getOrderItems(order.id);
+            openDetailModal({ ...order, items });
+        } catch (error) {
+            console.error("Failed to fetch order items:", error);
+            showAlert("주문 상세 정보를 불러오는 데 실패했습니다.");
+        } finally {
+            setIsLoading(false);
+        }
+    }, [openDetailModal, showAlert]);
 
     return (
-        <div className="h-full flex flex-col w-full max-w-3xl mx-auto">
-            <div ref={filterContainerRef} className="fixed-filter p-4 bg-gray-50 shadow-md z-10">
-                <div className="grid grid-cols-2 gap-4 items-center">
-                    <div className="space-y-1">
-                        <label htmlFor="start-date" className="text-sm font-medium text-gray-600 px-1">시작일</label>
-                        <input id="start-date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 border border-gray-300 bg-gray-100 shadow-inner shadow-gray-200/80 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors" autoComplete="off" />
-                    </div>
-                    <div className="space-y-1">
-                        <label htmlFor="end-date" className="text-sm font-medium text-gray-600 px-1">종료일</label>
-                        <input id="end-date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full p-2 border border-gray-300 bg-gray-100 shadow-inner shadow-gray-200/80 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors" autoComplete="off" />
-                    </div>
-                </div>
+        <div className="h-full flex flex-col bg-gray-100">
+            <div className="fixed-filter p-3 bg-white border-b border-gray-200 shadow-sm">
+                <h2 className="text-xl font-bold text-gray-800">발주 내역</h2>
             </div>
-            <div ref={scrollableContainerRef} className="scrollable-content p-4 relative" onClick={handleBackgroundClick}>
-                {filteredOrders.length === 0 ? (
-                    <div className="relative flex flex-col items-center justify-center h-full text-gray-400">
-                        <p className="text-center text-lg font-semibold">발주 내역이 없습니다</p>
-                        <p className="text-sm">기간을 변경하거나 새로운 발주를 등록해주세요.</p>
+            <div ref={listRef} className="scrollable-content p-2 space-y-3">
+                {(isLoading && orders.length === 0) ? (
+                    <div className="flex items-center justify-center h-full pt-16">
+                        <SpinnerIcon className="w-10 h-10 text-blue-500" />
+                    </div>
+                ) : orders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400 pt-16 text-center">
+                        <ArchiveBoxIcon className="w-16 h-16 text-gray-300 mb-4" />
+                        <p className="text-lg font-semibold">발주 내역이 없습니다</p>
+                        <p className="text-sm mt-1">신규 발주를 생성해보세요.</p>
                     </div>
                 ) : (
-                    <div className="relative pb-16 space-y-6">
-                        {sortedDates.map(dateStr => {
-                            const dailyOrders = groupedByDate[dateStr];
-                            const dailyTotal = dailyOrders.reduce((sum, order) => sum + order.total, 0);
-                            return (
-                            <div key={dateStr} className="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-200/80">
-                                <div className="p-4 border-b border-slate-200 bg-slate-50">
-                                    <div className="flex justify-between items-baseline">
-                                        <h3 className="text-lg font-bold text-slate-800 tracking-tight">{dateStr}</h3>
-                                        <div className="text-sm font-semibold text-slate-600">
-                                            일일 합계: <span className="text-base font-bold text-slate-800">{dailyTotal.toLocaleString()} 원</span>
-                                        </div>
-                                    </div>
+                    groupedOrders.map(group => {
+                        const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
+                        return (
+                            <div key={group.date} className={`bg-white rounded-xl shadow-md ${isGroupActive ? 'relative z-10' : ''}`}>
+                                <div className="flex justify-between items-center p-4 bg-gray-50 border-b border-gray-200">
+                                    <h3 className="font-bold text-gray-800 text-base" id={`date-header-${group.date}`}>
+                                        {new Date(group.date).toLocaleDateString('ko-KR', {
+                                            year: 'numeric',
+                                            month: 'long',
+                                            day: 'numeric',
+                                            weekday: 'short',
+                                        })}
+                                    </h3>
+                                    <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
                                 </div>
-                                <div className="p-2 space-y-px">
-                                    {dailyOrders.map(order => {
-                                        const isCompleted = !!order.completedAt || !!order.completionDetails;
-                                        
-                                        const actionMenuItems: ActionMenuItem[] = isCompleted ? [
-                                            {
-                                                id: 'cancel', label: '완료 취소',
-                                                icon: <UndoIcon className="w-5 h-5 text-gray-500" />,
-                                                onClick: () => { handleCancelCompletion(order); setOpenMenuId(null); },
-                                            },
-                                            {
-                                                id: 'delete', label: '삭제',
-                                                icon: <TrashIcon className="w-5 h-5 text-red-500" />,
-                                                className: 'text-red-500 font-medium',
-                                                onClick: () => { handleDelete(order); setOpenMenuId(null); },
-                                            }
-                                        ] : [
-                                            {
-                                                id: 'sms', label: 'SMS 내보내기',
-                                                icon: <SmsIcon className="w-5 h-5 text-gray-500" />,
-                                                onClick: () => handleSmsExport(order)
-                                            },
-                                            {
-                                                id: 'xls', label: 'XLS 내보내기',
-                                                icon: <XlsIcon className="w-5 h-5 text-gray-500" />,
-                                                onClick: () => handleXlsExport(order)
-                                            },
-                                            {
-                                                id: 'delete', label: '삭제',
-                                                icon: <TrashIcon className="w-5 h-5 text-red-500" />,
-                                                className: 'text-red-500 font-medium',
-                                                onClick: () => { handleDelete(order); setOpenMenuId(null); },
-                                            }
-                                        ];
-
-                                        return (
-                                            <OrderCard
-                                                key={order.id}
-                                                order={order}
-                                                isHighlighted={highlightedOrderId === order.id}
-                                                isMenuOpen={openMenuId === order.id}
-                                                hasDraft={draftOrderIds.has(order.id)}
-                                                onCardClick={() => handleCardClick(order.id)}
-                                                onMenuToggle={(e) => handleMenuToggle(e, order.id)}
-                                                actionMenuItems={actionMenuItems}
-                                            />
-                                        )
-                                    })}
+                                <div>
+                                    {group.orders.map(order => (
+                                        <OrderRow
+                                            key={order.id}
+                                            order={order}
+                                            isHighlighted={order.id === lastModifiedOrderId}
+                                            isMenuOpen={activeMenuOrderId === order.id}
+                                            hasDraft={draftKeys.has(order.id)}
+                                            onCardClick={() => handleCardClick(order)}
+                                            onMenuToggle={(e) => handleMenuToggle(e, order.id)}
+                                            actionMenuItems={getActionMenuItems(order)}
+                                        />
+                                    ))}
                                 </div>
                             </div>
-                        )})}
-                    </div>
+                        )
+                    })
                 )}
             </div>
         </div>

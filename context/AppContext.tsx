@@ -10,16 +10,15 @@ import { useAuth } from './AuthContext';
 interface DataState {
     customers: Customer[];
     products: Product[];
-    orders: Order[];
     selectedCameraId: string | null;
 }
 
 interface DataActions {
     setCustomers: (customers: Customer[]) => Promise<void>;
     setProducts: (products: Product[]) => Promise<void>;
-    setOrders: (orders: Order[]) => Promise<void>;
-    addOrder: (order: Omit<Order, 'id' | 'date'>) => Promise<number>;
+    addOrder: (orderData: { customer: Customer; items: OrderItem[]; total: number; memo?: string; }) => Promise<number>;
     updateOrder: (updatedOrder: Order) => Promise<void>;
+    updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
     deleteOrder: (orderId: number) => Promise<void>;
     setSelectedCameraId: (id: string | null) => Promise<void>;
     clearOrders: () => Promise<void>;
@@ -37,7 +36,7 @@ interface AlertState {
 interface UIState {
     alert: AlertState;
     isDetailModalOpen: boolean;
-    editingOrderId: number | null;
+    editingOrder: Order | null;
     isScannerOpen: boolean;
     scannerContext: ScannerContext;
     isContinuousScan: boolean;
@@ -51,7 +50,7 @@ interface UIState {
 interface UIActions {
     showAlert: (message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => void;
     hideAlert: () => void;
-    openDetailModal: (orderId: number) => void;
+    openDetailModal: (order: Order) => void;
     closeDetailModal: () => void;
     openScanner: (context: ScannerContext, onScan: (barcode: string) => void, continuous?: boolean) => void;
     closeScanner: () => void;
@@ -63,18 +62,29 @@ interface UIActions {
 
 const getDeviceId = (): string => {
     const DEVICE_ID_KEY = 'app-device-id';
-    let storedId = localStorage.getItem(DEVICE_ID_KEY);
-    if (!storedId) {
-        // Simple UUID v4 generator
-        storedId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            var r = (Math.random() * 16) | 0,
-                v = c === 'x' ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-        });
-        localStorage.setItem(DEVICE_ID_KEY, storedId);
+    try {
+        let storedId = localStorage.getItem(DEVICE_ID_KEY);
+        if (!storedId) {
+            // Simple UUID v4 generator
+            storedId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = (Math.random() * 16) | 0,
+                    v = c === 'x' ? r : (r & 0x3) | 0x8;
+                return v.toString(16);
+            });
+            localStorage.setItem(DEVICE_ID_KEY, storedId);
+        }
+        return storedId;
+    } catch (error) {
+        console.error("Failed to access localStorage for device ID:", error);
+        // Fallback for environments where localStorage is not available (e.g., private browsing on some browsers)
+        // This will not be persistent across sessions, but will be consistent for the current session.
+        if (!(window as any)._sessionDeviceId) {
+             (window as any)._sessionDeviceId = 'session-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15);
+        }
+        return (window as any)._sessionDeviceId;
     }
-    return storedId;
 };
+
 
 // --- CONTEXT CREATION ---
 // For performance optimization, contexts are split into State and Actions.
@@ -99,7 +109,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- UI STATE & ACTIONS ---
     const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-    const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+    const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [scannerContext, setScannerContext] = useState<ScannerContext>(null);
     const [isContinuousScan, setIsContinuousScan] = useState(false);
@@ -133,13 +143,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const uiActions: UIActions = useMemo(() => ({
         showAlert,
         hideAlert: () => setAlert(prev => ({ ...prev, isOpen: false })),
-        openDetailModal: (orderId: number) => {
-            setEditingOrderId(orderId);
+        openDetailModal: (order: Order) => {
+            setEditingOrder(order);
             setIsDetailModalOpen(true);
         },
         closeDetailModal: () => {
             setIsDetailModalOpen(false);
-            setEditingOrderId(null);
+            setEditingOrder(null);
         },
         openScanner: (context, onScan, continuous = false) => {
             setScannerContext(context);
@@ -176,7 +186,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const uiState: UIState = {
         alert,
         isDetailModalOpen,
-        editingOrderId,
+        editingOrder,
         isScannerOpen,
         scannerContext,
         isContinuousScan,
@@ -191,7 +201,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [dataState, setDataState] = useState<DataState>({
         customers: [],
         products: [],
-        orders: [],
         selectedCameraId: null,
     });
     const [loadingState, setLoadingState] = useState({
@@ -209,12 +218,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         const initialize = async () => {
             if (!user) {
-                setDataState({ customers: [], products: [], orders: [], selectedCameraId: null });
+                setDataState({ customers: [], products: [], selectedCameraId: null });
                 setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
                 return;
             }
 
-            setLoadingState({ connecting: false, customers: false, products: false, orders: false, settings: false });
+            setLoadingState({ connecting: false, customers: false, products: false, orders: true, settings: false });
 
             // 1. Load master data from local cache for instant UI
             try {
@@ -279,50 +288,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         cache.setCachedData('products', data).catch(e => console.error("Failed to cache products", e));
                     }
                 }));
-
-                // New: Efficiently listen for individual order changes.
-                // The onChildAdded event will handle the initial population of the orders array.
-                unsubscribers.push(db.listenToOrderChanges((event) => {
-                    if (!isMounted) return;
-                    setDataState(prev => {
-                        const newOrders = [...prev.orders];
-                        const index = newOrders.findIndex(o => o.id === event.order.id);
-
-                        switch (event.type) {
-                            case 'added':
-                                if (index === -1) { // Add only if it doesn't exist
-                                    newOrders.push(event.order);
-                                }
-                                break;
-                            case 'changed':
-                                if (index !== -1) { // Update if it exists
-                                    newOrders[index] = event.order;
-                                } else { // Or add if it was somehow missing
-                                    newOrders.push(event.order);
-                                }
-                                break;
-                            case 'removed':
-                                if (index !== -1) { // Remove if it exists
-                                   return { ...prev, orders: prev.orders.filter(o => o.id !== event.order.id) };
-                                }
-                                break;
-                        }
-                        return { ...prev, orders: newOrders };
-                    });
-                }));
-
-                // Use a one-time get() call as a signal that the initial order load is complete.
-                // We don't use the data from this call, only the promise resolution.
-                db.getAll('orders').then(() => {
-                    if (isMounted) {
-                        setLoadingState(prev => ({ ...prev, orders: true }));
-                    }
-                }).catch(err => {
-                    console.error("Error getting initial order load signal:", err);
-                     if (isMounted) {
-                        setLoadingState(prev => ({ ...prev, orders: true })); // Unlock UI on error
-                    }
-                });
                 
                 unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => isMounted && setDataState(prev => ({ ...prev, selectedCameraId: id }))));
 
@@ -354,15 +319,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             await cache.setCachedData('products', products).catch(e => console.error("Failed to cache new products", e));
             return db.replaceAll('products', products);
         },
-        setOrders: (orders) => db.replaceAll('orders', orders),
-        addOrder: async (order) => {
-            const now = new Date().toISOString();
-            const newOrder: Order = { ...order, id: Date.now(), date: now, createdAt: now, completedAt: null };
-            await db.put('orders', newOrder);
-            return newOrder.id;
+        // FIX: Refactor to give parameter a name (`orderData`) before destructuring.
+        // This helps TypeScript correctly infer the type of `orderShellData` from the `DataActions` interface,
+        // resolving a type mismatch error when calling `db.addOrderWithItems`.
+        addOrder: (orderData) => {
+            const { items, ...orderShellData } = orderData;
+            return db.addOrderWithItems(orderShellData, items);
         },
-        updateOrder: (updatedOrder) => db.put('orders', updatedOrder),
-        deleteOrder: (orderId) => db.deleteByKey('orders', orderId),
+        updateOrder: (updatedOrder) => {
+            const { items, ...orderShell } = updatedOrder;
+            return db.updateOrderAndItems(orderShell, items || []);
+        },
+        updateOrderStatus: (orderId, completionDetails) => db.updateOrderStatus(orderId, completionDetails),
+        deleteOrder: (orderId) => db.deleteOrderAndItems(orderId),
         setSelectedCameraId: (id) => {
             const deviceId = getDeviceId();
             const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;

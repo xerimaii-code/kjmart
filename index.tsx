@@ -3,33 +3,27 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 
 // --- PWA Service Worker Registration ---
+// This function will be called once the page is fully loaded.
 const registerServiceWorker = () => {
+  // Check if the browser supports service workers.
   if ('serviceWorker' in navigator) {
-    // Construct the full URL to the service worker to avoid any potential
-    // ambiguity or misinterpretation by the browser in specific environments.
-    // This explicitly tells the browser to load the worker from the current origin.
+    // Construct the full URL to the service worker to ensure it's resolved correctly.
     const swUrl = `${window.location.origin}/service-worker.js`;
     navigator.serviceWorker.register(swUrl)
       .then(registration => {
         console.log('Service Worker registered successfully with scope:', registration.scope);
       })
       .catch(error => {
+        // Log any errors that occur during registration.
         console.error('Service Worker registration failed:', error);
       });
   }
 };
 
-// To prevent "invalid state" errors, service worker registration must
-// happen after the page has finished loading. This code checks if the
-// document is already loaded ('complete'). If so, it registers the worker
-// immediately. Otherwise, it waits for the 'load' event. This is a more
-// robust approach than just listening for the 'load' event, as it handles
-// cases where the event might have already fired before the script runs.
-if (document.readyState === 'complete') {
-  registerServiceWorker();
-} else {
-  window.addEventListener('load', registerServiceWorker);
-}
+// We wrap the registration in a 'load' event listener. This is the most reliable
+// way to ensure that the registration attempt doesn't happen prematurely,
+// which is the cause of the "invalid state" error.
+window.addEventListener('load', registerServiceWorker);
 // --- End of Service Worker Registration ---
 
 const rootElement = document.getElementById('root');

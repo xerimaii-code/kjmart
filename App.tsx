@@ -1,7 +1,7 @@
 import React, { useState, lazy, Suspense, useRef, useEffect } from 'react';
 import { AppProvider, useUIActions, useUIState } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { Page } from './types';
+import { Page, Order, OrderItem } from './types';
 import ScannerModal from './components/ScannerModal';
 import Header from './components/Header';
 import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon } from './components/Icons';
@@ -127,17 +127,13 @@ const AppContent: React.FC = () => {
         hideAlert,
         closeDeliveryModal,
      } = useUIActions();
-    const { updateOrder } = useDataActions();
+    const { updateOrderStatus } = useDataActions();
 
     const handleExportConfirm = (deliveryType: '일반배송' | '택배배송') => {
         if (orderToExport) {
             exportToXLS(orderToExport, deliveryType);
             const timestamp = new Date().toISOString();
-            updateOrder({
-                ...orderToExport,
-                completedAt: timestamp,
-                completionDetails: { type: 'xls', timestamp }
-            });
+            updateOrderStatus(orderToExport.id, { type: 'xls', timestamp });
         }
         closeDeliveryModal();
     };
