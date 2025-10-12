@@ -149,7 +149,7 @@ const AppContent: React.FC = () => {
         setActivePage(targetPage);
     };
 
-    const { onTouchStart, onTouchMove, onTouchEnd } = useSwipeNavigation({
+    const { onTouchStart, onTouchMove, onTouchEnd, containerStyle } = useSwipeNavigation({
         items: pages,
         activeIndex: currentPageIndex,
         onNavigate: (page) => handleNavigation(page),
@@ -172,7 +172,7 @@ const AppContent: React.FC = () => {
                     className="h-full flex absolute top-0 left-0"
                     style={{
                         width: `${pages.length * 100}%`,
-                        // transform is now managed by useSwipeNavigation hook
+                        ...containerStyle
                     }}
                 >
                     {pages.map(page => {

@@ -27,17 +27,10 @@ const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
 };
 
 const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void }) => {
-    const handleEdit = useCallback(() => onEdit(item), [onEdit, item]);
-    
-    const handleRemove = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        onRemove(item);
-    }, [onRemove, item]);
-
     return (
         <div
             className="flex items-center p-3 space-x-2 cursor-pointer hover:bg-gray-50"
-            onClick={handleEdit}
+            onClick={() => onEdit(item)}
         >
             <div className="flex-grow min-w-0 pr-1">
                 <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
@@ -54,7 +47,7 @@ const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit
             <div className="flex items-center space-x-1.5 flex-shrink-0">
                 <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
                 <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
-                <button onClick={handleRemove} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+                <button onClick={(e) => { e.stopPropagation(); onRemove(item); }} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
                     <RemoveIcon className="w-5 h-5"/>
                 </button>
             </div>
@@ -74,9 +67,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const [productSearch, setProductSearch] = useState('');
     const [memo, setMemo] = useState('');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
-    
-    const debouncedCustomerSearch = useDebounce(customerSearch, 300);
-    const debouncedProductSearch = useDebounce(productSearch, 300);
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
@@ -104,7 +94,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     const {
         items,
-        addItem,
+        addOrUpdateItem,
         updateItem,
         removeItem,
         resetItems,
@@ -113,6 +103,11 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         initialItems: initialOrderItems,
     });
     
+    const itemsRef = useRef(items);
+    useEffect(() => {
+        itemsRef.current = items;
+    }, [items]);
+
     // --- Draft Logic ---
     const draftDataToSave = useMemo(() => ({
         selectedCustomer,
@@ -166,29 +161,29 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     }, [items.length]);
     
     const filteredCustomers = useMemo(() => {
-        const searchTerm = debouncedCustomerSearch.trim().toLowerCase();
+        const searchTerm = customerSearch.trim().toLowerCase();
         if (!searchTerm || isCustomerSelected) return [];
         return customers.filter(c => c.name.toLowerCase().includes(searchTerm) || c.comcode.includes(searchTerm));
-    }, [customers, debouncedCustomerSearch, isCustomerSelected]);
+    }, [customers, customerSearch, isCustomerSelected]);
 
     const filteredProducts = useMemo(() => {
-        const searchTerm = debouncedProductSearch.trim().toLowerCase();
+        const searchTerm = productSearch.trim().toLowerCase();
         if (!searchTerm) return [];
         return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm));
-    }, [products, debouncedProductSearch]);
+    }, [products, productSearch]);
 
-    const handleSelectCustomer = useCallback((customer: Customer) => {
+    const handleSelectCustomer = (customer: Customer) => {
         setSelectedCustomer(customer);
         setCustomerSearch(customer.name);
         setShowCustomerDropdown(false);
         productSearchInputRef.current?.focus();
-    }, []);
+    };
 
-    const handleClearCustomer = useCallback(() => {
+    const handleClearCustomer = () => {
         setSelectedCustomer(null);
         setCustomerSearch('');
         setTimeout(() => customerSearchInputRef.current?.focus(), 0);
-    }, []);
+    };
 
     const resetOrder = useCallback((options?: { preventFocus?: boolean }) => {
         setSelectedCustomer(null);
@@ -248,7 +243,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
-    const handleAddProductFromSearch = useCallback((product: Product) => {
+    const handleAddProductFromSearch = (product: Product) => {
         setAddItemTrigger('search');
         const existingItem = items.find(item => item.barcode === product.barcode);
         setProductForModal(product);
@@ -256,19 +251,19 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         setProductSearch('');
         setShowProductDropdown(false);
         productSearchInputRef.current?.blur();
-    }, [items]);
+    };
 
     const handleScanSuccess = useCallback((barcode: string) => {
         const product = products.find(p => p.barcode === barcode);
         if (product) {
             setAddItemTrigger('scan');
-            const existingItem = items.find(item => item.barcode === product.barcode);
+            const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
             setProductForModal(product);
             setExistingItemForModal(existingItem || null);
         } else {
             showAlert("등록되지 않은 바코드입니다.");
         }
-    }, [products, showAlert, items]);
+    }, [products, showAlert]);
 
     const handleOpenScanner = useCallback(() => {
         if (!isCustomerSelected) {
@@ -288,24 +283,10 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     }, [showAlert, removeItem]);
 
     const handleAddItemFromModal = useCallback((product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
-        const existingItem = items.find(i => i.barcode === product.barcode);
-        if (existingItem) {
-            updateItem(product.barcode, {
-                ...existingItem,
-                quantity: existingItem.quantity + details.quantity,
-                unit: details.unit,
-                memo: details.memo,
-            });
-        } else {
-            addItem(product, {
-                quantity: details.quantity,
-                isBoxUnit: details.unit === '박스',
-                memo: details.memo,
-            });
-        }
+        addOrUpdateItem(product, details);
         setProductForModal(null);
         setExistingItemForModal(null);
-    }, [items, addItem, updateItem]);
+    }, [addOrUpdateItem]);
 
     const handleEditItem = useCallback((item: OrderItem) => {
         setEditingItem(item);

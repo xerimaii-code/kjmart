@@ -30,9 +30,9 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
     // Synchronize the internal state with the initialItems prop when it changes
     // (e.g., when a draft is loaded or a different order is displayed).
     useEffect(() => {
-        // This effect synchronizes the manager's state with the initialItems prop.
-        // It should only run when initialItems changes, not when the internal `items` state changes.
-        // The parent component is responsible for memoizing initialItems if it's an array literal.
+        // This effect should only run when the initialItems prop changes.
+        // The previous implementation had a bug where it also depended on the internal `items` state,
+        // which caused any new item additions to be immediately reverted.
         setItems(normalizeItems(initialItems));
     }, [initialItems]);
 
@@ -62,6 +62,32 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         });
     }, []);
 
+    const addOrUpdateItem = useCallback((product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
+        setItems(prevItems => {
+            const existingItemIndex = prevItems.findIndex(i => i.barcode === product.barcode);
+            
+            if (existingItemIndex > -1) {
+                const updatedItems = [...prevItems];
+                const existingItem = updatedItems[existingItemIndex];
+                updatedItems[existingItemIndex] = {
+                    ...existingItem,
+                    quantity: existingItem.quantity + details.quantity,
+                    unit: details.unit,
+                    memo: details.memo || '',
+                };
+                return normalizeItems(updatedItems);
+            } else {
+                const newItem: OrderItem = {
+                    ...product,
+                    quantity: details.quantity,
+                    unit: details.unit,
+                    memo: details.memo || '',
+                };
+                return normalizeItems([...prevItems, newItem]);
+            }
+        });
+    }, []);
+
     const removeItem = useCallback((barcode: string) => {
         setItems(prev => prev.filter(item => item.barcode !== barcode));
     }, []);
@@ -78,6 +104,7 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         items,
         addItem,
         updateItem,
+        addOrUpdateItem,
         removeItem,
         resetItems,
         totalAmount,

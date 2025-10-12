@@ -1,5 +1,4 @@
-// FIX: Add 'React' to the import from 'react' to fix 'Cannot find namespace React' errors.
-import React, { useRef, useCallback, useEffect }from 'react';
+import React, { useRef, useCallback, useEffect, useState } from 'react';
 
 interface UseSwipeNavigationOptions<T> {
     items: T[];
@@ -11,17 +10,24 @@ interface UseSwipeNavigationOptions<T> {
 export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, containerRef }: UseSwipeNavigationOptions<T>) => {
     const isDragging = useRef(false);
     const dragStartCoords = useRef({ x: 0, y: 0 });
-    const currentTranslate = useRef(0);
     const dragDirection = useRef<'horizontal' | 'vertical' | 'none'>('none');
+    
+    // State for the transform value in pixels
+    const [translateX, setTranslateX] = useState(0);
+    // State to control whether CSS animations are active
+    const [isAnimating, setIsAnimating] = useState(true);
+
+    // Update transform position programmatically when activeIndex changes (e.g., from a tab click)
+    useEffect(() => {
+        // Only update if the container is ready and not being actively dragged
+        if (containerRef.current && !isDragging.current) {
+            const parentWidth = containerRef.current.parentElement!.clientWidth;
+            setIsAnimating(true); // Ensure animations are enabled for the transition
+            setTranslateX(-activeIndex * parentWidth);
+        }
+    }, [activeIndex, containerRef]);
 
     const getPositionX = (event: React.TouchEvent) => event.touches[0].clientX;
-    
-    const setPosition = useCallback((x: number, animate = false) => {
-        if (containerRef.current) {
-            containerRef.current.style.transition = animate ? 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none';
-            containerRef.current.style.transform = `translateX(${x}px)`;
-        }
-    }, [containerRef]);
 
     const onTouchStart = useCallback((e: React.TouchEvent) => {
         const target = e.target as HTMLElement;
@@ -33,34 +39,45 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
         dragStartCoords.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         dragDirection.current = 'none';
         isDragging.current = true;
+        setIsAnimating(false); // Disable CSS animations during manual dragging
     }, []);
-    
+
     const onTouchMove = useCallback((e: React.TouchEvent) => {
         if (!isDragging.current) return;
-    
+
+        // Determine swipe direction only on the first significant move
         if (dragDirection.current === 'none') {
             const deltaX = Math.abs(e.touches[0].clientX - dragStartCoords.current.x);
             const deltaY = Math.abs(e.touches[0].clientY - dragStartCoords.current.y);
             
-            // Determine swipe direction after a small threshold to avoid accidental vertical scroll blocking
             if (deltaX > 5 || deltaY > 5) {
                 dragDirection.current = deltaX > deltaY ? 'horizontal' : 'vertical';
             }
         }
         
+        // Only proceed if the swipe is horizontal
         if (dragDirection.current === 'horizontal') {
-            e.preventDefault(); // Prevent vertical scroll while swiping horizontally
-            const currentPos = getPositionX(e);
-            const delta = currentPos - dragStartCoords.current.x;
+            e.preventDefault(); // Prevent vertical page scroll
             
+            const currentPos = getPositionX(e);
+            let delta = currentPos - dragStartCoords.current.x;
+
             if (containerRef.current) {
                 const parentWidth = containerRef.current.parentElement!.clientWidth;
                 const baseTranslate = -activeIndex * parentWidth;
-                currentTranslate.current = baseTranslate + delta;
-                setPosition(currentTranslate.current);
+
+                const isFirstPage = activeIndex === 0;
+                const isLastPage = activeIndex === items.length - 1;
+
+                // Apply resistance for a "chewy" overscroll effect at the boundaries
+                if ((isFirstPage && delta > 0) || (isLastPage && delta < 0)) {
+                    delta *= 0.4;
+                }
+
+                setTranslateX(baseTranslate + delta);
             }
         }
-    }, [activeIndex, containerRef, setPosition]);
+    }, [activeIndex, containerRef, items]);
 
     const onTouchEnd = useCallback(() => {
         if (!isDragging.current || !containerRef.current || dragDirection.current !== 'horizontal') {
@@ -68,35 +85,35 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
             return;
         }
         isDragging.current = false;
+        setIsAnimating(true); // Re-enable animations for the snap-back effect
 
         const containerWidth = containerRef.current.parentElement!.clientWidth;
-        const movedBy = currentTranslate.current - (-activeIndex * containerWidth);
-        const threshold = containerWidth / 4;
-    
+        const baseTranslate = -activeIndex * containerWidth;
+        const movedBy = translateX - baseTranslate;
+        
+        // Change page if swipe is more than 50% of the screen width
+        const threshold = containerWidth / 2;
+
         let newIndex = activeIndex;
         if (movedBy < -threshold && activeIndex < items.length - 1) {
             newIndex = activeIndex + 1;
         } else if (movedBy > threshold && activeIndex > 0) {
             newIndex = activeIndex - 1;
         }
-    
+        
         if (newIndex !== activeIndex) {
             onNavigate(items[newIndex]);
         } else {
-            // Animate back to the original position if swipe threshold was not met
-            setPosition(-activeIndex * containerWidth, true);
+            // Animate back to the original position if threshold not met
+            setTranslateX(baseTranslate);
         }
-    }, [activeIndex, containerRef, items, onNavigate, setPosition]);
+    }, [activeIndex, containerRef, items, onNavigate, translateX]);
 
-    // Effect to animate the container when activeIndex changes programmatically (e.g., by tab click)
-    useEffect(() => {
-        if (containerRef.current && !isDragging.current) {
-            const containerWidth = containerRef.current.parentElement!.clientWidth;
-            const newTranslate = -activeIndex * containerWidth;
-            currentTranslate.current = newTranslate;
-            setPosition(newTranslate, true);
-        }
-    }, [activeIndex, containerRef, setPosition]);
+    // Style object to be applied to the swipeable container
+    const containerStyle: React.CSSProperties = {
+        transform: `translateX(${translateX}px)`,
+        transition: isAnimating ? 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none',
+    };
 
-    return { onTouchStart, onTouchMove, onTouchEnd };
+    return { onTouchStart, onTouchMove, onTouchEnd, containerStyle };
 };

@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 interface MemoModalProps {
     isOpen: boolean;
@@ -22,8 +21,6 @@ const MemoModal: React.FC<MemoModalProps> = ({ isOpen, onClose, onSave, initialM
             }, 100);
         }
     }, [isOpen, initialMemo]);
-
-    useAdjustForKeyboard(modalContentRef, isOpen);
 
     if (!isOpen) return null;
 

@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo } from 'react';
+import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
 import { Customer, Product, Order, OrderItem, ScannerContext } from '../types';
 import * as db from '../services/dbService';
 import * as cache from '../services/cacheDbService';
@@ -88,7 +88,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [scannerContext, setScannerContext] = useState<ScannerContext>(null);
     const [isContinuousScan, setIsContinuousScan] = useState(false);
-    const [scanSuccessCallback, setScanSuccessCallback] = useState<(barcode: string) => void>(() => () => {});
+    const onScanCallbackRef = useRef<(barcode: string) => void>(() => {});
     const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
     const [lastModifiedOrderId, setLastModifiedOrderId] = useState<number | null>(null);
     const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
@@ -110,8 +110,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, []);
 
     const onScanSuccess = useCallback((barcode: string) => {
-        if (scanSuccessCallback) scanSuccessCallback(barcode);
-    }, [scanSuccessCallback]);
+        if (onScanCallbackRef.current) {
+            onScanCallbackRef.current(barcode);
+        }
+    }, []);
     
     const uiActions: UIActions = useMemo(() => ({
         showAlert,
@@ -126,7 +128,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         },
         openScanner: (context, onScan, continuous = false) => {
             setScannerContext(context);
-            setScanSuccessCallback(() => onScan);
+            onScanCallbackRef.current = onScan;
             setIsContinuousScan(continuous);
             setIsScannerOpen(true);
         },
