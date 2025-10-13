@@ -3,7 +3,9 @@ import { useDataState, useDataActions, useUIActions, useUIState } from '../conte
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon, TrashIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon, TrashIcon } from '../components/Icons';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+import ToggleSwitch from '../components/ToggleSwitch';
 
 const LoadingSpinner: React.FC = () => (
     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
@@ -33,6 +35,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const restoreInputRef = useRef<HTMLInputElement>(null);
     const customerInputRef = useRef<HTMLInputElement>(null);
     const productInputRef = useRef<HTMLInputElement>(null);
+
+    const [vibrateOnScan, setVibrateOnScan] = useLocalStorage<boolean>('setting:vibrateOnScan', true);
+    const [soundOnScan, setSoundOnScan] = useLocalStorage<boolean>('setting:soundOnScan', true);
 
     useEffect(() => {
         setCurrentCameraSelection(selectedCameraId || '');
@@ -291,6 +296,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 >
                                     선택 카메라로 저장
                                 </button>
+                            </div>
+
+                             <div className="border-t border-slate-200 px-4 divide-y divide-slate-200">
+                                <div className="py-3 flex items-center justify-between">
+                                    <label htmlFor="vibrate-toggle" className="flex items-center cursor-pointer flex-grow">
+                                        <DevicePhoneMobileIcon className="w-5 h-5 text-slate-500 mr-3" />
+                                        <span className="font-medium text-slate-700">스캔 시 진동</span>
+                                    </label>
+                                    <ToggleSwitch id="vibrate-toggle" checked={vibrateOnScan ?? true} onChange={setVibrateOnScan} label="" size="small" />
+                                </div>
+                                <div className="py-3 flex items-center justify-between">
+                                    <label htmlFor="sound-toggle" className="flex items-center cursor-pointer flex-grow">
+                                        <BellIcon className="w-5 h-5 text-slate-500 mr-3" />
+                                        <span className="font-medium text-slate-700">스캔 시 효과음</span>
+                                    </label>
+                                    <ToggleSwitch id="sound-toggle" checked={soundOnScan ?? true} onChange={setSoundOnScan} label="" size="small" />
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useDataState, useUIActions } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
 import { SpinnerIcon } from './Icons';
@@ -6,6 +7,21 @@ import { SpinnerIcon } from './Icons';
 // Assuming ZXing is loaded from a CDN and available on the window object
 declare const ZXing: any;
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
+
+// --- Persistent AudioContext ---
+// Create a single AudioContext instance outside the component.
+// This ensures it's created only once and persists across re-renders and modal open/close cycles,
+// which is a more robust way to handle browser audio policies.
+let audioCtx: AudioContext | null = null;
+if (typeof window !== 'undefined') {
+    try {
+        audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    } catch (e) {
+        console.error("Web Audio API is not supported in this browser.");
+    }
+}
+// --- End of Persistent AudioContext ---
+
 
 interface ScannerModalProps {
     isOpen: boolean;
@@ -20,8 +36,40 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const { showAlert } = useUIActions();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
 
+    const playBeep = useCallback(() => {
+        // Play sound if the persistent AudioContext is available and in a running state.
+        if (!audioCtx || audioCtx.state !== 'running') {
+            console.warn(`Cannot play beep. AudioContext not ready. State: ${audioCtx?.state}`);
+            return;
+        }
+    
+        try {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            gainNode.gain.value = 0.1; // Low volume to not be jarring
+            oscillator.frequency.value = 800; // A pleasant, medium-pitch frequency
+            oscillator.type = 'sine';
+            
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.1); // 100ms duration
+        } catch (error) {
+            console.error("Failed to play beep sound:", error);
+        }
+    }, []);
+
+    // Effect to unlock audio and load the scanner library when the modal opens.
     useEffect(() => {
         if (isOpen) {
+            // This code runs as a direct result of the user action that set `isOpen` to true.
+            // This is the correct place to "unlock" a suspended AudioContext.
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(err => console.error("Failed to resume AudioContext on modal open:", err));
+            }
+
             setIsLibraryLoading(true);
             loadScript(ZXING_CDN)
                 .then(() => setIsLibraryLoading(false))
@@ -33,6 +81,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }
     }, [isOpen, onClose, showAlert]);
 
+    // Effect to handle camera setup and scanning logic.
     useEffect(() => {
         if (isOpen && !isLibraryLoading && videoRef.current) {
             const hints = new Map();
@@ -68,7 +117,15 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     try {
                         await codeReaderRef.current.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
                             if (result) {
-                                if (navigator.vibrate) navigator.vibrate(100);
+                                const shouldVibrate = JSON.parse(localStorage.getItem('setting:vibrateOnScan') ?? 'true');
+                                const shouldSound = JSON.parse(localStorage.getItem('setting:soundOnScan') ?? 'true');
+
+                                if (shouldVibrate) {
+                                    if (navigator.vibrate) navigator.vibrate(100);
+                                }
+                                if (shouldSound) {
+                                    playBeep();
+                                }
                                 const barcode = result.getText();                             
                                 onScanSuccess(barcode);
                                 onClose();
@@ -96,8 +153,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 codeReaderRef.current.reset();
             }
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert]);
+    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert, playBeep]);
 
     if (!isOpen) return null;
 
