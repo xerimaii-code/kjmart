@@ -23,18 +23,16 @@ interface SettingsPageProps {
 // --- Reusable Sync Section Component ---
 const SyncSection: React.FC<{
     dataType: 'customer' | 'product';
-    setIsLoading: (loading: boolean) => void;
-    setLoadingMessage: (message: string) => void;
-}> = ({ dataType, setIsLoading, setLoadingMessage }) => {
+}> = ({ dataType }) => {
     const { setCustomers, setProducts } = useDataActions();
     const { showToast, showAlert } = useUIActions();
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
     const [isGapiReady, setIsGapiReady] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
     const dataTypeKorean = dataType === 'customer' ? '거래처' : '상품';
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         googleDrive.initGoogleApi()
@@ -52,11 +50,10 @@ const SyncSection: React.FC<{
         }
         setIsSyncing(true);
         setError(null);
+        setStatusMessage('파일 선택창 여는 중...');
         try {
             const fileId = await googleDrive.showPicker();
-            setIsLoading(true);
-            setLoadingMessage('선택한 파일 정보 확인 중...');
-            await new Promise(r => setTimeout(r, 50));
+            setStatusMessage('선택한 파일 정보 확인 중...');
             const metadata = await googleDrive.getFileMetadata(fileId);
             setSettings({
                 fileId,
@@ -75,8 +72,7 @@ const SyncSection: React.FC<{
             }
         } finally {
             setIsSyncing(false);
-            setIsLoading(false);
-            setLoadingMessage('');
+            setStatusMessage(null);
         }
     };
 
@@ -91,31 +87,25 @@ const SyncSection: React.FC<{
         }
 
         setIsSyncing(true);
-        setIsLoading(true);
         setError(null);
         try {
-            setLoadingMessage(`${dataTypeKorean} 파일 정보 확인 중...`);
-            await new Promise(r => setTimeout(r, 50));
+            setStatusMessage(`${dataTypeKorean} 파일 정보 확인 중...`);
             const metadata = await googleDrive.getFileMetadata(settings.fileId);
 
-            setLoadingMessage('파일 다운로드 및 처리 중...');
-            await new Promise(r => setTimeout(r, 50));
+            setStatusMessage('파일 다운로드 및 처리 중...');
             const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
             
-            setLoadingMessage('데이터 분석 중...');
-            await new Promise(r => setTimeout(r, 50));
+            setStatusMessage('데이터 분석 중...');
             const rows = await parseExcelFile(fileBlob);
             
             let result;
             if (dataType === 'customer') {
                 result = processCustomerData(rows);
-                setLoadingMessage(`${result.valid.length}개 거래처 데이터 저장 중...`);
-                await new Promise(r => setTimeout(r, 50));
+                setStatusMessage(`${result.valid.length}개 거래처 데이터 저장 중...`);
                 if (result.valid.length > 0) await setCustomers(result.valid);
             } else {
                 result = processProductData(rows);
-                setLoadingMessage(`${result.valid.length}개 상품 데이터 저장 중...`);
-                await new Promise(r => setTimeout(r, 50));
+                setStatusMessage(`${result.valid.length}개 상품 데이터 저장 중...`);
                 if (result.valid.length > 0) await setProducts(result.valid);
             }
 
@@ -140,8 +130,7 @@ const SyncSection: React.FC<{
             }
         } finally {
             setIsSyncing(false);
-            setIsLoading(false);
-            setLoadingMessage('');
+            setStatusMessage(null);
         }
     };
     
@@ -220,6 +209,7 @@ const SyncSection: React.FC<{
                     </div>
 
                     {error && <p className="text-xs text-center text-red-600 mt-2">{error}</p>}
+                    {isSyncing && statusMessage && <p className="text-xs text-center text-gray-500 mt-2 animate-pulse">{statusMessage}</p>}
                 </div>
             </div>
         </div>
@@ -228,7 +218,7 @@ const SyncSection: React.FC<{
 
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
-    const { customers, products, selectedCameraId } = useDataState();
+    const { selectedCameraId } = useDataState();
     const { setCustomers, setProducts, setSelectedCameraId, clearOrders } = useDataActions();
     const { isInstallPromptAvailable } = useUIState();
     const { showAlert, showToast, triggerInstallPrompt } = useUIActions();
@@ -242,6 +232,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [fileImportType, setFileImportType] = useState<'customer' | 'product' | null>(null);
+    const [isImporting, setIsImporting] = useState<'customer' | 'product' | null>(null);
+
 
     useEffect(() => {
         if (isActive && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
@@ -277,26 +269,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             const file = event.target.files[0];
             const dataTypeKorean = fileImportType === 'customer' ? '거래처' : '상품';
 
-            setIsLoading(true);
-            setLoadingMessage(`${dataTypeKorean} 파일 처리 중...`);
+            setIsImporting(fileImportType);
             
             try {
-                await new Promise(resolve => setTimeout(resolve, 50)); // Allow UI update
-                
                 const rows = await parseExcelFile(file);
-                setLoadingMessage(`${rows.length}개 행 데이터 분석 중...`);
-                await new Promise(resolve => setTimeout(resolve, 50));
-
+                
                 let result;
                 if (fileImportType === 'customer') {
                     result = processCustomerData(rows);
-                    setLoadingMessage(`${result.valid.length}개 유효 데이터 저장 중...`);
-                    await new Promise(resolve => setTimeout(resolve, 50));
                     await setCustomers(result.valid);
                 } else {
                     result = processProductData(rows);
-                    setLoadingMessage(`${result.valid.length}개 유효 데이터 저장 중...`);
-                    await new Promise(resolve => setTimeout(resolve, 50));
                     await setProducts(result.valid);
                 }
                 
@@ -310,8 +293,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 const errorMessage = (error instanceof Error) ? error.message : "알 수 없는 오류가 발생했습니다.";
                 showAlert(`파일 처리 중 오류가 발생했습니다: ${errorMessage}`);
             } finally {
-                setIsLoading(false);
-                setLoadingMessage('');
+                setIsImporting(null);
                 if(fileInputRef.current) fileInputRef.current.value = "";
             }
         }
@@ -481,22 +463,24 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 
                 {/* 데이터 관리 */}
                 <Card title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
-                    <SyncSection dataType="customer" setIsLoading={setIsLoading} setLoadingMessage={setLoadingMessage} />
-                    <SyncSection dataType="product" setIsLoading={setIsLoading} setLoadingMessage={setLoadingMessage} />
+                    <SyncSection dataType="customer" />
+                    <SyncSection dataType="product" />
                     <div className="pt-4 mt-4 border-t border-gray-200">
                         <h4 className="text-sm font-bold text-gray-600 mb-2">로컬 파일로 데이터 업데이트</h4>
                         <div className="grid grid-cols-2 gap-3">
                              <button
                                 onClick={() => handleFileImportClick('customer')}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition"
+                                disabled={isImporting !== null}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
                             >
-                                <span>거래처 가져오기</span>
+                                {isImporting === 'customer' ? <SpinnerIcon className="w-5 h-5" /> : <span>거래처 가져오기</span>}
                             </button>
                             <button
                                 onClick={() => handleFileImportClick('product')}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition"
+                                disabled={isImporting !== null}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
                             >
-                                <span>상품 가져오기</span>
+                                {isImporting === 'product' ? <SpinnerIcon className="w-5 h-5" /> : <span>상품 가져오기</span>}
                             </button>
                         </div>
                     </div>
