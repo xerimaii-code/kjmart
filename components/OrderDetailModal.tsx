@@ -70,6 +70,7 @@ const OrderDetailModal: React.FC = () => {
     const isCompleted = useMemo(() => !!order?.completedAt || !!order?.completionDetails, [order]);
     
     const [productSearch, setProductSearch] = useState('');
+    const debouncedProductSearch = useDebounce(productSearch, 200);
     const [showDropdown, setShowDropdown] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     const [productForModal, setProductForModal] = useState<Product | null>(null);
@@ -244,10 +245,10 @@ const OrderDetailModal: React.FC = () => {
     };
 
     const filteredProducts = useMemo(() => {
-        const searchTerm = productSearch.trim().toLowerCase();
+        const searchTerm = debouncedProductSearch.trim().toLowerCase();
         if (!searchTerm) return [];
         return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm));
-    }, [products, productSearch]);
+    }, [products, debouncedProductSearch]);
 
     const handleProductSelect = (product: Product) => {
         setAddItemTrigger('search');

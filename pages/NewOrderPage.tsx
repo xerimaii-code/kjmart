@@ -64,7 +64,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
+    const debouncedCustomerSearch = useDebounce(customerSearch, 200);
     const [productSearch, setProductSearch] = useState('');
+    const debouncedProductSearch = useDebounce(productSearch, 200);
     const [memo, setMemo] = useState('');
     const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     
@@ -161,16 +163,16 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     }, [items.length]);
     
     const filteredCustomers = useMemo(() => {
-        const searchTerm = customerSearch.trim().toLowerCase();
+        const searchTerm = debouncedCustomerSearch.trim().toLowerCase();
         if (!searchTerm || isCustomerSelected) return [];
         return customers.filter(c => c.name.toLowerCase().includes(searchTerm) || c.comcode.includes(searchTerm));
-    }, [customers, customerSearch, isCustomerSelected]);
+    }, [customers, debouncedCustomerSearch, isCustomerSelected]);
 
     const filteredProducts = useMemo(() => {
-        const searchTerm = productSearch.trim().toLowerCase();
+        const searchTerm = debouncedProductSearch.trim().toLowerCase();
         if (!searchTerm) return [];
         return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm));
-    }, [products, productSearch]);
+    }, [products, debouncedProductSearch]);
 
     const handleSelectCustomer = (customer: Customer) => {
         setSelectedCustomer(customer);

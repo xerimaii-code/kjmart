@@ -113,6 +113,8 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 // --- End Top Tab Bar Component ---
 
 
+const pages: Page[] = ['history', 'new-order', 'settings'];
+
 const AppContent: React.FC = () => {
     const [activePage, setActivePage] = useState<Page>('new-order');
     const { 
@@ -138,7 +140,6 @@ const AppContent: React.FC = () => {
         closeDeliveryModal();
     };
 
-    const pages: Page[] = ['history', 'new-order', 'settings'];
     const currentPageIndex = pages.indexOf(activePage);
     const swipeContainerRef = useRef<HTMLDivElement>(null);
 
