@@ -253,6 +253,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             { type: 'product', key: `google-drive-sync-settings-product` }
         ];
 
+        // First, check if any auto-sync is enabled before initializing the heavy Google API.
+        const isAutoSyncEnabled = syncConfigs.some(config => {
+            const deviceSpecificKey = `${deviceId}:${config.key}`;
+            const settingsJSON = localStorage.getItem(deviceSpecificKey);
+            if (!settingsJSON) return false;
+            try {
+                const settings: SyncSettings = JSON.parse(settingsJSON);
+                return settings.autoSync && !!settings.fileId;
+            } catch {
+                return false;
+            }
+        });
+
+        if (!isAutoSyncEnabled) {
+            console.log("[AutoSync] No auto-sync configurations found. Skipping Google API initialization.");
+            return; // Exit if no auto-sync is configured.
+        }
+
         try {
             await googleDrive.initGoogleApi();
         } catch (apiInitError) {
