@@ -269,12 +269,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     }
                 } catch (syncError) {
                     console.error(`[AutoSync] Failed to sync ${config.type} data:`, syncError);
+                    const dataTypeKorean = config.type === 'customer' ? '거래처' : '상품';
+                    if (syncError instanceof Error && syncError.message.includes("File not found")) {
+                        showAlert(`자동 동기화 오류: 연결된 ${dataTypeKorean} 파일을 Google Drive에서 찾을 수 없습니다. 설정에서 파일을 다시 연결해주세요.`);
+                    } else {
+                        showAlert(`자동 동기화 실패: ${dataTypeKorean} 데이터를 업데이트하지 못했습니다.\n인터넷 연결을 확인해주세요.`);
+                    }
                 }
             }
         } catch (apiInitError) {
             console.warn("[AutoSync] Could not initialize Google API for auto-sync.", apiInitError);
         }
-    }, [dataActions]);
+    }, [dataActions, showAlert]);
 
 
     // Initial Data Load: Cache-first strategy
