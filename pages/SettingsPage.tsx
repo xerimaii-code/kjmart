@@ -3,9 +3,10 @@ import { useDataState, useDataActions, useUIActions, useUIState } from '../conte
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, ArrowLongRightIcon, DownloadIcon, UploadIcon, ArrowDownTrayIcon, LogoutIcon, TrashIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
+import * as googleDrive from '../services/googleDriveService';
 
 const LoadingSpinner: React.FC = () => (
     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
@@ -31,6 +32,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [currentCameraSelection, setCurrentCameraSelection] = useState<string>(selectedCameraId || '');
     const [isLoading, setIsLoading] = useState(false);
     const [isStandalone, setIsStandalone] = useState(false);
+    const [isGoogleApiReady, setIsGoogleApiReady] = useState(false);
     
     const restoreInputRef = useRef<HTMLInputElement>(null);
     const customerInputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +40,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
 
     const [vibrateOnScan, setVibrateOnScan] = useLocalStorage<boolean>('setting:vibrateOnScan', true);
     const [soundOnScan, setSoundOnScan] = useLocalStorage<boolean>('setting:soundOnScan', true);
+
+    useEffect(() => {
+        if (isActive) {
+            googleDrive.initGoogleApi()
+                .then(() => setIsGoogleApiReady(true))
+                .catch(err => {
+                    console.error("Google API init failed:", err)
+                    setIsGoogleApiReady(false);
+                });
+        }
+    }, [isActive]);
 
     useEffect(() => {
         setCurrentCameraSelection(selectedCameraId || '');
@@ -135,57 +148,47 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         );
     };
     
-    const handleMasterFileSelected = async (
-        event: React.ChangeEvent<HTMLInputElement>,
-        dataType: 'customer' | 'product'
-    ) => {
+    const processAndShowResult = async (rows: any[], dataType: 'customer' | 'product') => {
+        let resultMessage = '';
+        if (dataType === 'customer') {
+            const { valid, invalidCount, errors } = processCustomerData(rows);
+            if (valid.length > 0) {
+                await setCustomers(valid);
+            }
+            resultMessage = `거래처 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
+            if (invalidCount > 0) {
+                const errorSummary = errors.slice(0, 3).join('\n');
+                resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
+                if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
+            }
+        } else { // product
+            const { valid, invalidCount, errors } = processProductData(rows);
+            if (valid.length > 0) {
+                await setProducts(valid);
+            }
+            resultMessage = `상품 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
+            if (invalidCount > 0) {
+                const errorSummary = errors.slice(0, 3).join('\n');
+                resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
+                if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
+            }
+        }
+        showAlert(resultMessage);
+    };
+
+    const handleMasterFileSelected = async (event: React.ChangeEvent<HTMLInputElement>, dataType: 'customer' | 'product') => {
         const file = event.target.files?.[0];
         if (!file) return;
 
         setIsLoading(true);
         try {
             const rows = await parseExcelFile(file);
-            let resultMessage = '';
-
-            if (dataType === 'customer') {
-                const { valid, invalidCount, errors } = processCustomerData(rows);
-                if (valid.length > 0) {
-                    await setCustomers(valid);
-                }
-                
-                resultMessage = `거래처 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
-                if (invalidCount > 0) {
-                    const errorSummary = errors.slice(0, 3).join('\n');
-                    resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
-                    if (errors.length > 3) {
-                        resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
-                    }
-                }
-                showAlert(resultMessage);
-
-            } else { // product
-                const { valid, invalidCount, errors } = processProductData(rows);
-                if (valid.length > 0) {
-                    await setProducts(valid);
-                }
-
-                resultMessage = `상품 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
-                if (invalidCount > 0) {
-                    const errorSummary = errors.slice(0, 3).join('\n');
-                    resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
-                    if (errors.length > 3) {
-                        resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
-                    }
-                }
-                showAlert(resultMessage);
-            }
+            await processAndShowResult(rows, dataType);
         } catch (error) {
             console.error("Error during file import process:", error);
             showAlert(`파일 처리 중 오류 발생: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
-            if (event.target) {
-                event.target.value = ''; // Reset file input
-            }
+            if (event.target) event.target.value = '';
             setIsLoading(false);
         }
     };
@@ -203,6 +206,28 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             "가져오기",
             'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500'
         );
+    };
+
+    const handleGoogleDriveImport = async (dataType: 'customer' | 'product') => {
+        if (!isGoogleApiReady) {
+            showAlert("Google Drive 연동이 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+            return;
+        }
+        setIsLoading(true);
+        try {
+            const fileId = await googleDrive.showPicker();
+            const fileBlob = await googleDrive.getFileContent(fileId);
+            const rows = await parseExcelFile(fileBlob);
+            await processAndShowResult(rows, dataType);
+        } catch (error) {
+            if (error instanceof Error && error.message !== "Picker was cancelled.") {
+                console.error("Google Drive import failed:", error);
+                showAlert(`Google Drive에서 파일을 가져오는 데 실패했습니다: ${error.message}`);
+            }
+            // Don't show an alert if the user just cancelled the picker.
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleLogout = () => {
@@ -326,19 +351,31 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         <div className="py-4 first:pt-0 last:pb-0">
                             <h3 className="font-semibold text-slate-800">거래처 자료 등록</h3>
                             <p className="text-sm text-slate-500 mt-1 mb-3">XLS 파일을 통해 모든 거래처 데이터를 한번에 등록/수정합니다.</p>
-                            <button onClick={() => triggerMasterFileUpload('customer')} className="w-full mt-2 flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
-                                <UploadIcon className="w-5 h-5"/>
-                                <span>거래처 파일 선택</span>
-                            </button>
+                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                <button onClick={() => triggerMasterFileUpload('customer')} className="w-full flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
+                                    <UploadIcon className="w-5 h-5"/>
+                                    <span>기기에서 선택</span>
+                                </button>
+                                <button onClick={() => handleGoogleDriveImport('customer')} disabled={!isGoogleApiReady} className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white p-3 rounded-md font-bold transition shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed">
+                                    <GoogleDriveIcon className="w-5 h-5"/>
+                                    <span>Google Drive</span>
+                                </button>
+                            </div>
                         </div>
                         {/* Product */}
                         <div className="py-4 first:pt-0 last:pb-0">
                             <h3 className="font-semibold text-slate-800">상품 마스터 등록</h3>
                             <p className="text-sm text-slate-500 mt-1 mb-3">XLS 파일을 통해 모든 상품 데이터를 한번에 등록/수정합니다.</p>
-                            <button onClick={() => triggerMasterFileUpload('product')} className="w-full mt-2 flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
-                                <UploadIcon className="w-5 h-5"/>
-                                <span>상품 파일 선택</span>
-                            </button>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                <button onClick={() => triggerMasterFileUpload('product')} className="w-full flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
+                                    <UploadIcon className="w-5 h-5"/>
+                                    <span>기기에서 선택</span>
+                                </button>
+                                <button onClick={() => handleGoogleDriveImport('product')} disabled={!isGoogleApiReady} className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white p-3 rounded-md font-bold transition shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed">
+                                    <GoogleDriveIcon className="w-5 h-5"/>
+                                    <span>Google Drive</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

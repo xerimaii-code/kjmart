@@ -198,6 +198,14 @@ export const PencilSquareIcon = ({className, title, ...props}: IconProps) => (
     </svg>
 );
 
+export const GoogleDriveIcon = ({className, ...props}: IconProps) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className || "h-6 w-6"} fill="currentColor" viewBox="0 0 24 24" {...props}>
+      <path d="M7.71,3.5,1.5,15,4.21,20.5,10.43,9.25Z" />
+      <path d="M16.29,3.5,10.07,14.75,12.79,19.5,22.5,19.5,16.29,3.5Z" />
+      <path d="M11.57,15.25,8.86,20.5,15.07,20.5,17.79,15.25Z" />
+    </svg>
+);
+
 export const BellIcon = ({className, ...props}: IconProps) => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className || "w-6 h-6"} {...props}>
         {props.title && <title>{props.title}</title>}
