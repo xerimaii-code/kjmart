@@ -7,6 +7,7 @@ import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon,
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
+import CollapsibleCard from '../components/CollapsibleCard';
 
 // --- Types ---
 interface SyncSettings {
@@ -29,13 +30,27 @@ const SyncSection: React.FC<{
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
     const [isPicking, setIsPicking] = useState(false);
+    const [isApiReady, setIsApiReady] = useState(false);
 
     const dataTypeKorean = dataType === 'customer' ? '거래처' : '상품';
+
+    const initializeApi = useCallback(async () => {
+        if (isApiReady) return true;
+        try {
+            await googleDrive.initGoogleApi();
+            setIsApiReady(true);
+            return true;
+        } catch (err) {
+            console.error("Google API initialization failed:", err);
+            showToast('Google API 초기화에 실패했습니다.', 'error');
+            return false;
+        }
+    }, [isApiReady, showToast]);
 
     const handleSelectFile = async () => {
         setIsPicking(true);
         try {
-            await googleDrive.initGoogleApi(); // Initialize on demand
+            if (!await initializeApi()) return;
             const fileId = await googleDrive.showPicker();
             const metadata = await googleDrive.getFileMetadata(fileId);
             setSettings({
@@ -64,7 +79,7 @@ const SyncSection: React.FC<{
 
         setIsSyncing(true);
         try {
-            await googleDrive.initGoogleApi(); // Ensure API is ready
+            if (!await initializeApi()) return;
             const metadata = await googleDrive.getFileMetadata(settings.fileId);
             const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
             const rows = await parseExcelFile(fileBlob);
@@ -340,20 +355,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
     };
-    
-    const Card: React.FC<{title: string, icon: React.ReactNode, children: React.ReactNode}> = ({title, icon, children}) => (
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="p-4 bg-gray-50 border-b border-gray-200">
-                <h3 className="font-bold text-gray-800 text-base flex items-center gap-2">
-                    {icon}
-                    <span>{title}</span>
-                </h3>
-            </div>
-            <div className="p-4 space-y-4">
-                {children}
-            </div>
-        </div>
-    );
 
     return (
         <div className="h-full flex flex-col bg-gray-100">
@@ -375,8 +376,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             </div>
             <div className="scrollable-content p-2 space-y-3">
 
-                {/* 앱 설정 */}
-                <Card title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>}>
+                <CollapsibleCard title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
                     <div className="flex items-center justify-between">
                         <label htmlFor="camera-select" className="text-sm font-medium text-gray-700 flex items-center gap-2">
                             <CameraIcon className="w-5 h-5 text-gray-500"/>
@@ -405,10 +405,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             <span>홈 화면에 앱 설치</span>
                         </button>
                     )}
-                </Card>
+                </CollapsibleCard>
 
-                {/* 스캔 알림 설정 */}
-                <Card title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>}>
+                <CollapsibleCard title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
                     <div className="flex justify-between items-center">
                          <span className="text-sm font-medium text-gray-700">스캔 시 진동</span>
                          <ToggleSwitch
@@ -427,10 +426,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             label=""
                          />
                     </div>
-                </Card>
+                </CollapsibleCard>
                 
-                {/* 데이터 관리 */}
-                <Card title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
+                <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
                     <SyncSection dataType="customer" />
                     <SyncSection dataType="product" />
                     <div className="pt-4 mt-4 border-t border-gray-200">
@@ -452,10 +450,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             </button>
                         </div>
                     </div>
-                </Card>
+                </CollapsibleCard>
                 
-                 {/* 위험 구역 */}
-                <Card title="데이터 백업 및 복원" icon={<ArrowLongRightIcon className="w-5 h-5 text-gray-500"/>}>
+                <CollapsibleCard title="데이터 백업 및 복원" icon={<ArrowLongRightIcon className="w-5 h-5 text-gray-500"/>}>
                     <div className="grid grid-cols-2 gap-3">
                         <button
                             onClick={handleBackup}
@@ -479,7 +476,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         <TrashIcon className="w-5 h-5" />
                         <span>발주 내역 전체 삭제</span>
                     </button>
-                </Card>
+                </CollapsibleCard>
                 
                  {/* 계정 */}
                  <div className="p-4">
