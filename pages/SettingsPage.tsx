@@ -29,26 +29,13 @@ const SyncSection: React.FC<{
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
     const [isPicking, setIsPicking] = useState(false);
-    const [isGapiReady, setIsGapiReady] = useState(false);
 
     const dataTypeKorean = dataType === 'customer' ? '거래처' : '상품';
 
-    useEffect(() => {
-        googleDrive.initGoogleApi()
-            .then(() => setIsGapiReady(true))
-            .catch(err => {
-                console.error("Failed to initialize Google API:", err);
-                // No need to show alert, button will just be disabled
-            });
-    }, []);
-
     const handleSelectFile = async () => {
-        if (!isGapiReady) {
-            // This alert is removed as requested. The button is disabled and shows a loading state.
-            return;
-        }
         setIsPicking(true);
         try {
+            await googleDrive.initGoogleApi(); // Initialize on demand
             const fileId = await googleDrive.showPicker();
             const metadata = await googleDrive.getFileMetadata(fileId);
             setSettings({
@@ -70,10 +57,6 @@ const SyncSection: React.FC<{
     };
 
     const handleSync = async () => {
-        if (!isGapiReady) {
-            showToast("Google API가 아직 준비되지 않았습니다.", 'error');
-            return;
-        }
         if (!settings?.fileId) {
             showToast("먼저 동기화할 파일을 선택해주세요.", 'error');
             return;
@@ -81,6 +64,7 @@ const SyncSection: React.FC<{
 
         setIsSyncing(true);
         try {
+            await googleDrive.initGoogleApi(); // Ensure API is ready
             const metadata = await googleDrive.getFileMetadata(settings.fileId);
             const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
             const rows = await parseExcelFile(fileBlob);
@@ -165,18 +149,16 @@ const SyncSection: React.FC<{
                     <div className="grid grid-cols-2 gap-3">
                         <button
                             onClick={handleSelectFile}
-                            disabled={!isGapiReady || isSyncing || isPicking}
+                            disabled={isSyncing || isPicking}
                             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
                         >
-                            {!isGapiReady || isPicking ? (
+                            {isPicking ? (
                                 <SpinnerIcon className="w-5 h-5" />
                             ) : (
                                 <GoogleDriveIcon className="w-5 h-5" />
                             )}
                             <span className="truncate">
-                                {!isGapiReady
-                                    ? 'API 초기화 중...'
-                                    : isPicking
+                                {isPicking
                                     ? '인증/선택 창...'
                                     : settings?.fileId
                                     ? '파일 변경'
@@ -185,7 +167,7 @@ const SyncSection: React.FC<{
                         </button>
                         <button
                             onClick={handleSync}
-                            disabled={!settings?.fileId || !isGapiReady || isSyncing || isPicking}
+                            disabled={!settings?.fileId || isSyncing || isPicking}
                             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-sky-600 text-white font-semibold rounded-md hover:bg-sky-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
                         >
                             {isSyncing ? (
