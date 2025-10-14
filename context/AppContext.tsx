@@ -8,6 +8,7 @@ import { useAuth } from './AuthContext';
 import * as googleDrive from '../services/googleDriveService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
 import { getDeviceId } from '../services/deviceService';
+import Toast from '../components/Toast';
 
 
 interface SyncSettings {
@@ -44,8 +45,15 @@ interface AlertState {
     confirmButtonClass?: string;
 }
 
+interface ToastState {
+    isOpen: boolean;
+    message: string;
+    type: 'success' | 'error';
+}
+
 interface UIState {
     alert: AlertState;
+    toast: ToastState;
     isDetailModalOpen: boolean;
     editingOrder: Order | null;
     isScannerOpen: boolean;
@@ -61,6 +69,8 @@ interface UIState {
 interface UIActions {
     showAlert: (message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => void;
     hideAlert: () => void;
+    showToast: (message: string, type: 'success' | 'error') => void;
+    hideToast: () => void;
     openDetailModal: (order: Order) => void;
     closeDetailModal: () => void;
     openScanner: (context: ScannerContext, onScan: (barcode: string) => void, continuous?: boolean) => void;
@@ -93,6 +103,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // --- UI STATE & ACTIONS ---
     const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
+    const [toast, setToast] = useState<ToastState>({ isOpen: false, message: '', type: 'success' });
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -106,6 +117,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
         setAlert({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
+    }, []);
+
+    const showToast = useCallback((message: string, type: 'success' | 'error') => {
+        setToast({ isOpen: true, message, type });
+    }, []);
+
+    const hideToast = useCallback(() => {
+        setToast(prev => ({...prev, isOpen: false}));
     }, []);
 
     useEffect(() => {
@@ -128,6 +147,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const uiActions: UIActions = useMemo(() => ({
         showAlert,
         hideAlert: () => setAlert(prev => ({ ...prev, isOpen: false })),
+        showToast,
+        hideToast,
         openDetailModal: (order: Order) => {
             setEditingOrder(order);
             setIsDetailModalOpen(true);
@@ -166,10 +187,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setLastModifiedOrderId: (id: number | null) => {
             setLastModifiedOrderId(id);
         },
-    }), [showAlert, installPromptEvent]);
+    }), [showAlert, showToast, hideToast, installPromptEvent]);
 
     const uiState: UIState = {
         alert,
+        toast,
         isDetailModalOpen,
         editingOrder,
         isScannerOpen,
@@ -249,7 +271,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
                     if (isModified) {
                         console.log(`[AutoSync] New version of ${config.type} file found. Syncing...`);
-                        const fileBlob = await googleDrive.getFileContent(settings.fileId);
+                        const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
                         const rows = await parseExcelFile(fileBlob);
                         
                         if (config.type === 'customer') {
@@ -271,16 +293,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     console.error(`[AutoSync] Failed to sync ${config.type} data:`, syncError);
                     const dataTypeKorean = config.type === 'customer' ? '거래처' : '상품';
                     if (syncError instanceof Error && syncError.message.includes("File not found")) {
-                        showAlert(`자동 동기화 오류: 연결된 ${dataTypeKorean} 파일을 Google Drive에서 찾을 수 없습니다. 설정에서 파일을 다시 연결해주세요.`);
+                        showToast(`자동 동기화 오류: 연결된 ${dataTypeKorean} 파일을 찾을 수 없습니다. 설정에서 확인해주세요.`, 'error');
                     } else {
-                        showAlert(`자동 동기화 실패: ${dataTypeKorean} 데이터를 업데이트하지 못했습니다.\n인터넷 연결을 확인해주세요.`);
+                        showToast(`자동 동기화 실패: ${dataTypeKorean} 데이터를 업데이트하지 못했습니다.`, 'error');
                     }
                 }
             }
         } catch (apiInitError) {
             console.warn("[AutoSync] Could not initialize Google API for auto-sync.", apiInitError);
         }
-    }, [dataActions, showAlert]);
+    }, [dataActions, showToast]);
 
 
     // Initial Data Load: Cache-first strategy
@@ -382,6 +404,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             <UIStateContext.Provider value={uiState}>
                 <DataActionsContext.Provider value={dataActions}>
                     <DataStateContext.Provider value={dataState}>
+                        <Toast
+                            isOpen={uiState.toast.isOpen}
+                            message={uiState.toast.message}
+                            type={uiState.toast.type}
+                            onClose={uiActions.hideToast}
+                        />
                         <AlertModal
                             isOpen={alert.isOpen}
                             message={alert.message}

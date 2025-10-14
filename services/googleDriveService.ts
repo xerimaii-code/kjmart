@@ -149,15 +149,15 @@ export const showPicker = (): Promise<string> => {
     });
 };
 
-// Function to get file metadata (name, modifiedTime)
-export const getFileMetadata = async (fileId: string): Promise<{ name: string; modifiedTime: string; }> => {
+// Function to get file metadata (name, modifiedTime, mimeType)
+export const getFileMetadata = async (fileId: string): Promise<{ name: string; modifiedTime: string; mimeType: string; }> => {
     const oauthToken = await getAccessToken();
     gapi.client.setToken({ access_token: oauthToken });
 
     try {
         const response = await gapi.client.drive.files.get({
             fileId: fileId,
-            fields: 'id, name, modifiedTime'
+            fields: 'id, name, modifiedTime, mimeType'
         });
         
         if (response.status !== 200 || !response.result) {
@@ -176,27 +176,48 @@ export const getFileMetadata = async (fileId: string): Promise<{ name: string; m
 
 
 // Function to get file content as a Blob
-export const getFileContent = async (fileId: string): Promise<Blob> => {
-    // Set the access token for this API call. getAccessToken will provide a cached token.
+export const getFileContent = async (fileId: string, fileMimeType: string): Promise<Blob> => {
     const oauthToken = await getAccessToken();
     gapi.client.setToken({ access_token: oauthToken });
 
-    const response = await gapi.client.drive.files.export({
-        fileId: fileId,
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-    
-    if (response.status !== 200 || !response.body) {
-        throw new Error("Google Drive에서 파일을 다운로드하는 데 실패했습니다.");
+    // If it's a native Google Sheet, we must export it to a standard format.
+    if (fileMimeType === 'application/vnd.google-apps.spreadsheet') {
+        const response = await gapi.client.drive.files.export({
+            fileId: fileId,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        
+        if (response.status !== 200 || !response.body) {
+            throw new Error("Google Drive에서 파일을 다운로드하는 데 실패했습니다.");
+        }
+        
+        // The response body is a string of bytes. We need to convert it to a Blob.
+        const binaryString = response.body;
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    } else {
+        // For other file types (like uploaded .xls, .xlsx), download them directly.
+        const response = await gapi.client.drive.files.get({
+            fileId: fileId,
+            alt: 'media'
+        });
+
+        if (response.status !== 200 || !response.body) {
+            throw new Error("Google Drive에서 파일을 다운로드하는 데 실패했습니다.");
+        }
+        
+        const binaryString = response.body;
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        return new Blob([bytes], { type: fileMimeType });
     }
-    
-    // The response body is a string of bytes. We need to convert it to a Blob.
-    const binaryString = response.body;
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    
-    return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 };
