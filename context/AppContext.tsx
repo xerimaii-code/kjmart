@@ -309,6 +309,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     useEffect(() => {
         let isMounted = true;
         const unsubscribers: (() => void)[] = [];
+        let syncTimeoutId: number;
 
         const initialize = async () => {
             if (!user) {
@@ -349,7 +350,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setLoadingState(prev => ({ ...prev, connecting: true }));
 
             // --- Auto-Sync on Startup ---
-            runAutoSync();
+            // Delay auto-sync to allow the main UI to load first. This makes the sync
+            // feel like a background process and doesn't block initial app rendering.
+            syncTimeoutId = window.setTimeout(() => {
+                runAutoSync();
+            }, 2000); // 2-second delay
 
             if (!db.isInitialized()) {
                 console.warn("Database not initialized. Proceeding with cached data only.");
@@ -394,6 +399,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return () => {
             isMounted = false;
             unsubscribers.forEach(unsub => unsub());
+            clearTimeout(syncTimeoutId);
         };
     }, [user, showAlert, runAutoSync]);
     
