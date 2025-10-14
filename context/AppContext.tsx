@@ -5,6 +5,17 @@ import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { useAuth } from './AuthContext';
+import * as googleDrive from '../services/googleDriveService';
+import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
+import { getDeviceId } from '../services/deviceService';
+
+
+interface SyncSettings {
+    fileId: string;
+    fileName: string;
+    lastSyncTime: string | null;
+    autoSync: boolean;
+}
 
 // --- TYPE DEFINITIONS ---
 interface DataState {
@@ -59,32 +70,6 @@ interface UIActions {
     triggerInstallPrompt: () => void;
     setLastModifiedOrderId: (id: number | null) => void;
 }
-
-const getDeviceId = (): string => {
-    const DEVICE_ID_KEY = 'app-device-id';
-    try {
-        let storedId = localStorage.getItem(DEVICE_ID_KEY);
-        if (!storedId) {
-            // Simple UUID v4 generator
-            storedId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                var r = (Math.random() * 16) | 0,
-                    v = c === 'x' ? r : (r & 0x3) | 0x8;
-                return v.toString(16);
-            });
-            localStorage.setItem(DEVICE_ID_KEY, storedId);
-        }
-        return storedId;
-    } catch (error) {
-        console.error("Failed to access localStorage for device ID:", error);
-        // Fallback for environments where localStorage is not available (e.g., private browsing on some browsers)
-        // This will not be persistent across sessions, but will be consistent for the current session.
-        if (!(window as any)._sessionDeviceId) {
-             (window as any)._sessionDeviceId = 'session-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15);
-        }
-        return (window as any)._sessionDeviceId;
-    }
-};
-
 
 // --- CONTEXT CREATION ---
 // For performance optimization, contexts are split into State and Actions.
@@ -210,105 +195,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         orders: true,
         settings: true,
     });
-    
-    // Initial Data Load: Cache-first strategy
-    useEffect(() => {
-        let isMounted = true;
-        const unsubscribers: (() => void)[] = [];
-
-        const initialize = async () => {
-            if (!user) {
-                setDataState({ customers: [], products: [], selectedCameraId: null });
-                setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
-                return;
-            }
-
-            setLoadingState({ connecting: false, customers: false, products: false, orders: true, settings: false });
-
-            // 1. Load master data from local cache for instant UI
-            try {
-                const cachedCustomers = await cache.getCachedData<Customer>('customers');
-                if (isMounted && cachedCustomers.length > 0) {
-                    setDataState(prev => ({ ...prev, customers: cachedCustomers }));
-                    setLoadingState(prev => ({ ...prev, customers: true }));
-                }
-                const cachedProducts = await cache.getCachedData<Product>('products');
-                if (isMounted && cachedProducts.length > 0) {
-                    setDataState(prev => ({ ...prev, products: cachedProducts }));
-                    setLoadingState(prev => ({ ...prev, products: true }));
-                }
-            } catch (cacheError) {
-                console.warn("Failed to load data from cache:", cacheError);
-            }
-
-            // 2. Connect to Firebase
-            try {
-                await db.initDB();
-            } catch (initError) {
-                console.error("Database initialization failed:", initError);
-                if (isMounted) {
-                    showAlert("데이터베이스 연결에 실패했습니다. 오프라인 모드로 실행됩니다.");
-                    setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
-                }
-                return;
-            }
-            
-            if (!isMounted) return;
-            setLoadingState(prev => ({ ...prev, connecting: true }));
-
-            if (!db.isInitialized()) {
-                console.warn("Database not initialized. Proceeding with cached data only.");
-                if (isMounted) {
-                    setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
-                }
-                return;
-            }
-            
-            // 3. Fetch dynamic data and listen for realtime updates
-            try {
-                const deviceId = getDeviceId();
-                const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
-
-                // Fetch initial non-cached data
-                const selectedCameraId = await db.getValue<string | null>(cameraSettingPath, null);
-                if (isMounted) { setDataState(prev => ({ ...prev, selectedCameraId })); setLoadingState(prev => ({ ...prev, settings: true })); }
-
-                // Listen for realtime updates for master data, and update cache when new data arrives
-                unsubscribers.push(db.listenToStore<Customer>('customers', (data) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, customers: data }));
-                        setLoadingState(prev => ({ ...prev, customers: true }));
-                        cache.setCachedData('customers', data).catch(e => console.error("Failed to cache customers", e));
-                    }
-                }));
-                unsubscribers.push(db.listenToStore<Product>('products', (data) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, products: data }));
-                        setLoadingState(prev => ({ ...prev, products: true }));
-                        cache.setCachedData('products', data).catch(e => console.error("Failed to cache products", e));
-                    }
-                }));
-                
-                unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => isMounted && setDataState(prev => ({ ...prev, selectedCameraId: id }))));
-
-            } catch (error) {
-                console.error("Failed to fetch initial data from Firebase:", error);
-                if (isMounted) {
-                     showAlert("데이터를 불러오는 데 실패했습니다. 캐시된 데이터로 표시됩니다.");
-                     setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
-                }
-            }
-        };
-
-        initialize();
-        
-        return () => {
-            isMounted = false;
-            unsubscribers.forEach(unsub => unsub());
-        };
-    }, [user, showAlert]);
-    
-    const isDataLoading = !!user && Object.values(loadingState).some(status => !status);
 
     const dataActions: DataActions = useMemo(() => ({
         setCustomers: async (customers) => {
@@ -319,9 +205,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             await cache.setCachedData('products', products).catch(e => console.error("Failed to cache new products", e));
             return db.replaceAll('products', products);
         },
-        // FIX: Refactor to give parameter a name (`orderData`) before destructuring.
-        // This helps TypeScript correctly infer the type of `orderShellData` from the `DataActions` interface,
-        // resolving a type mismatch error when calling `db.addOrderWithItems`.
         addOrder: (orderData) => {
             const { items, ...orderShellData } = orderData;
             return db.addOrderWithItems(orderShellData, items);
@@ -339,6 +222,154 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         },
         clearOrders: () => db.clearOrders(),
     }), []);
+    
+    // Auto-sync logic
+    const runAutoSync = useCallback(async () => {
+        const deviceId = getDeviceId();
+        const syncConfigs = [
+            { type: 'customer', key: `google-drive-sync-settings-customer` },
+            { type: 'product', key: `google-drive-sync-settings-product` }
+        ];
+
+        try {
+            await googleDrive.initGoogleApi();
+
+            for (const config of syncConfigs) {
+                const deviceSpecificKey = `${deviceId}:${config.key}`;
+                const settingsJSON = localStorage.getItem(deviceSpecificKey);
+                if (!settingsJSON) continue;
+
+                const settings: SyncSettings = JSON.parse(settingsJSON);
+                if (!settings.autoSync || !settings.fileId) continue;
+
+                try {
+                    console.log(`[AutoSync] Checking for ${config.type} updates...`);
+                    const metadata = await googleDrive.getFileMetadata(settings.fileId);
+                    const isModified = !settings.lastSyncTime || new Date(metadata.modifiedTime) > new Date(settings.lastSyncTime);
+
+                    if (isModified) {
+                        console.log(`[AutoSync] New version of ${config.type} file found. Syncing...`);
+                        const fileBlob = await googleDrive.getFileContent(settings.fileId);
+                        const rows = await parseExcelFile(fileBlob);
+                        
+                        if (config.type === 'customer') {
+                            const { valid } = processCustomerData(rows);
+                            if (valid.length > 0) await dataActions.setCustomers(valid);
+                        } else {
+                            const { valid } = processProductData(rows);
+                            if (valid.length > 0) await dataActions.setProducts(valid);
+                        }
+                        
+                        // Update settings in localStorage with new sync time
+                        settings.lastSyncTime = metadata.modifiedTime;
+                        localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
+                        console.log(`[AutoSync] ${config.type} data synced successfully.`);
+                    } else {
+                        console.log(`[AutoSync] ${config.type} data is already up to date.`);
+                    }
+                } catch (syncError) {
+                    console.error(`[AutoSync] Failed to sync ${config.type} data:`, syncError);
+                }
+            }
+        } catch (apiInitError) {
+            console.warn("[AutoSync] Could not initialize Google API for auto-sync.", apiInitError);
+        }
+    }, [dataActions]);
+
+
+    // Initial Data Load: Cache-first strategy
+    useEffect(() => {
+        let isMounted = true;
+        const unsubscribers: (() => void)[] = [];
+
+        const initialize = async () => {
+            if (!user) {
+                setDataState({ customers: [], products: [], selectedCameraId: null });
+                setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                return;
+            }
+
+            setLoadingState({ connecting: false, customers: false, products: false, orders: true, settings: false });
+
+            try {
+                const cachedCustomers = await cache.getCachedData<Customer>('customers');
+                if (isMounted && cachedCustomers.length > 0) {
+                    setDataState(prev => ({ ...prev, customers: cachedCustomers }));
+                    setLoadingState(prev => ({ ...prev, customers: true }));
+                }
+                const cachedProducts = await cache.getCachedData<Product>('products');
+                if (isMounted && cachedProducts.length > 0) {
+                    setDataState(prev => ({ ...prev, products: cachedProducts }));
+                    setLoadingState(prev => ({ ...prev, products: true }));
+                }
+            } catch (cacheError) {
+                console.warn("Failed to load data from cache:", cacheError);
+            }
+
+            try {
+                await db.initDB();
+            } catch (initError) {
+                console.error("Database initialization failed:", initError);
+                if (isMounted) {
+                    showAlert("데이터베이스 연결에 실패했습니다. 오프라인 모드로 실행됩니다.");
+                    setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                }
+                return;
+            }
+            
+            if (!isMounted) return;
+            setLoadingState(prev => ({ ...prev, connecting: true }));
+
+            // --- Auto-Sync on Startup ---
+            runAutoSync();
+
+            if (!db.isInitialized()) {
+                console.warn("Database not initialized. Proceeding with cached data only.");
+                if (isMounted) {
+                    setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                }
+                return;
+            }
+            
+            try {
+                const deviceId = getDeviceId();
+                const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
+                const selectedCameraId = await db.getValue<string | null>(cameraSettingPath, null);
+                if (isMounted) { setDataState(prev => ({ ...prev, selectedCameraId })); setLoadingState(prev => ({ ...prev, settings: true })); }
+
+                unsubscribers.push(db.listenToStore<Customer>('customers', (data) => {
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, customers: data }));
+                        setLoadingState(prev => ({ ...prev, customers: true }));
+                        cache.setCachedData('customers', data).catch(e => console.error("Failed to cache customers", e));
+                    }
+                }));
+                unsubscribers.push(db.listenToStore<Product>('products', (data) => {
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, products: data }));
+                        setLoadingState(prev => ({ ...prev, products: true }));
+                        cache.setCachedData('products', data).catch(e => console.error("Failed to cache products", e));
+                    }
+                }));
+                unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => isMounted && setDataState(prev => ({ ...prev, selectedCameraId: id }))));
+            } catch (error) {
+                console.error("Failed to fetch initial data from Firebase:", error);
+                if (isMounted) {
+                     showAlert("데이터를 불러오는 데 실패했습니다. 캐시된 데이터로 표시됩니다.");
+                     setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                }
+            }
+        };
+
+        initialize();
+        
+        return () => {
+            isMounted = false;
+            unsubscribers.forEach(unsub => unsub());
+        };
+    }, [user, showAlert, runAutoSync]);
+    
+    const isDataLoading = !!user && Object.values(loadingState).some(status => !status);
 
     return (
         <UIActionsContext.Provider value={uiActions}>

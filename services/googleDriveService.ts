@@ -105,11 +105,25 @@ export const showPicker = (): Promise<string> => {
         try {
             const oauthToken = await getAccessToken();
 
-            const view = new google.picker.View(google.picker.ViewId.SPREADSHEETS);
-            view.setMimeTypes("application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/x-vnd.oasis.opendocument.spreadsheet");
+            const spreadsheetView = new google.picker.View(google.picker.ViewId.SPREADSHEETS);
+            spreadsheetView.setMimeTypes([
+                "application/vnd.google-apps.spreadsheet",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel",
+                "application/x-vnd.oasis.opendocument.spreadsheet"
+            ].join(','));
+
+            // View for navigating folders
+            const folderView = new google.picker.View(google.picker.ViewId.DOCS);
             
+            // View for recently picked/viewed files
+            const recentView = new google.picker.View(google.picker.ViewId.RECENTLY_PICKED);
+
             const picker = new google.picker.PickerBuilder()
-                .addView(view)
+                .setTitle("Google Drive에서 파일 선택")
+                .addView(recentView) // Add Recent view as the first tab
+                .addView(folderView) // Add Folder navigation view
+                .addView(spreadsheetView) // Add specific spreadsheet view
                 .setOAuthToken(oauthToken)
                 .setDeveloperKey(GOOGLE_API_KEY)
                 .setCallback((data: any) => {
@@ -134,6 +148,32 @@ export const showPicker = (): Promise<string> => {
         }
     });
 };
+
+// Function to get file metadata (name, modifiedTime)
+export const getFileMetadata = async (fileId: string): Promise<{ name: string; modifiedTime: string; }> => {
+    const oauthToken = await getAccessToken();
+    gapi.client.setToken({ access_token: oauthToken });
+
+    try {
+        const response = await gapi.client.drive.files.get({
+            fileId: fileId,
+            fields: 'id, name, modifiedTime'
+        });
+        
+        if (response.status !== 200 || !response.result) {
+            throw new Error("Failed to fetch file metadata from Google Drive.");
+        }
+        
+        return response.result;
+    } catch (error: any) {
+        // Handle common 404 Not Found error gracefully
+        if (error.status === 404) {
+            throw new Error("File not found in Google Drive.");
+        }
+        throw error; // Re-throw other errors
+    }
+};
+
 
 // Function to get file content as a Blob
 export const getFileContent = async (fileId: string): Promise<Blob> => {

@@ -1,12 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
+
+// --- Types ---
+interface SyncSettings {
+    fileId: string;
+    fileName: string;
+    lastSyncTime: string | null; // ISO string for file modification time
+    autoSync: boolean;
+}
 
 const LoadingSpinner: React.FC = () => (
     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
@@ -17,13 +25,185 @@ const LoadingSpinner: React.FC = () => (
     </div>
 );
 
+// --- Reusable Sync Section Component ---
+const SyncSection: React.FC<{
+    dataType: 'customer' | 'product';
+    title: string;
+    description: string;
+    settings: SyncSettings | null;
+    onSettingsChange: (settings: SyncSettings | null) => void;
+    isGoogleApiReady: boolean;
+}> = ({ dataType, title, description, settings, onSettingsChange, isGoogleApiReady }) => {
+    const [isLoading, setIsLoading] = useState(false);
+    const { setCustomers, setProducts } = useDataActions();
+    const { showAlert } = useUIActions();
+    const customerInputRef = useRef<HTMLInputElement>(null);
+    const productInputRef = useRef<HTMLInputElement>(null);
+
+    const processAndShowResult = async (rows: any[], dataType: 'customer' | 'product') => {
+        let resultMessage = '';
+        if (dataType === 'customer') {
+            const { valid, invalidCount, errors } = processCustomerData(rows);
+            if (valid.length > 0) {
+                await setCustomers(valid);
+            }
+            resultMessage = `거래처 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
+            if (invalidCount > 0) {
+                const errorSummary = errors.slice(0, 3).join('\n');
+                resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
+                if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
+            }
+        } else { // product
+            const { valid, invalidCount, errors } = processProductData(rows);
+            if (valid.length > 0) {
+                await setProducts(valid);
+            }
+            resultMessage = `상품 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
+            if (invalidCount > 0) {
+                const errorSummary = errors.slice(0, 3).join('\n');
+                resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
+                if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
+            }
+        }
+        showAlert(resultMessage);
+    };
+    
+    const performSync = useCallback(async (force = false) => {
+        if (!settings) {
+            showAlert("동기화할 파일이 연결되어 있지 않습니다.");
+            return;
+        }
+        setIsLoading(true);
+        try {
+            const metadata = await googleDrive.getFileMetadata(settings.fileId);
+            const isModified = !settings.lastSyncTime || new Date(metadata.modifiedTime) > new Date(settings.lastSyncTime);
+
+            if (isModified || force) {
+                const fileBlob = await googleDrive.getFileContent(settings.fileId);
+                const rows = await parseExcelFile(fileBlob);
+                await processAndShowResult(rows, dataType);
+                onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime, fileName: metadata.name });
+            } else {
+                showAlert("데이터가 이미 최신 상태입니다.");
+            }
+        } catch (error) {
+            if (error instanceof Error && error.message.includes("File not found")) {
+                showAlert("연결된 파일을 Google Drive에서 찾을 수 없습니다. 파일이 삭제되었거나 접근 권한이 변경되었을 수 있습니다. 파일을 다시 연결해주세요.");
+                onSettingsChange(null); // Unlink the file
+            } else if (error instanceof Error && error.message !== "Picker was cancelled.") {
+                showAlert(`동기화 실패: ${error.message}`);
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    }, [settings, dataType, onSettingsChange, showAlert, processAndShowResult]);
+
+    const handleLinkFile = async () => {
+        if (!isGoogleApiReady) {
+            showAlert("Google Drive 연동이 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+            return;
+        }
+        setIsLoading(true);
+        try {
+            const fileId = await googleDrive.showPicker();
+            const metadata = await googleDrive.getFileMetadata(fileId);
+            const newSettings: SyncSettings = {
+                fileId,
+                fileName: metadata.name,
+                lastSyncTime: null, // Force first sync
+                autoSync: settings?.autoSync ?? true,
+            };
+            onSettingsChange(newSettings);
+            // Immediately sync after linking
+            const fileBlob = await googleDrive.getFileContent(fileId);
+            const rows = await parseExcelFile(fileBlob);
+            await processAndShowResult(rows, dataType);
+            // Update last sync time after successful sync
+            onSettingsChange({ ...newSettings, lastSyncTime: metadata.modifiedTime });
+        } catch (error) {
+            if (error instanceof Error && error.message !== "Picker was cancelled.") {
+                console.error("Google Drive linking failed:", error);
+                showAlert(`파일 연결에 실패했습니다: ${error.message}`);
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    const handleManualFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setIsLoading(true);
+        try {
+            const rows = await parseExcelFile(file);
+            await processAndShowResult(rows, dataType);
+        } catch (error) {
+            console.error("Error during file import process:", error);
+            showAlert(`파일 처리 중 오류 발생: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            if (event.target) event.target.value = '';
+            setIsLoading(false);
+        }
+    };
+    
+    return (
+        <div className="py-4 first:pt-0 last:pb-0 relative">
+            {isLoading && <div className="absolute inset-0 bg-white/50 z-10" />}
+            <h3 className="font-semibold text-slate-800">{title}</h3>
+            <p className="text-sm text-slate-500 mt-1 mb-3">{description}</p>
+            
+            {settings ? (
+                <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <GoogleDriveIcon className="w-5 h-5 text-gray-700 flex-shrink-0" />
+                        <span className="font-semibold">연결된 파일:</span>
+                        <span className="truncate font-mono text-xs bg-slate-200 px-2 py-1 rounded" title={settings.fileName}>{settings.fileName}</span>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                        마지막 동기화: {settings.lastSyncTime ? new Date(settings.lastSyncTime).toLocaleString() : '아직 동기화되지 않음'}
+                    </div>
+                    <div className="border-t border-slate-200 pt-3">
+                        <ToggleSwitch
+                            id={`autosync-${dataType}`}
+                            label="앱 시작 시 자동 동기화"
+                            checked={settings.autoSync}
+                            onChange={(checked) => onSettingsChange({ ...settings, autoSync: checked })}
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 pt-2">
+                        <button onClick={() => performSync(true)} className="w-full flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-2.5 rounded-md font-bold transition shadow-sm text-sm">
+                            <span>수동 동기화</span>
+                        </button>
+                        <button onClick={handleLinkFile} disabled={!isGoogleApiReady} className="w-full flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white p-2.5 rounded-md font-bold transition shadow-sm disabled:bg-slate-400 text-sm">
+                            <span>파일 변경</span>
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                     <input type="file" ref={dataType === 'customer' ? customerInputRef : productInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleManualFileUpload}/>
+                     <button onClick={() => (dataType === 'customer' ? customerInputRef.current?.click() : productInputRef.current?.click())} className="w-full flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
+                        <UploadIcon className="w-5 h-5"/>
+                        <span>기기에서 선택</span>
+                    </button>
+                    <button onClick={handleLinkFile} disabled={!isGoogleApiReady} className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white p-3 rounded-md font-bold transition shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        <GoogleDriveIcon className="w-5 h-5"/>
+                        <span>Google Drive 연결</span>
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
 interface SettingsPageProps {
     isActive: boolean;
 }
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId } = useDataState();
-    const { setSelectedCameraId, setCustomers, setProducts, clearOrders } = useDataActions();
+    const { setSelectedCameraId, clearOrders } = useDataActions();
     const { isInstallPromptAvailable } = useUIState();
     const { showAlert, triggerInstallPrompt } = useUIActions();
     const { user, logout } = useAuth();
@@ -35,11 +215,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [isGoogleApiReady, setIsGoogleApiReady] = useState(false);
     
     const restoreInputRef = useRef<HTMLInputElement>(null);
-    const customerInputRef = useRef<HTMLInputElement>(null);
-    const productInputRef = useRef<HTMLInputElement>(null);
 
-    const [vibrateOnScan, setVibrateOnScan] = useLocalStorage<boolean>('setting:vibrateOnScan', true);
-    const [soundOnScan, setSoundOnScan] = useLocalStorage<boolean>('setting:soundOnScan', true);
+    const [vibrateOnScan, setVibrateOnScan] = useLocalStorage<boolean>('setting:vibrateOnScan', true, { deviceSpecific: true });
+    const [soundOnScan, setSoundOnScan] = useLocalStorage<boolean>('setting:soundOnScan', true, { deviceSpecific: true });
+
+    const [customerSyncSettings, setCustomerSyncSettings] = useLocalStorage<SyncSettings | null>('google-drive-sync-settings-customer', null, { deviceSpecific: true });
+    const [productSyncSettings, setProductSyncSettings] = useLocalStorage<SyncSettings | null>('google-drive-sync-settings-product', null, { deviceSpecific: true });
+
 
     useEffect(() => {
         if (isActive) {
@@ -65,6 +247,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
 
     useEffect(() => {
         const loadCameras = async () => {
+            if (!isActive) return;
             try {
                 // Ensure permissions are granted before enumerating devices
                 await navigator.mediaDevices.getUserMedia({ video: true });
@@ -77,11 +260,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 }
             } catch (err) {
                 console.error("Error loading cameras:", err);
+                if (err instanceof DOMException && (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError')) {
+                    showAlert("사용 가능한 카메라를 찾을 수 없습니다. 기기에 카메라가 연결되어 있는지 확인해주세요.");
+                } else if (err instanceof DOMException && err.name === 'NotAllowedError') {
+                    showAlert("카메라 접근 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
+                }
             }
         };
         loadCameras();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [isActive, selectedCameraId, showAlert]);
     
     const handleSaveCamera = () => {
         setSelectedCameraId(currentCameraSelection);
@@ -147,88 +334,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500'
         );
     };
-    
-    const processAndShowResult = async (rows: any[], dataType: 'customer' | 'product') => {
-        let resultMessage = '';
-        if (dataType === 'customer') {
-            const { valid, invalidCount, errors } = processCustomerData(rows);
-            if (valid.length > 0) {
-                await setCustomers(valid);
-            }
-            resultMessage = `거래처 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
-            if (invalidCount > 0) {
-                const errorSummary = errors.slice(0, 3).join('\n');
-                resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
-                if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
-            }
-        } else { // product
-            const { valid, invalidCount, errors } = processProductData(rows);
-            if (valid.length > 0) {
-                await setProducts(valid);
-            }
-            resultMessage = `상품 데이터 가져오기 완료.\n성공: ${valid.length}건, 실패: ${invalidCount}건.`;
-            if (invalidCount > 0) {
-                const errorSummary = errors.slice(0, 3).join('\n');
-                resultMessage += `\n\n[오류 예시]\n${errorSummary}`;
-                if (errors.length > 3) resultMessage += `\n...등 ${errors.length - 3}개 추가 오류`;
-            }
-        }
-        showAlert(resultMessage);
-    };
-
-    const handleMasterFileSelected = async (event: React.ChangeEvent<HTMLInputElement>, dataType: 'customer' | 'product') => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        setIsLoading(true);
-        try {
-            const rows = await parseExcelFile(file);
-            await processAndShowResult(rows, dataType);
-        } catch (error) {
-            console.error("Error during file import process:", error);
-            showAlert(`파일 처리 중 오류 발생: ${error instanceof Error ? error.message : String(error)}`);
-        } finally {
-            if (event.target) event.target.value = '';
-            setIsLoading(false);
-        }
-    };
-
-    const triggerMasterFileUpload = (type: 'customer' | 'product') => {
-        showAlert(
-            `XLS 파일로 ${type === 'customer' ? '거래처' : '상품'} 데이터를 가져옵니다. 현재 기기의 데이터는 덮어쓰기 됩니다. 계속하시겠습니까?`,
-            () => {
-                if (type === 'customer') {
-                    customerInputRef.current?.click();
-                } else {
-                    productInputRef.current?.click();
-                }
-            },
-            "가져오기",
-            'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500'
-        );
-    };
-
-    const handleGoogleDriveImport = async (dataType: 'customer' | 'product') => {
-        if (!isGoogleApiReady) {
-            showAlert("Google Drive 연동이 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const fileId = await googleDrive.showPicker();
-            const fileBlob = await googleDrive.getFileContent(fileId);
-            const rows = await parseExcelFile(fileBlob);
-            await processAndShowResult(rows, dataType);
-        } catch (error) {
-            if (error instanceof Error && error.message !== "Picker was cancelled.") {
-                console.error("Google Drive import failed:", error);
-                showAlert(`Google Drive에서 파일을 가져오는 데 실패했습니다: ${error.message}`);
-            }
-            // Don't show an alert if the user just cancelled the picker.
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     const handleLogout = () => {
         showAlert(
@@ -262,20 +367,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     return (
         <div className="h-full overflow-y-auto bg-gray-200 relative pb-10">
             {isLoading && <LoadingSpinner />}
-            <input
-                type="file"
-                ref={customerInputRef}
-                className="hidden"
-                accept=".xlsx, .xls"
-                onChange={(e) => handleMasterFileSelected(e, 'customer')}
-            />
-            <input
-                type="file"
-                ref={productInputRef}
-                className="hidden"
-                accept=".xlsx, .xls"
-                onChange={(e) => handleMasterFileSelected(e, 'product')}
-            />
             <input
                 type="file"
                 ref={restoreInputRef}
@@ -343,40 +434,36 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     </div>
                 </div>
 
-                {/* --- 초기 데이터 설정 (Initial Data Setup) --- */}
+                {/* --- 데이터 동기화 (Data Sync) --- */}
                 <div>
-                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">초기 데이터 설정</h2>
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider px-1 mb-3">데이터 동기화</h2>
                     <div className="bg-white rounded-xl shadow-lg shadow-slate-300/50 p-4 divide-y divide-slate-200">
-                        {/* Customer */}
-                        <div className="py-4 first:pt-0 last:pb-0">
-                            <h3 className="font-semibold text-slate-800">거래처 자료 등록</h3>
-                            <p className="text-sm text-slate-500 mt-1 mb-3">XLS 파일을 통해 모든 거래처 데이터를 한번에 등록/수정합니다.</p>
-                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                                <button onClick={() => triggerMasterFileUpload('customer')} className="w-full flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
-                                    <UploadIcon className="w-5 h-5"/>
-                                    <span>기기에서 선택</span>
-                                </button>
-                                <button onClick={() => handleGoogleDriveImport('customer')} disabled={!isGoogleApiReady} className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white p-3 rounded-md font-bold transition shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed">
-                                    <GoogleDriveIcon className="w-5 h-5"/>
-                                    <span>Google Drive</span>
-                                </button>
+                        <div className="text-center pb-4">
+                            <p className="text-sm text-slate-600">Google Drive 파일을 기준으로 앱의 데이터를 업데이트합니다.</p>
+                            <div className="mt-2 inline-flex items-center gap-2 text-xs font-semibold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full">
+                                <GoogleDriveIcon className="w-4 h-4" />
+                                <span>Google Drive</span>
+                                <ArrowLongRightIcon className="w-4 h-4" />
+                                <DevicePhoneMobileIcon className="w-4 h-4" />
+                                <span>App</span>
                             </div>
                         </div>
-                        {/* Product */}
-                        <div className="py-4 first:pt-0 last:pb-0">
-                            <h3 className="font-semibold text-slate-800">상품 마스터 등록</h3>
-                            <p className="text-sm text-slate-500 mt-1 mb-3">XLS 파일을 통해 모든 상품 데이터를 한번에 등록/수정합니다.</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                                <button onClick={() => triggerMasterFileUpload('product')} className="w-full flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-md font-bold transition shadow-sm">
-                                    <UploadIcon className="w-5 h-5"/>
-                                    <span>기기에서 선택</span>
-                                </button>
-                                <button onClick={() => handleGoogleDriveImport('product')} disabled={!isGoogleApiReady} className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white p-3 rounded-md font-bold transition shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed">
-                                    <GoogleDriveIcon className="w-5 h-5"/>
-                                    <span>Google Drive</span>
-                                </button>
-                            </div>
-                        </div>
+                        <SyncSection 
+                            dataType="customer"
+                            title="거래처 자료 동기화"
+                            description="Google Drive에 저장된 XLS 파일과 거래처 데이터를 동기화합니다."
+                            settings={customerSyncSettings}
+                            onSettingsChange={setCustomerSyncSettings}
+                            isGoogleApiReady={isGoogleApiReady}
+                        />
+                         <SyncSection 
+                            dataType="product"
+                            title="상품 마스터 동기화"
+                            description="Google Drive에 저장된 XLS 파일과 상품 데이터를 동기화합니다."
+                            settings={productSyncSettings}
+                            onSettingsChange={setProductSyncSettings}
+                            isGoogleApiReady={isGoogleApiReady}
+                        />
                     </div>
                 </div>
 

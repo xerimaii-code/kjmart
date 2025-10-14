@@ -1,6 +1,7 @@
 
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useDataState, useUIActions } from '../context/AppContext';
+import { useDataState, useUIActions, useDataActions } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
 import { SpinnerIcon } from './Icons';
 
@@ -33,6 +34,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const videoRef = useRef<HTMLVideoElement>(null);
     const codeReaderRef = useRef<any>(null);
     const { selectedCameraId } = useDataState();
+    const { setSelectedCameraId } = useDataActions();
     const { showAlert } = useUIActions();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
 
@@ -99,12 +101,11 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             hints.set(ZXing.DecodeHintType.ASSUME_GS1, true);
             codeReaderRef.current = new ZXing.BrowserMultiFormatReader(hints);
             
-            const startScanning = async () => {
+            const tryStartScanning = async (deviceId: string | null) => {
                 const baseVideoConstraints: MediaTrackConstraints = {
-                    deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
+                    deviceId: deviceId ? { exact: deviceId } : undefined,
                 };
                 
-                // A list of constraints to try, from most desirable to least.
                 const constraintsToTry: MediaStreamConstraints[] = [
                     { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any },
                     { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
@@ -113,6 +114,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     { audio: false, video: { ...baseVideoConstraints } },
                 ];
 
+                let lastError: unknown = null;
                 for (const constraints of constraintsToTry) {
                     try {
                         await codeReaderRef.current.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
@@ -138,14 +140,36 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         return; // Success, exit the loop.
                     } catch (e) {
                         console.warn(`Failed to start camera with constraints: ${JSON.stringify(constraints)}`, e);
+                        lastError = e;
                     }
                 }
                 
-                showAlert('카메라를 시작할 수 없습니다. 권한을 확인해 주세요.');
-                onClose();
+                // If all constraints failed, throw the last error encountered.
+                throw lastError;
             };
 
-            startScanning();
+            const initializeCamera = async () => {
+                try {
+                    await tryStartScanning(selectedCameraId);
+                } catch (e) {
+                    if (e instanceof DOMException && e.name === 'NotFoundError' && selectedCameraId) {
+                        console.warn(`Saved camera with ID ${selectedCameraId} not found. Trying default camera.`);
+                        showAlert("저장된 카메라를 찾을 수 없습니다. 기본 카메라로 다시 시도합니다.");
+                        await setSelectedCameraId(null); // Clear the invalid ID from settings
+                        try {
+                           await tryStartScanning(null);
+                        } catch {
+                            showAlert('기본 카메라도 시작할 수 없습니다. 권한을 확인해주세요.');
+                            onClose();
+                        }
+                    } else {
+                        showAlert('카메라를 시작할 수 없습니다. 권한을 확인해 주세요.');
+                        onClose();
+                    }
+                }
+            };
+            
+            initializeCamera();
         }
 
         return () => {
@@ -153,7 +177,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 codeReaderRef.current.reset();
             }
         };
-    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert, playBeep]);
+    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert, playBeep, setSelectedCameraId]);
 
     if (!isOpen) return null;
 

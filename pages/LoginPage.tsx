@@ -4,7 +4,7 @@ import { SpinnerIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 
 const LoginPage: React.FC = () => {
-    const [savedEmail, setSavedEmail] = useLocalStorage<string>('savedLoginEmail', '');
+    const [savedEmail, setSavedEmail] = useLocalStorage<string>('savedLoginEmail', '', { deviceSpecific: true });
     const [email, setEmail] = useState(savedEmail || '');
     const [password, setPassword] = useState('');
     const [rememberEmail, setRememberEmail] = useState(!!savedEmail);
