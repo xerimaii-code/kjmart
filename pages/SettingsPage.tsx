@@ -44,7 +44,7 @@ const SyncSection: React.FC<{
 
     const handleSelectFile = async () => {
         if (!isGapiReady) {
-            showAlert("Google API가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+            // This alert is removed as requested. The button is disabled and shows a loading state.
             return;
         }
         setIsPicking(true);
@@ -59,9 +59,10 @@ const SyncSection: React.FC<{
             });
         } catch (err) {
             if (err instanceof Error && (err.message.includes("cancelled") || err.message.includes("popup_closed"))) {
-                // User cancelled the picker, do nothing.
+                // User cancelled the picker, this is not an error.
             } else {
                 console.error("File selection error:", err);
+                showToast('파일 선택 중 오류가 발생했습니다.', 'error');
             }
         } finally {
             setIsPicking(false);
@@ -70,11 +71,11 @@ const SyncSection: React.FC<{
 
     const handleSync = async () => {
         if (!isGapiReady) {
-            showAlert("Google API가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+            showToast("Google API가 아직 준비되지 않았습니다.", 'error');
             return;
         }
         if (!settings?.fileId) {
-            showAlert("먼저 동기화할 파일을 선택해주세요.");
+            showToast("먼저 동기화할 파일을 선택해주세요.", 'error');
             return;
         }
 
@@ -93,6 +94,8 @@ const SyncSection: React.FC<{
                 if (result.valid.length > 0) await setProducts(result.valid);
             }
 
+            showToast(`${dataTypeKorean} 데이터 동기화가 완료되었습니다.`, 'success');
+
             if (result.errors.length > 0) {
                  showAlert(`${result.invalidCount}개의 행에서 오류가 발견되어 가져오지 못했습니다.\n\n오류 미리보기:\n${result.errors.slice(0, 5).join('\n')}`);
             }
@@ -102,6 +105,7 @@ const SyncSection: React.FC<{
 
         } catch (err) {
             console.error(`Sync error for ${dataType}:`, err);
+            showToast(`${dataTypeKorean} 데이터 동기화 중 오류가 발생했습니다.`, 'error');
         } finally {
             setIsSyncing(false);
         }
@@ -164,8 +168,20 @@ const SyncSection: React.FC<{
                             disabled={!isGapiReady || isSyncing || isPicking}
                             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
                         >
-                            {isPicking ? <SpinnerIcon className="w-5 h-5" /> : <GoogleDriveIcon className="w-5 h-5" />}
-                            <span>{settings?.fileId ? '파일 변경' : '파일 선택'}</span>
+                            {!isGapiReady || isPicking ? (
+                                <SpinnerIcon className="w-5 h-5" />
+                            ) : (
+                                <GoogleDriveIcon className="w-5 h-5" />
+                            )}
+                            <span className="truncate">
+                                {!isGapiReady
+                                    ? 'API 초기화 중...'
+                                    : isPicking
+                                    ? '인증/선택 창...'
+                                    : settings?.fileId
+                                    ? '파일 변경'
+                                    : '파일 선택'}
+                            </span>
                         </button>
                         <button
                             onClick={handleSync}
