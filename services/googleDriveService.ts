@@ -139,11 +139,16 @@ export const showPicker = (): Promise<string> => {
 
         } catch(err) {
             console.error("Picker or Auth error:", err);
-            // Don't show an error alert if the user simply closed the popup or cancelled the picker.
-            // These are expected user actions, not application errors.
             const errorDetails = err as any;
-            if (errorDetails.type !== 'popup_closed' && errorDetails.message !== "Picker was cancelled.") {
-                 reject(new Error("Google 로그인 또는 파일 선택에 실패했습니다."));
+
+            // User-initiated actions like closing the auth popup or cancelling the picker
+            // should not be treated as application errors. We reject with a specific
+            // message that the UI layer can identify and handle silently.
+            if (errorDetails.type === 'popup_closed' || (errorDetails.message && errorDetails.message.includes("cancelled"))) {
+                reject(new Error("Picker was cancelled by user."));
+            } else {
+                // For all other errors (e.g., access denied, network issues), reject with a generic failure message.
+                reject(new Error("Google 로그인 또는 파일 선택에 실패했습니다."));
             }
         }
     });

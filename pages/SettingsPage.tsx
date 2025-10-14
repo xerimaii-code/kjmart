@@ -28,9 +28,8 @@ const SyncSection: React.FC<{
     const { showToast, showAlert } = useUIActions();
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
+    const [isPicking, setIsPicking] = useState(false);
     const [isGapiReady, setIsGapiReady] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
     const dataTypeKorean = dataType === 'customer' ? '거래처' : '상품';
 
@@ -48,12 +47,9 @@ const SyncSection: React.FC<{
             showAlert("Google API가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
             return;
         }
-        setIsSyncing(true);
-        setError(null);
-        setStatusMessage('파일 선택창 여는 중...');
+        setIsPicking(true);
         try {
             const fileId = await googleDrive.showPicker();
-            setStatusMessage('선택한 파일 정보 확인 중...');
             const metadata = await googleDrive.getFileMetadata(fileId);
             setSettings({
                 fileId,
@@ -61,18 +57,14 @@ const SyncSection: React.FC<{
                 lastSyncTime: null, // Reset sync time on new file selection
                 autoSync: settings?.autoSync || false,
             });
-            showToast(`${dataTypeKorean} 파일이 연결되었습니다.`, 'success');
         } catch (err) {
-            if (err instanceof Error && err.message.includes("cancelled")) {
+            if (err instanceof Error && (err.message.includes("cancelled") || err.message.includes("popup_closed"))) {
                 // User cancelled the picker, do nothing.
             } else {
                 console.error("File selection error:", err);
-                setError(`파일 선택 중 오류가 발생했습니다. 권한을 확인해주세요.`);
-                showToast(`파일 선택에 실패했습니다.`, 'error');
             }
         } finally {
-            setIsSyncing(false);
-            setStatusMessage(null);
+            setIsPicking(false);
         }
     };
 
@@ -87,25 +79,17 @@ const SyncSection: React.FC<{
         }
 
         setIsSyncing(true);
-        setError(null);
         try {
-            setStatusMessage(`${dataTypeKorean} 파일 정보 확인 중...`);
             const metadata = await googleDrive.getFileMetadata(settings.fileId);
-
-            setStatusMessage('파일 다운로드 및 처리 중...');
             const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
-            
-            setStatusMessage('데이터 분석 중...');
             const rows = await parseExcelFile(fileBlob);
             
             let result;
             if (dataType === 'customer') {
                 result = processCustomerData(rows);
-                setStatusMessage(`${result.valid.length}개 거래처 데이터 저장 중...`);
                 if (result.valid.length > 0) await setCustomers(result.valid);
             } else {
                 result = processProductData(rows);
-                setStatusMessage(`${result.valid.length}개 상품 데이터 저장 중...`);
                 if (result.valid.length > 0) await setProducts(result.valid);
             }
 
@@ -115,22 +99,11 @@ const SyncSection: React.FC<{
             
             const newSettings = { ...settings, lastSyncTime: metadata.modifiedTime };
             setSettings(newSettings);
-            showToast(`${dataTypeKorean} 데이터가 성공적으로 동기화되었습니다.`, 'success');
 
         } catch (err) {
             console.error(`Sync error for ${dataType}:`, err);
-            const errorMessage = (err instanceof Error) ? err.message : '알 수 없는 오류가 발생했습니다.';
-            
-            if(errorMessage.includes("File not found")){
-                 setError(`연결된 파일을 찾을 수 없습니다. 다른 파일을 선택해주세요.`);
-                 showToast(`연결된 파일을 찾을 수 없습니다.`, 'error');
-            } else {
-                 setError(`동기화 실패: ${errorMessage}`);
-                 showToast(`${dataTypeKorean} 데이터 동기화에 실패했습니다.`, 'error');
-            }
         } finally {
             setIsSyncing(false);
-            setStatusMessage(null);
         }
     };
     
@@ -188,15 +161,15 @@ const SyncSection: React.FC<{
                     <div className="grid grid-cols-2 gap-3">
                         <button
                             onClick={handleSelectFile}
-                            disabled={!isGapiReady || isSyncing}
+                            disabled={!isGapiReady || isSyncing || isPicking}
                             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
                         >
-                             <GoogleDriveIcon className="w-5 h-5" />
-                             <span>{settings?.fileId ? '파일 변경' : '파일 선택'}</span>
+                            {isPicking ? <SpinnerIcon className="w-5 h-5" /> : <GoogleDriveIcon className="w-5 h-5" />}
+                            <span>{settings?.fileId ? '파일 변경' : '파일 선택'}</span>
                         </button>
                         <button
                             onClick={handleSync}
-                            disabled={!settings?.fileId || !isGapiReady || isSyncing}
+                            disabled={!settings?.fileId || !isGapiReady || isSyncing || isPicking}
                             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-sky-600 text-white font-semibold rounded-md hover:bg-sky-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
                         >
                             {isSyncing ? (
@@ -204,12 +177,9 @@ const SyncSection: React.FC<{
                             ) : (
                                 <UploadIcon className="w-5 h-5" />
                             )}
-                            <span>{isSyncing ? '동기화 중...' : '동기화'}</span>
+                            <span>동기화</span>
                         </button>
                     </div>
-
-                    {error && <p className="text-xs text-center text-red-600 mt-2">{error}</p>}
-                    {isSyncing && statusMessage && <p className="text-xs text-center text-gray-500 mt-2 animate-pulse">{statusMessage}</p>}
                 </div>
             </div>
         </div>

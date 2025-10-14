@@ -246,7 +246,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }), []);
     
     // Auto-sync logic
-    const runAutoSync = useCallback(async () => {
+    const runAutoSyncOnStartup = useCallback(async () => {
         const deviceId = getDeviceId();
         const syncConfigs = [
             { type: 'customer', key: `google-drive-sync-settings-customer` },
@@ -255,61 +255,74 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         try {
             await googleDrive.initGoogleApi();
-
-            for (const config of syncConfigs) {
-                const deviceSpecificKey = `${deviceId}:${config.key}`;
-                const settingsJSON = localStorage.getItem(deviceSpecificKey);
-                if (!settingsJSON) continue;
-
-                const settings: SyncSettings = JSON.parse(settingsJSON);
-                if (!settings.autoSync || !settings.fileId) continue;
-
-                try {
-                    console.log(`[AutoSync] Checking for ${config.type} updates...`);
-                    const metadata = await googleDrive.getFileMetadata(settings.fileId);
-                    const isModified = !settings.lastSyncTime || new Date(metadata.modifiedTime) > new Date(settings.lastSyncTime);
-
-                    if (isModified) {
-                        console.log(`[AutoSync] New version of ${config.type} file found. Syncing...`);
-                        const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
-                        const rows = await parseExcelFile(fileBlob);
-                        
-                        if (config.type === 'customer') {
-                            const { valid } = processCustomerData(rows);
-                            if (valid.length > 0) await dataActions.setCustomers(valid);
-                        } else {
-                            const { valid } = processProductData(rows);
-                            if (valid.length > 0) await dataActions.setProducts(valid);
-                        }
-                        
-                        // Update settings in localStorage with new sync time
-                        settings.lastSyncTime = metadata.modifiedTime;
-                        localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
-                        console.log(`[AutoSync] ${config.type} data synced successfully.`);
-                    } else {
-                        console.log(`[AutoSync] ${config.type} data is already up to date.`);
-                    }
-                } catch (syncError) {
-                    console.error(`[AutoSync] Failed to sync ${config.type} data:`, syncError);
-                    const dataTypeKorean = config.type === 'customer' ? '거래처' : '상품';
-                    if (syncError instanceof Error && syncError.message.includes("File not found")) {
-                        showToast(`자동 동기화 오류: 연결된 ${dataTypeKorean} 파일을 찾을 수 없습니다. 설정에서 확인해주세요.`, 'error');
-                    } else {
-                        showToast(`자동 동기화 실패: ${dataTypeKorean} 데이터를 업데이트하지 못했습니다.`, 'error');
-                    }
-                }
-            }
         } catch (apiInitError) {
             console.warn("[AutoSync] Could not initialize Google API for auto-sync.", apiInitError);
+            return;
         }
-    }, [dataActions, showToast]);
+
+        for (const config of syncConfigs) {
+            const deviceSpecificKey = `${deviceId}:${config.key}`;
+            const settingsJSON = localStorage.getItem(deviceSpecificKey);
+            if (!settingsJSON) continue;
+
+            const settings: SyncSettings = JSON.parse(settingsJSON);
+            if (!settings.autoSync || !settings.fileId) continue;
+
+            try {
+                console.log(`[AutoSync] Checking for ${config.type} updates...`);
+                const metadata = await googleDrive.getFileMetadata(settings.fileId);
+                const isModified = !settings.lastSyncTime || new Date(metadata.modifiedTime) > new Date(settings.lastSyncTime);
+
+                if (isModified) {
+                    console.log(`[AutoSync] New version of ${config.type} file found. Syncing...`);
+                    const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
+                    const rows = await parseExcelFile(fileBlob);
+                    
+                    if (config.type === 'customer') {
+                        const { valid } = processCustomerData(rows);
+                        if (valid.length > 0) await dataActions.setCustomers(valid);
+                    } else {
+                        const { valid } = processProductData(rows);
+                        if (valid.length > 0) await dataActions.setProducts(valid);
+                    }
+                    
+                    settings.lastSyncTime = metadata.modifiedTime;
+                    localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
+                    console.log(`[AutoSync] ${config.type} data synced successfully.`);
+                } else {
+                    console.log(`[AutoSync] ${config.type} data is already up to date.`);
+                }
+            } catch (syncError) {
+                console.error(`[AutoSync] Failed to sync ${config.type} data:`, syncError);
+                // Silently disable auto-sync on critical errors like file not found.
+                if (syncError instanceof Error && syncError.message.includes("File not found")) {
+                    settings.autoSync = false;
+                    localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
+                }
+            }
+        }
+    }, [dataActions]);
+
+    // Auto-sync on startup effect
+    useEffect(() => {
+        if (!user) return; // Only run for logged-in users
+
+        // Run on startup after a short delay to not interfere with initial load
+        const initialSyncTimeoutId = window.setTimeout(() => {
+            console.log('[AutoSync] Running auto-sync on startup...');
+            runAutoSyncOnStartup();
+        }, 10000); // 10-second delay
+
+        return () => {
+            clearTimeout(initialSyncTimeoutId);
+        };
+    }, [user, runAutoSyncOnStartup]);
 
 
     // Initial Data Load: Cache-first strategy
     useEffect(() => {
         let isMounted = true;
         const unsubscribers: (() => void)[] = [];
-        let syncTimeoutId: number;
 
         const initialize = async () => {
             if (!user) {
@@ -348,14 +361,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             
             if (!isMounted) return;
             setLoadingState(prev => ({ ...prev, connecting: true }));
-
-            // --- Auto-Sync on Startup ---
-            // Delay auto-sync to allow the main UI to load first. This makes the sync
-            // feel like a background process and doesn't block initial app rendering.
-            syncTimeoutId = window.setTimeout(() => {
-                runAutoSync();
-            }, 2000); // 2-second delay
-
+            
             if (!db.isInitialized()) {
                 console.warn("Database not initialized. Proceeding with cached data only.");
                 if (isMounted) {
@@ -399,9 +405,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return () => {
             isMounted = false;
             unsubscribers.forEach(unsub => unsub());
-            clearTimeout(syncTimeoutId);
         };
-    }, [user, showAlert, runAutoSync]);
+    }, [user, showAlert]);
     
     const isDataLoading = !!user && Object.values(loadingState).some(status => !status);
 
