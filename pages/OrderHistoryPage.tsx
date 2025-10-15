@@ -237,7 +237,20 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             updateOrderStatus(order.id, { type: 'sms', timestamp });
         });
 
-        const handleXls = closeMenuAnd(() => openDeliveryModal(order));
+        const handleXls = closeMenuAnd(async () => {
+            try {
+                const items = await db.getOrderItems(order.id);
+                if (items.length === 0) {
+                    showAlert("품목이 없어 내보낼 수 없습니다.");
+                    return;
+                }
+                const orderWithItems = { ...order, items };
+                openDeliveryModal(orderWithItems);
+            } catch (error) {
+                console.error("Failed to fetch order items for XLS export:", error);
+                showAlert("XLS로 내보내기 위해 주문 품목을 불러오는 데 실패했습니다.");
+            }
+        });
         
         const menuItems: ActionMenuItem[] = [];
 
