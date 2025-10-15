@@ -256,7 +256,12 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
     const workbook = XLSX.utils.book_new();
 
     const itemData: (string | number | null)[][] = [];
-    order.items.forEach((item) => {
+    const CHUNK_SIZE = 10;
+    
+    order.items.forEach((item, index) => {
+        if (index > 0 && index % CHUNK_SIZE === 0) {
+            itemData.push([null, null, null, null]);
+        }
         itemData.push([
             item.barcode,
             item.name,
