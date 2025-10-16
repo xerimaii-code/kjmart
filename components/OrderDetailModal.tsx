@@ -303,6 +303,24 @@ const OrderDetailModal: React.FC = () => {
         showAlert("발주 내역이 수정되었습니다.");
     };
     
+    // FIX: Memoize the onAdd function prop for AddItemModal.
+    // This prevents it from being recreated on every render of OrderDetailModal,
+    // which was causing AddItemModal to re-render and reset its internal state (like quantity)
+    // whenever the user typed.
+    const handleAddItem = useCallback(({ quantity, unit, memo }: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
+        if (addItemModalState.product) {
+            addOrUpdateItem(addItemModalState.product, { quantity, unit, memo });
+            setQuickAddedBarcode(addItemModalState.product.barcode);
+            setAddItemModalState({ product: null, existingItem: null, initialUnit: '개' });
+        }
+    }, [addOrUpdateItem, addItemModalState.product]);
+
+    // FIX: Memoize the initialSettings object to prevent it from being recreated on every render,
+    // which was causing the AddItemModal's useEffect hook to fire unnecessarily and reset its state.
+    const initialSettingsForModal = useMemo(() => ({
+        unit: addItemModalState.initialUnit
+    }), [addItemModalState.initialUnit]);
+
 
     useEffect(() => {
         if (scrollableContainerRef.current && quickAddedBarcode) {
@@ -575,16 +593,10 @@ const OrderDetailModal: React.FC = () => {
                 onClose={() => {
                     setAddItemModalState({ product: null, existingItem: null, initialUnit: '개' });
                 }}
-                onAdd={({ quantity, unit, memo }) => {
-                    if (addItemModalState.product) {
-                        addOrUpdateItem(addItemModalState.product, { quantity, unit, memo });
-                        setQuickAddedBarcode(addItemModalState.product.barcode);
-                        setAddItemModalState({ product: null, existingItem: null, initialUnit: '개' });
-                    }
-                }}
+                onAdd={handleAddItem}
                 onNextScan={handleNextScan}
                 trigger={addItemTrigger}
-                initialSettings={{ unit: addItemModalState.initialUnit }}
+                initialSettings={initialSettingsForModal}
             />
             <EditItemModal
                 isOpen={!!editingItem}

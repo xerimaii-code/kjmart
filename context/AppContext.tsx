@@ -189,7 +189,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         },
     }), [showAlert, showToast, hideToast, installPromptEvent]);
 
-    const uiState: UIState = {
+    const uiState: UIState = useMemo(() => ({
         alert,
         toast,
         isDetailModalOpen,
@@ -202,7 +202,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         orderToExport,
         isInstallPromptAvailable: !!installPromptEvent,
         lastModifiedOrderId,
-    };
+    }), [
+        alert.isOpen,
+        toast.isOpen,
+        isDetailModalOpen,
+        editingOrder,
+        isScannerOpen,
+        scannerContext,
+        isContinuousScan,
+        onScanSuccess,
+        isDeliveryModalOpen,
+        orderToExport,
+        installPromptEvent,
+        lastModifiedOrderId
+    ]);
     
     // --- DATA STATE & ACTIONS ---
     const [dataState, setDataState] = useState<DataState>({
@@ -244,6 +257,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         },
         clearOrders: () => db.clearOrders(),
     }), []);
+
+    // --- State to Cache Synchronization ---
+    useEffect(() => {
+        if (dataState.customers.length > 0) {
+            cache.setCachedData('customers', dataState.customers);
+        }
+    }, [dataState.customers]);
+
+    useEffect(() => {
+        if (dataState.products.length > 0) {
+            cache.setCachedData('products', dataState.products);
+        }
+    }, [dataState.products]);
     
     // Auto-sync logic
     const runAutoSyncOnStartup = useCallback(async () => {
@@ -253,7 +279,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             { type: 'product', key: `google-drive-sync-settings-product` }
         ];
 
-        // First, check if any auto-sync is enabled before initializing the heavy Google API.
         const isAutoSyncEnabled = syncConfigs.some(config => {
             const deviceSpecificKey = `${deviceId}:${config.key}`;
             const settingsJSON = localStorage.getItem(deviceSpecificKey);
@@ -268,7 +293,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         if (!isAutoSyncEnabled) {
             console.log("[AutoSync] No auto-sync configurations found. Skipping Google API initialization.");
-            return; // Exit if no auto-sync is configured.
+            return;
         }
 
         try {
@@ -312,7 +337,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
             } catch (syncError) {
                 console.error(`[AutoSync] Failed to sync ${config.type} data:`, syncError);
-                // Silently disable auto-sync on critical errors like file not found.
                 if (syncError instanceof Error && syncError.message.includes("File not found")) {
                     settings.autoSync = false;
                     localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
@@ -321,23 +345,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
     }, [dataActions]);
 
-    // Auto-sync on startup effect
     useEffect(() => {
-        if (!user) return; // Only run for logged-in users
-
-        // Run on startup after a short delay to not interfere with initial load
+        if (!user) return;
         const initialSyncTimeoutId = window.setTimeout(() => {
             console.log('[AutoSync] Running auto-sync on startup...');
             runAutoSyncOnStartup();
-        }, 10000); // 10-second delay
-
+        }, 10000);
         return () => {
             clearTimeout(initialSyncTimeoutId);
         };
     }, [user, runAutoSyncOnStartup]);
 
-
-    // Initial Data Load: Cache-first strategy
+    // --- Main Data Loading Effect ---
     useEffect(() => {
         let isMounted = true;
         const unsubscribers: (() => void)[] = [];
@@ -349,25 +368,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 return;
             }
 
-            setLoadingState({ connecting: false, customers: false, products: false, orders: true, settings: false });
+            setLoadingState({ connecting: false, customers: true, products: true, orders: true, settings: true });
 
+            // 1. Load from cache for immediate UI responsiveness
             try {
                 const cachedCustomers = await cache.getCachedData<Customer>('customers');
                 if (isMounted && cachedCustomers.length > 0) {
                     setDataState(prev => ({ ...prev, customers: cachedCustomers }));
-                    setLoadingState(prev => ({ ...prev, customers: true }));
                 }
                 const cachedProducts = await cache.getCachedData<Product>('products');
                 if (isMounted && cachedProducts.length > 0) {
                     setDataState(prev => ({ ...prev, products: cachedProducts }));
-                    setLoadingState(prev => ({ ...prev, products: true }));
                 }
             } catch (cacheError) {
                 console.warn("Failed to load data from cache:", cacheError);
             }
 
+            // 2. Initialize Firebase connection
             try {
                 await db.initDB();
+                if (isMounted) {
+                    setLoadingState({ connecting: true, customers: false, products: false, orders: true, settings: false });
+                }
             } catch (initError) {
                 console.error("Database initialization failed:", initError);
                 if (isMounted) {
@@ -377,44 +399,71 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 return;
             }
             
-            if (!isMounted) return;
-            setLoadingState(prev => ({ ...prev, connecting: true }));
-            
-            if (!db.isInitialized()) {
-                console.warn("Database not initialized. Proceeding with cached data only.");
+            if (!isMounted || !db.isInitialized()) return;
+
+            // 3. Fetch initial data from Firebase to overwrite cache and get the latest.
+            // This provides a clear "loaded" state and is faster than item-by-item listeners.
+            try {
+                const [customersFromDB, productsFromDB] = await Promise.all([
+                    db.getStore<Customer>('customers'),
+                    db.getStore<Product>('products')
+                ]);
+                
                 if (isMounted) {
-                    setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                    // Set initial data and mark as loaded
+                    setDataState(prev => ({ ...prev, customers: customersFromDB, products: productsFromDB }));
+                    setLoadingState(prev => ({ ...prev, customers: true, products: true }));
                 }
-                return;
+            } catch (dataError) {
+                console.error("Failed to get initial customer/product data:", dataError);
+                if (isMounted) {
+                    // Mark as loaded even on error to unblock UI. App will run on cached data if available.
+                    setLoadingState(prev => ({ ...prev, customers: true, products: true }));
+                }
             }
-            
+
+            // 4. After initial data is loaded, attach listeners for real-time updates.
+            const unsubCustomers = db.listenToStoreChanges<Customer>('customers', {
+                onAdd: (customer) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, customers: [...prev.customers.filter(c => c.comcode !== customer.comcode), customer] }));
+                },
+                onChange: (customer) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, customers: prev.customers.map(c => c.comcode === customer.comcode ? customer : c) }));
+                },
+                onRemove: (comcode) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, customers: prev.customers.filter(c => c.comcode !== comcode) }));
+                }
+            });
+
+            const unsubProducts = db.listenToStoreChanges<Product>('products', {
+                onAdd: (product) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, products: [...prev.products.filter(p => p.barcode !== product.barcode), product] }));
+                },
+                onChange: (product) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, products: prev.products.map(p => p.barcode === product.barcode ? product : p) }));
+                },
+                onRemove: (barcode) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, products: prev.products.filter(p => p.barcode !== barcode) }));
+                }
+            });
+
+            unsubscribers.push(unsubCustomers, unsubProducts);
+
+            // 5. Set up listeners for device-specific settings
             try {
                 const deviceId = getDeviceId();
                 const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
                 const selectedCameraId = await db.getValue<string | null>(cameraSettingPath, null);
-                if (isMounted) { setDataState(prev => ({ ...prev, selectedCameraId })); setLoadingState(prev => ({ ...prev, settings: true })); }
-
-                unsubscribers.push(db.listenToStore<Customer>('customers', (data) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, customers: data }));
-                        setLoadingState(prev => ({ ...prev, customers: true }));
-                        cache.setCachedData('customers', data).catch(e => console.error("Failed to cache customers", e));
-                    }
-                }));
-                unsubscribers.push(db.listenToStore<Product>('products', (data) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, products: data }));
-                        setLoadingState(prev => ({ ...prev, products: true }));
-                        cache.setCachedData('products', data).catch(e => console.error("Failed to cache products", e));
-                    }
-                }));
-                unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => isMounted && setDataState(prev => ({ ...prev, selectedCameraId: id }))));
-            } catch (error) {
-                console.error("Failed to fetch initial data from Firebase:", error);
-                if (isMounted) {
-                     showAlert("데이터를 불러오는 데 실패했습니다. 캐시된 데이터로 표시됩니다.");
-                     setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                if (isMounted) { 
+                    setDataState(prev => ({ ...prev, selectedCameraId })); 
+                    setLoadingState(prev => ({ ...prev, settings: true })); 
                 }
+                unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => {
+                    if (isMounted) setDataState(prev => ({ ...prev, selectedCameraId: id }));
+                }));
+            } catch (error) {
+                console.error("Failed to setup settings listener:", error);
+                 if (isMounted) setLoadingState(prev => ({ ...prev, settings: true }));
             }
         };
 

@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update } from 'firebase/database';
+import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
 import { firebaseConfig } from '../firebaseConfig';
 import { Order, OrderItem } from '../types';
 
@@ -45,6 +45,47 @@ const arrayToObject = (arr: any[], keyField: string) => {
 };
 
 // --- Listener functions for realtime updates ---
+/**
+ * Attaches real-time listeners to a specific data store in Firebase to handle
+ * individual item changes (add, change, remove) efficiently. This is more
+ * data-efficient than listening to the entire value of the store.
+ * @param storeName The name of the data store (e.g., 'customers', 'products').
+ * @param callbacks An object containing functions to call for each event type.
+ * @returns A function to unsubscribe from all attached listeners.
+ */
+export const listenToStoreChanges = <T>(
+    storeName: string,
+    callbacks: {
+        onAdd: (item: T) => void;
+        onChange: (item: T) => void;
+        onRemove: (key: string) => void;
+    }
+): (() => void) => {
+    if (!dbInitialized) return () => {};
+    const storeRef = ref(db, storeName);
+
+    const unsubAdded = onChildAdded(storeRef, (snapshot) => {
+        const item = snapshot.val() as T;
+        if (item) callbacks.onAdd(item);
+    }, (error) => console.error(`[onChildAdded: ${storeName}]`, error));
+
+    const unsubChanged = onChildChanged(storeRef, (snapshot) => {
+        const item = snapshot.val() as T;
+        if (item) callbacks.onChange(item);
+    }, (error) => console.error(`[onChildChanged: ${storeName}]`, error));
+
+    const unsubRemoved = onChildRemoved(storeRef, (snapshot) => {
+        const key = snapshot.key;
+        if (key) callbacks.onRemove(key);
+    }, (error) => console.error(`[onChildRemoved: ${storeName}]`, error));
+
+    return () => {
+        unsubAdded();
+        unsubChanged();
+        unsubRemoved();
+    };
+};
+
 
 /**
  * To ensure date-range queries perform well, you must add an index to your Firebase
@@ -59,9 +100,9 @@ const arrayToObject = (arr: any[], keyField: string) => {
  * }
  */
 export const listenToOrdersByDateRange = (
-    startDate: Date,
     endDate: Date,
-    callback: (orders: Order[]) => void
+    callback: (orders: Order[]) => void,
+    startDate?: Date, // Make startDate optional
 ): (() => void) => {
     if (!dbInitialized) return () => {};
 
@@ -69,11 +110,18 @@ export const listenToOrdersByDateRange = (
     const endOfDay = new Date(endDate);
     endOfDay.setHours(23, 59, 59, 999);
 
+    const queryConstraints = [
+        orderByChild('date'),
+        endAt(endOfDay.toISOString())
+    ];
+
+    if (startDate) {
+        queryConstraints.push(startAt(startDate.toISOString()));
+    }
+
     const ordersQuery = query(
         ref(db, 'orders'),
-        orderByChild('date'),
-        startAt(startDate.toISOString()),
-        endAt(endOfDay.toISOString())
+        ...queryConstraints
     );
 
     return onValue(ordersQuery, (snapshot) => {
@@ -98,19 +146,6 @@ export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[
     });
 };
 
-export const listenToStore = <T>(storeName: string, callback: (data: T[]) => void): (() => void) => {
-    if (!dbInitialized) return () => {};
-    const dataRef = ref(db, storeName);
-    return onValue(dataRef, (snapshot) => {
-        const data = snapshot.val();
-        const dataArray = data ? Object.values(data) as T[] : [];
-        callback(dataArray);
-    }, (error) => {
-        console.error(`Error listening to ${storeName}:`, error);
-        callback([] as T[]);
-    });
-};
-
 export const listenToValue = <T>(path: string, callback: (data: T | null) => void): (() => void) => {
      if (!dbInitialized) return () => {};
     const dataRef = ref(db, path);
@@ -124,6 +159,18 @@ export const listenToValue = <T>(path: string, callback: (data: T | null) => voi
 };
 
 // --- Data Fetching ---
+export const getStore = async <T>(storeName: string): Promise<T[]> => {
+    if (!dbInitialized) return [];
+    try {
+        const snapshot = await get(ref(db, storeName));
+        const data = snapshot.val();
+        return data ? Object.values(data) as T[] : [];
+    } catch (error) {
+        console.error(`Error getting store ${storeName}:`, error);
+        return [];
+    }
+};
+
 export const getValue = async <T>(path: string, defaultValue: T): Promise<T> => {
     if (!dbInitialized) return defaultValue;
     const snapshot = await get(ref(db, path));

@@ -119,36 +119,65 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
     const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
+    
+    const getTodayString = () => new Date().toISOString().slice(0, 10);
+    const getPastDateString = (daysAgo: number) => {
+        const date = new Date();
+        date.setDate(date.getDate() - daysAgo);
+        return date.toISOString().slice(0, 10);
+    };
+
+    const [customStartDate, setCustomStartDate] = useState(() => getPastDateString(7));
+    const [customEndDate, setCustomEndDate] = useState(() => getTodayString());
+    
     const listRef = useRef<HTMLDivElement>(null);
 
-    // Fetch orders and drafts when page is active
+    const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setCustomStartDate(e.target.value);
+    };
+
+    const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setCustomEndDate(e.target.value);
+    };
+
     useEffect(() => {
         if (!isActive) {
             setActiveMenuOrderId(null);
             return;
         }
-        
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(endDate.getDate() - 30);
-        
+
+        const calculateDates = () => {
+            const start = customStartDate ? new Date(customStartDate) : undefined;
+            if(start && !isNaN(start.getTime())) {
+                start.setHours(0,0,0,0);
+            }
+            
+            const end = customEndDate ? new Date(customEndDate) : new Date();
+            end.setHours(23, 59, 59, 999);
+
+            return { startDate: start, endDate: end };
+        };
+
         setIsLoading(true);
+        setOrders([]);
+        
+        const { startDate, endDate } = calculateDates();
+        
         const unsubscribe = db.listenToOrdersByDateRange(
-            startDate,
             endDate,
             (fetchedOrders) => {
                 const sortedOrders = fetchedOrders.sort((a, b) => b.id - a.id);
                 setOrders(sortedOrders);
                 setIsLoading(false);
-            }
+            },
+            startDate
         );
 
         getAllDraftKeys().then(keys => setDraftKeys(new Set(keys)));
         
         return () => unsubscribe();
-    }, [isActive]);
+    }, [isActive, customStartDate, customEndDate]);
 
-    // Group orders by date
     const groupedOrders = useMemo(() => {
         const groups: { [key: string]: { orders: Order[]; total: number } } = {};
 
@@ -162,7 +191,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         });
 
         return Object.keys(groups)
-            .sort((a, b) => b.localeCompare(a)) // Sort dates descending
+            .sort((a, b) => b.localeCompare(a))
             .map(dateKey => ({
                 date: dateKey,
                 ...groups[dateKey]
@@ -282,18 +311,25 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col bg-gray-100">
             <div className="fixed-filter p-3 bg-white border-b border-gray-200 shadow-sm">
-                <h2 className="text-xl font-bold text-gray-800">발주 내역</h2>
+                <div className="flex justify-between items-center gap-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex-shrink-0">발주 내역</h2>
+                    <div className="flex items-center gap-2 text-sm">
+                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="w-full p-1.5 border border-gray-300 rounded-md text-gray-700" aria-label="시작일" />
+                        <span className="flex-shrink-0 text-gray-500">~</span>
+                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="w-full p-1.5 border border-gray-300 rounded-md text-gray-700" aria-label="종료일" />
+                    </div>
+                </div>
             </div>
             <div ref={listRef} className="scrollable-content p-2 space-y-3">
-                {(isLoading && orders.length === 0) ? (
+                {isLoading ? (
                     <div className="flex items-center justify-center h-full pt-16">
                         <SpinnerIcon className="w-10 h-10 text-blue-500" />
                     </div>
-                ) : orders.length === 0 ? (
+                ) : groupedOrders.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-400 pt-16 text-center">
                         <ArchiveBoxIcon className="w-16 h-16 text-gray-300 mb-4" />
-                        <p className="text-lg font-semibold">발주 내역이 없습니다</p>
-                        <p className="text-sm mt-1">신규 발주를 생성해보세요.</p>
+                        <p className="text-lg font-semibold">선택한 기간에 발주 내역이 없습니다</p>
+                        <p className="text-sm mt-1">다른 기간을 선택하거나 신규 발주를 생성해보세요.</p>
                     </div>
                 ) : (
                     groupedOrders.map(group => {

@@ -15,7 +15,6 @@ interface AddItemModalProps {
 }
 
 const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingItem, onClose, onAdd, onNextScan, trigger, initialSettings }) => {
-    // Use `any` for quantity state to allow for intermediate string values like '-'
     const [quantity, setQuantity] = useState<number | string>(1);
     const [unit, setUnit] = useState<'개' | '박스'>('개');
     const [memo, setMemo] = useState('');
@@ -25,18 +24,16 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     useAdjustForKeyboard(modalContentRef, isOpen);
 
     useEffect(() => {
-        // Reset state when a new product is passed in or modal opens
         if (isOpen && product) {
-            setQuantity(1); // Always default to adding 1
+            setQuantity(1);
             setUnit(initialSettings?.unit ?? existingItem?.unit ?? '개');
             setMemo(existingItem?.memo || '');
             
-            // As per request, focus the input unless triggered by a scan to allow for a faster workflow.
             if (trigger !== 'scan') {
                 setTimeout(() => {
                     inputRef.current?.focus();
                     inputRef.current?.select();
-                }, 150); // Increased delay for robustness on slower devices
+                }, 150);
             }
         }
     }, [isOpen, product, existingItem, initialSettings, trigger]);
@@ -45,7 +42,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
 
     const handleAdd = () => {
         const finalQuantity = Number(quantity);
-        if (isNaN(finalQuantity) || finalQuantity === 0) {
+        if (!Number.isFinite(finalQuantity) || finalQuantity <= 0) {
             return;
         }
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
@@ -53,7 +50,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
 
     const handleAddAndScan = () => {
         const finalQuantity = Number(quantity);
-         if (isNaN(finalQuantity) || finalQuantity === 0) {
+        if (!Number.isFinite(finalQuantity) || finalQuantity <= 0) {
             return;
         }
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
@@ -65,7 +62,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const isContinuousScan = trigger === 'scan' && onNextScan;
 
     const changeQuantity = (delta: number) => {
-        setQuantity(q => (Number(q) || 0) + delta);
+        setQuantity(q => Math.max(1, (Number(q) || 0) + delta));
     };
 
     return (
@@ -87,16 +84,13 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-10 h-10 bg-gray-200 text-gray-700 text-2xl font-bold rounded-full transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
                                 <input
                                     ref={inputRef}
-                                    type="number"
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
                                     value={quantity}
                                     onChange={(e) => {
-                                        const value = e.target.value;
-                                        if (value === '' || value === '-') {
-                                            setQuantity(value);
-                                        } else {
-                                            const num = parseInt(value, 10);
-                                            if (!isNaN(num)) setQuantity(num);
-                                        }
+                                        const value = e.target.value.replace(/[^0-9]/g, '');
+                                        setQuantity(value === '' ? '' : Number(value));
                                     }}
                                     className="w-20 h-10 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-2xl focus:outline-none"
                                 />
