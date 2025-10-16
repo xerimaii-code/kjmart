@@ -17,10 +17,8 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ status }) => {
 
     const currentStatusText = useMemo(() => {
         if (!status.connecting) return '데이터베이스 연결 중...';
-        if (!status.customers) return '고객 정보 로딩 중...';
-        if (!status.products) return '상품 정보 로딩 중...';
-        if (!status.orders) return '발주 내역 로딩 중...';
-        if (!status.settings) return '앱 설정 로딩 중...';
+        if (!status.customers || !status.products || !status.settings) return '기초 데이터 로딩 중...';
+        if (!status.orders) return '발주 내역 로딩 중...'; // This step is not currently used in the initial load sequence
         return '앱 준비 완료!';
     }, [status]);
 

@@ -1,15 +1,16 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef, memo, lazy, Suspense } from 'react';
 import { useDataState, useDataActions, useUIActions } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
 import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon, ChatBubbleLeftIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
-import AddItemModal from '../components/AddItemModal';
-import EditItemModal from '../components/EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
-import MemoModal from '../components/MemoModal';
 import SearchDropdown from '../components/SearchDropdown';
+
+const AddItemModal = lazy(() => import('../components/AddItemModal'));
+const EditItemModal = lazy(() => import('../components/EditItemModal'));
+const MemoModal = lazy(() => import('../components/MemoModal'));
 
 const DRAFT_KEY = 'new-order-draft';
 
@@ -459,40 +460,42 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 </div>
             </footer>
 
-            <MemoModal
-                isOpen={isMemoModalOpen}
-                onClose={() => setIsMemoModalOpen(false)}
-                onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
-                initialMemo={memo}
-            />
-            <AddItemModal
-                isOpen={!!productForModal}
-                product={productForModal}
-                existingItem={existingItemForModal}
-                onClose={() => {
-                    setProductForModal(null);
-                    setExistingItemForModal(null);
-                }}
-                onAdd={(details) => {
-                    if (productForModal) {
-                        handleAddItemFromModal(productForModal, details);
-                    }
-                }}
-                onNextScan={handleOpenScanner}
-                trigger={addItemTrigger}
-                initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
-            />
-            <EditItemModal
-                isOpen={!!editingItem}
-                item={editingItem}
-                onClose={() => setEditingItem(null)}
-                onSave={(updatedDetails) => {
-                    if (editingItem) {
-                        updateItem(editingItem.barcode, updatedDetails);
-                    }
-                    setEditingItem(null);
-                }}
-            />
+            <Suspense fallback={null}>
+                {isMemoModalOpen && <MemoModal
+                    isOpen={isMemoModalOpen}
+                    onClose={() => setIsMemoModalOpen(false)}
+                    onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
+                    initialMemo={memo}
+                />}
+                {!!productForModal && <AddItemModal
+                    isOpen={!!productForModal}
+                    product={productForModal}
+                    existingItem={existingItemForModal}
+                    onClose={() => {
+                        setProductForModal(null);
+                        setExistingItemForModal(null);
+                    }}
+                    onAdd={(details) => {
+                        if (productForModal) {
+                            handleAddItemFromModal(productForModal, details);
+                        }
+                    }}
+                    onNextScan={handleOpenScanner}
+                    trigger={addItemTrigger}
+                    initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
+                />}
+                {!!editingItem && <EditItemModal
+                    isOpen={!!editingItem}
+                    item={editingItem}
+                    onClose={() => setEditingItem(null)}
+                    onSave={(updatedDetails) => {
+                        if (editingItem) {
+                            updateItem(editingItem.barcode, updatedDetails);
+                        }
+                        setEditingItem(null);
+                    }}
+                />}
+            </Suspense>
         </div>
     );
 };

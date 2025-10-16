@@ -3,7 +3,6 @@ import { Customer, Product, Order, OrderItem, ScannerContext } from '../types';
 import * as db from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
-import LoadingOverlay from '../components/LoadingOverlay';
 import { useAuth } from './AuthContext';
 import * as googleDrive from '../services/googleDriveService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
@@ -54,6 +53,7 @@ interface ToastState {
 interface UIState {
     alert: AlertState;
     toast: ToastState;
+    isSyncing: boolean;
     isDetailModalOpen: boolean;
     editingOrder: Order | null;
     isScannerOpen: boolean;
@@ -104,6 +104,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- UI STATE & ACTIONS ---
     const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
     const [toast, setToast] = useState<ToastState>({ isOpen: false, message: '', type: 'success' });
+    const [isSyncing, setIsSyncing] = useState(false);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -192,6 +193,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const uiState: UIState = useMemo(() => ({
         alert,
         toast,
+        isSyncing,
         isDetailModalOpen,
         editingOrder,
         isScannerOpen,
@@ -205,6 +207,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }), [
         alert.isOpen,
         toast.isOpen,
+        isSyncing,
         isDetailModalOpen,
         editingOrder,
         isScannerOpen,
@@ -222,13 +225,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         customers: [],
         products: [],
         selectedCameraId: null,
-    });
-    const [loadingState, setLoadingState] = useState({
-        connecting: true,
-        customers: true,
-        products: true,
-        orders: true,
-        settings: true,
     });
 
     const dataActions: DataActions = useMemo(() => ({
@@ -258,19 +254,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         clearOrders: () => db.clearOrders(),
     }), []);
 
-    // --- State to Cache Synchronization ---
-    useEffect(() => {
-        if (dataState.customers.length > 0) {
-            cache.setCachedData('customers', dataState.customers);
-        }
-    }, [dataState.customers]);
-
-    useEffect(() => {
-        if (dataState.products.length > 0) {
-            cache.setCachedData('products', dataState.products);
-        }
-    }, [dataState.products]);
-    
     // Auto-sync logic
     const runAutoSyncOnStartup = useCallback(async () => {
         const deviceId = getDeviceId();
@@ -364,106 +347,94 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const initialize = async () => {
             if (!user) {
                 setDataState({ customers: [], products: [], selectedCameraId: null });
-                setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
                 return;
             }
 
-            setLoadingState({ connecting: false, customers: true, products: true, orders: true, settings: true });
-
-            // 1. Load from cache for immediate UI responsiveness
+            // 1. Load from cache for immediate UI responsiveness (batched)
             try {
-                const cachedCustomers = await cache.getCachedData<Customer>('customers');
-                if (isMounted && cachedCustomers.length > 0) {
-                    setDataState(prev => ({ ...prev, customers: cachedCustomers }));
-                }
-                const cachedProducts = await cache.getCachedData<Product>('products');
-                if (isMounted && cachedProducts.length > 0) {
-                    setDataState(prev => ({ ...prev, products: cachedProducts }));
+                const [cachedCustomers, cachedProducts] = await Promise.all([
+                    cache.getCachedData<Customer>('customers'),
+                    cache.getCachedData<Product>('products'),
+                ]);
+                
+                if (isMounted) {
+                    setDataState(prev => ({ 
+                        ...prev, 
+                        customers: cachedCustomers, 
+                        products: cachedProducts 
+                    }));
                 }
             } catch (cacheError) {
                 console.warn("Failed to load data from cache:", cacheError);
             }
 
+            // UI is now usable with cached data. Start background sync.
+            setIsSyncing(true);
+
             // 2. Initialize Firebase connection
             try {
                 await db.initDB();
-                if (isMounted) {
-                    setLoadingState({ connecting: true, customers: false, products: false, orders: true, settings: false });
-                }
             } catch (initError) {
                 console.error("Database initialization failed:", initError);
                 if (isMounted) {
                     showAlert("데이터베이스 연결에 실패했습니다. 오프라인 모드로 실행됩니다.");
-                    setLoadingState({ connecting: true, customers: true, products: true, orders: true, settings: true });
+                    setIsSyncing(false);
                 }
                 return;
             }
             
-            if (!isMounted || !db.isInitialized()) return;
-
-            // 3. Fetch initial data from Firebase to overwrite cache and get the latest.
-            // This provides a clear "loaded" state and is faster than item-by-item listeners.
-            try {
-                const [customersFromDB, productsFromDB] = await Promise.all([
-                    db.getStore<Customer>('customers'),
-                    db.getStore<Product>('products')
-                ]);
-                
-                if (isMounted) {
-                    // Set initial data and mark as loaded
-                    setDataState(prev => ({ ...prev, customers: customersFromDB, products: productsFromDB }));
-                    setLoadingState(prev => ({ ...prev, customers: true, products: true }));
-                }
-            } catch (dataError) {
-                console.error("Failed to get initial customer/product data:", dataError);
-                if (isMounted) {
-                    // Mark as loaded even on error to unblock UI. App will run on cached data if available.
-                    setLoadingState(prev => ({ ...prev, customers: true, products: true }));
-                }
+            if (!isMounted || !db.isInitialized()) {
+                if (isMounted) setIsSyncing(false);
+                return;
             }
 
-            // 4. After initial data is loaded, attach listeners for real-time updates.
-            const unsubCustomers = db.listenToStoreChanges<Customer>('customers', {
-                onAdd: (customer) => {
-                    if (isMounted) setDataState(prev => ({ ...prev, customers: [...prev.customers.filter(c => c.comcode !== customer.comcode), customer] }));
-                },
-                onChange: (customer) => {
-                    if (isMounted) setDataState(prev => ({ ...prev, customers: prev.customers.map(c => c.comcode === customer.comcode ? customer : c) }));
-                },
-                onRemove: (comcode) => {
-                    if (isMounted) setDataState(prev => ({ ...prev, customers: prev.customers.filter(c => c.comcode !== comcode) }));
+            let customersLoaded = false;
+            let productsLoaded = false;
+
+            const checkSyncStatus = () => {
+                if (customersLoaded && productsLoaded && isMounted) {
+                    setIsSyncing(false);
+                }
+            };
+
+            // 3. Attach real-time listeners for customers and products.
+            // This approach fetches all data in one go, preventing the app from freezing
+            // by avoiding thousands of individual state updates on startup.
+            const unsubCustomers = db.listenToStore<Customer>('customers', (customersFromDB) => {
+                if (isMounted) {
+                    setDataState(prev => ({ ...prev, customers: customersFromDB }));
+                    // Asynchronously update the cache in the background without blocking the UI.
+                    cache.setCachedData('customers', customersFromDB).catch(e => console.error("Cache update failed for customers:", e));
+                    if (!customersLoaded) {
+                        customersLoaded = true;
+                        checkSyncStatus();
+                    }
                 }
             });
 
-            const unsubProducts = db.listenToStoreChanges<Product>('products', {
-                onAdd: (product) => {
-                    if (isMounted) setDataState(prev => ({ ...prev, products: [...prev.products.filter(p => p.barcode !== product.barcode), product] }));
-                },
-                onChange: (product) => {
-                    if (isMounted) setDataState(prev => ({ ...prev, products: prev.products.map(p => p.barcode === product.barcode ? product : p) }));
-                },
-                onRemove: (barcode) => {
-                    if (isMounted) setDataState(prev => ({ ...prev, products: prev.products.filter(p => p.barcode !== barcode) }));
+            const unsubProducts = db.listenToStore<Product>('products', (productsFromDB) => {
+                if (isMounted) {
+                    setDataState(prev => ({ ...prev, products: productsFromDB }));
+                    // Asynchronously update the cache in the background without blocking the UI.
+                    cache.setCachedData('products', productsFromDB).catch(e => console.error("Cache update failed for products:", e));
+                    if (!productsLoaded) {
+                        productsLoaded = true;
+                        checkSyncStatus();
+                    }
                 }
             });
 
             unsubscribers.push(unsubCustomers, unsubProducts);
 
-            // 5. Set up listeners for device-specific settings
+            // 4. Set up listener for device-specific settings
             try {
                 const deviceId = getDeviceId();
                 const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
-                const selectedCameraId = await db.getValue<string | null>(cameraSettingPath, null);
-                if (isMounted) { 
-                    setDataState(prev => ({ ...prev, selectedCameraId })); 
-                    setLoadingState(prev => ({ ...prev, settings: true })); 
-                }
                 unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => {
                     if (isMounted) setDataState(prev => ({ ...prev, selectedCameraId: id }));
                 }));
             } catch (error) {
                 console.error("Failed to setup settings listener:", error);
-                 if (isMounted) setLoadingState(prev => ({ ...prev, settings: true }));
             }
         };
 
@@ -475,8 +446,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     }, [user, showAlert]);
     
-    const isDataLoading = !!user && Object.values(loadingState).some(status => !status);
-
     return (
         <UIActionsContext.Provider value={uiActions}>
             <UIStateContext.Provider value={uiState}>
@@ -497,7 +466,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                             confirmText={alert.confirmText}
                             confirmButtonClass={alert.confirmButtonClass}
                         />
-                        {isDataLoading ? <LoadingOverlay status={loadingState} /> : children}
+                        {children}
                     </DataStateContext.Provider>
                 </DataActionsContext.Provider>
             </UIStateContext.Provider>

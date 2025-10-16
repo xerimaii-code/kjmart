@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
-import { ExitFullscreenIcon } from './Icons';
+import { ExitFullscreenIcon, SpinnerIcon } from './Icons';
+import { useUIState } from '../context/AppContext';
 
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [currentDateTime, setCurrentDateTime] = useState(new Date());
     const [isOnline, setIsOnline] = useState(navigator.onLine);
+    const { isSyncing } = useUIState();
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -69,11 +71,17 @@ const Header: React.FC = () => {
         <header id="app-header" className="bg-gradient-to-b from-white to-gray-100 px-4 flex justify-between items-center h-12 flex-shrink-0 shadow-sm border-b border-gray-200">
             <div className="flex items-center gap-2.5">
                 <h1 className="text-lg font-bold text-gray-800">경진마트 발주관리</h1>
-                <span 
-                    className={`w-3 h-3 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}
-                    title={isOnline ? '온라인' : '오프라인'}
-                    aria-label={isOnline ? '온라인 상태' : '오프라인 상태'}
-                />
+                <div className="w-4 h-4 flex items-center justify-center">
+                    {isSyncing ? (
+                        <SpinnerIcon className="w-4 h-4 text-blue-500" title="데이터 동기화 중..." />
+                    ) : (
+                        <span 
+                            className={`w-3 h-3 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}
+                            title={isOnline ? '온라인' : '오프라인'}
+                            aria-label={isOnline ? '온라인 상태' : '오프라인 상태'}
+                        />
+                    )}
+                </div>
             </div>
             
             <div className="flex items-center space-x-3">

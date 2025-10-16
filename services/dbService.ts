@@ -86,6 +86,27 @@ export const listenToStoreChanges = <T>(
     };
 };
 
+/**
+ * Attaches a real-time listener to a specific data store in Firebase using `onValue`.
+ * This is efficient for initial data load as it fetches all data in one go.
+ * The callback is triggered once with the initial data and then again whenever the data changes.
+ * @param storeName The name of the data store (e.g., 'customers', 'products').
+ * @param callback A function that will be called with the entire array of items.
+ * @returns A function to unsubscribe from the listener.
+ */
+export const listenToStore = <T>(storeName: string, callback: (items: T[]) => void): (() => void) => {
+    if (!dbInitialized) return () => {};
+    const storeRef = ref(db, storeName);
+    return onValue(storeRef, (snapshot) => {
+        const data = snapshot.val();
+        const itemsArray = data ? Object.values(data) as T[] : [];
+        callback(itemsArray);
+    }, (error) => {
+        console.error(`Error listening to store ${storeName}:`, error);
+        callback([]);
+    });
+};
+
 
 /**
  * To ensure date-range queries perform well, you must add an index to your Firebase

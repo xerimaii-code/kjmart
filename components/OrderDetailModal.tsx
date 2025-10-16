@@ -1,15 +1,17 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect, memo, lazy, Suspense } from 'react';
 import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { Order, OrderItem, Product, EditedOrderDraft } from '../types';
 import { PlusCircleIcon, RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon } from './Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
-import AddItemModal from './AddItemModal';
-import EditItemModal from './EditItemModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
-import MemoModal from './MemoModal';
 import SearchDropdown from './SearchDropdown';
+
+const AddItemModal = lazy(() => import('./AddItemModal'));
+const EditItemModal = lazy(() => import('./EditItemModal'));
+const MemoModal = lazy(() => import('./MemoModal'));
+
 
 // Helper to ensure item properties are consistent for reliable comparison.
 const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
@@ -586,35 +588,37 @@ const OrderDetailModal: React.FC = () => {
                 )}
             </div>
             
-             <AddItemModal
-                isOpen={!!addItemModalState.product}
-                product={addItemModalState.product}
-                existingItem={addItemModalState.existingItem}
-                onClose={() => {
-                    setAddItemModalState({ product: null, existingItem: null, initialUnit: '개' });
-                }}
-                onAdd={handleAddItem}
-                onNextScan={handleNextScan}
-                trigger={addItemTrigger}
-                initialSettings={initialSettingsForModal}
-            />
-            <EditItemModal
-                isOpen={!!editingItem}
-                item={editingItem}
-                onClose={() => setEditingItem(null)}
-                onSave={(updatedDetails) => {
-                    if (editingItem) {
-                        updateItem(editingItem.barcode, updatedDetails);
-                    }
-                    setEditingItem(null);
-                }}
-            />
-            <MemoModal
-                isOpen={isMemoModalOpen}
-                onClose={() => setIsMemoModalOpen(false)}
-                onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
-                initialMemo={memo}
-            />
+             <Suspense fallback={null}>
+                {!!addItemModalState.product && <AddItemModal
+                    isOpen={!!addItemModalState.product}
+                    product={addItemModalState.product}
+                    existingItem={addItemModalState.existingItem}
+                    onClose={() => {
+                        setAddItemModalState({ product: null, existingItem: null, initialUnit: '개' });
+                    }}
+                    onAdd={handleAddItem}
+                    onNextScan={handleNextScan}
+                    trigger={addItemTrigger}
+                    initialSettings={initialSettingsForModal}
+                />}
+                {!!editingItem && <EditItemModal
+                    isOpen={!!editingItem}
+                    item={editingItem}
+                    onClose={() => setEditingItem(null)}
+                    onSave={(updatedDetails) => {
+                        if (editingItem) {
+                            updateItem(editingItem.barcode, updatedDetails);
+                        }
+                        setEditingItem(null);
+                    }}
+                />}
+                {isMemoModalOpen && <MemoModal
+                    isOpen={isMemoModalOpen}
+                    onClose={() => setIsMemoModalOpen(false)}
+                    onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
+                    initialMemo={memo}
+                />}
+            </Suspense>
         </div>
     );
 };

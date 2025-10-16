@@ -120,15 +120,24 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
     const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
     
-    const getTodayString = () => new Date().toISOString().slice(0, 10);
-    const getPastDateString = (daysAgo: number) => {
-        const date = new Date();
-        date.setDate(date.getDate() - daysAgo);
-        return date.toISOString().slice(0, 10);
+    // Helper to format a Date object into 'YYYY-MM-DD' string based on local timezone
+    const getLocalDateString = (date: Date) => {
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        return `${year}-${month}-${day}`;
     };
 
-    const [customStartDate, setCustomStartDate] = useState(() => getPastDateString(7));
-    const [customEndDate, setCustomEndDate] = useState(() => getTodayString());
+    const getTodayString = () => getLocalDateString(new Date());
+
+    const getStartDateString = () => {
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 6);
+        return getLocalDateString(startDate);
+    };
+
+    const [customStartDate, setCustomStartDate] = useState(getStartDateString);
+    const [customEndDate, setCustomEndDate] = useState(getTodayString);
     
     const listRef = useRef<HTMLDivElement>(null);
 

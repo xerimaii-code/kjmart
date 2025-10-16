@@ -2,7 +2,6 @@ import React, { useState, lazy, Suspense, useRef, useEffect } from 'react';
 import { AppProvider, useUIActions, useUIState } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page, Order, OrderItem } from './types';
-import ScannerModal from './components/ScannerModal';
 import Header from './components/Header';
 import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
@@ -16,6 +15,7 @@ const NewOrderPage = lazy(() => import('./pages/NewOrderPage'));
 const OrderHistoryPage = lazy(() => import('./pages/OrderHistoryPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
+const ScannerModal = lazy(() => import('./components/ScannerModal'));
 
 // Page component mapping for dynamic rendering
 const pageComponents: { [key in Page]: React.LazyExoticComponent<React.FC<{ isActive: boolean }>> } = {
@@ -192,7 +192,9 @@ const AppContent: React.FC = () => {
             <Suspense fallback={null}>
               {isDetailModalOpen && <OrderDetailModal />}
             </Suspense>
-            <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />
+            <Suspense fallback={null}>
+                {isScannerOpen && <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />}
+            </Suspense>
             <DeliveryTypeModal
                 isOpen={isDeliveryModalOpen}
                 onClose={closeDeliveryModal}
