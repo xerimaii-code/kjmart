@@ -322,10 +322,10 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             <div className="fixed-filter p-3 bg-white border-b border-gray-200 shadow-sm">
                 <div className="flex justify-between items-center gap-4">
                     <h2 className="text-xl font-bold text-gray-800 flex-shrink-0">발주 내역</h2>
-                    <div className="flex items-center gap-2 text-sm">
-                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="w-full p-1.5 border border-gray-300 rounded-md text-gray-700" aria-label="시작일" />
+                    <div className="flex items-center gap-2 text-sm flex-shrink min-w-0">
+                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-1.5 border border-gray-300 rounded-md text-gray-700 w-full" aria-label="시작일" />
                         <span className="flex-shrink-0 text-gray-500">~</span>
-                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="w-full p-1.5 border border-gray-300 rounded-md text-gray-700" aria-label="종료일" />
+                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-1.5 border border-gray-300 rounded-md text-gray-700 w-full" aria-label="종료일" />
                     </div>
                 </div>
             </div>
