@@ -51,19 +51,19 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
 
     const handleAdd = () => {
         const finalQuantity = Number(quantity);
-        if (!Number.isFinite(finalQuantity) || finalQuantity <= 0) return;
+        if (isNaN(finalQuantity)) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
     };
 
     const handleAddAndScan = () => {
         const finalQuantity = Number(quantity);
-        if (!Number.isFinite(finalQuantity) || finalQuantity <= 0) return;
+        if (isNaN(finalQuantity)) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
         if (onNextScan) onNextScan();
     };
     
     const isContinuousScan = trigger === 'scan' && onNextScan;
-    const changeQuantity = (delta: number) => setQuantity(q => Math.max(1, (Number(q) || 0) + delta));
+    const changeQuantity = (delta: number) => setQuantity(q => (Number(q) || 0) + delta);
 
     return (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
@@ -84,9 +84,19 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
                                 <input
                                     ref={inputRef}
-                                    type="text" inputMode="numeric" pattern="[0-9]*"
+                                    type="text" inputMode="numeric" pattern="-?[0-9]*"
                                     value={quantity}
-                                    onChange={(e) => { const value = e.target.value.replace(/[^0-9]/g, ''); setQuantity(value === '' ? '' : Number(value)); }}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === '' || value === '-') {
+                                            setQuantity(value);
+                                        } else {
+                                            const num = parseInt(value, 10);
+                                            if (!isNaN(num)) {
+                                                setQuantity(num);
+                                            }
+                                        }
+                                    }}
                                     className="w-24 h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-xl text-gray-800 font-bold text-3xl focus:outline-none"
                                 />
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 증가">+</button>
