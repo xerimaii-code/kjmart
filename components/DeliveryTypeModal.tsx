@@ -10,10 +10,15 @@ interface DeliveryTypeModalProps {
 
 const DeliveryTypeModal: React.FC<DeliveryTypeModalProps> = ({ isOpen, onClose, onConfirm }) => {
     const [selectedType, setSelectedType] = useState<DeliveryType>('일반배송');
+    const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
-            setSelectedType('일반배송'); // Reset selection to default when modal opens
+            setSelectedType('일반배송');
+            const timer = setTimeout(() => setIsRendered(true), 10);
+            return () => clearTimeout(timer);
+        } else {
+            setIsRendered(false);
         }
     }, [isOpen]);
 
@@ -26,10 +31,10 @@ const DeliveryTypeModal: React.FC<DeliveryTypeModalProps> = ({ isOpen, onClose, 
     const RadioOption: React.FC<{ value: DeliveryType; label: string }> = ({ value, label }) => (
         <label
             htmlFor={value}
-            className={`flex items-center p-4 border rounded-lg cursor-pointer transition-all duration-200 ${
+            className={`flex items-center p-5 border-2 rounded-xl cursor-pointer transition-all duration-200 ${
                 selectedType === value
-                    ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500'
-                    : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
+                    ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500/50'
+                    : 'bg-gray-50 border-gray-200 hover:border-gray-400'
             }`}
         >
             <input
@@ -39,15 +44,15 @@ const DeliveryTypeModal: React.FC<DeliveryTypeModalProps> = ({ isOpen, onClose, 
                 value={value}
                 checked={selectedType === value}
                 onChange={() => setSelectedType(value)}
-                className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                className="h-5 w-5 text-blue-600 border-gray-300 focus:ring-blue-500"
             />
-            <span className="ml-3 text-lg font-medium text-gray-800">{label}</span>
+            <span className="ml-4 text-lg font-bold text-gray-800">{label}</span>
         </label>
     );
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} role="dialog" aria-modal="true">
+            <div className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
                 <div className="p-6">
                     <h3 className="text-xl font-bold text-gray-800 text-center mb-6">배송 유형 선택</h3>
                     <div className="space-y-4">
@@ -58,14 +63,14 @@ const DeliveryTypeModal: React.FC<DeliveryTypeModalProps> = ({ isOpen, onClose, 
                 <div className="bg-gray-50 p-3 grid grid-cols-2 gap-3">
                     <button
                         onClick={onClose}
-                        className="px-6 py-3 rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition"
+                        className="px-6 py-3 rounded-xl font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition active:scale-95"
                     >
                         취소
                     </button>
                     <button
                         onClick={handleConfirm}
                         disabled={!selectedType}
-                        className="text-white px-6 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        className="text-white px-6 py-3 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
                         계속
                     </button>

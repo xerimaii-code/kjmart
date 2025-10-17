@@ -19,7 +19,6 @@ const LoginPage: React.FC = () => {
 
         try {
             await login(email, password);
-            // On successful login, AuthContext will trigger a re-render in App.tsx
             if (rememberEmail) {
                 setSavedEmail(email);
             } else {
@@ -48,14 +47,14 @@ const LoginPage: React.FC = () => {
     };
 
     return (
-        <div className="h-full w-full flex flex-col items-center justify-center bg-gray-100 p-4">
-            <div className="w-full max-w-sm">
+        <div className="h-full w-full flex flex-col items-center justify-center p-4">
+            <div className="w-full max-w-md">
                 <div className="text-center mb-10">
-                    <h1 className="text-4xl font-bold text-gray-800">경진마트 발주관리</h1>
-                    <p className="text-gray-500 mt-2">관리자 계정으로 로그인하세요.</p>
+                    <h1 className="text-5xl font-extrabold text-gray-800 tracking-tight">발주 관리 시스템</h1>
+                    <p className="text-gray-500 mt-3 text-lg">관리자 계정으로 로그인하세요.</p>
                 </div>
                 
-                <form onSubmit={handleSubmit} className="bg-white shadow-2xl rounded-2xl p-8 space-y-6">
+                <form onSubmit={handleSubmit} className="bg-white/70 backdrop-blur-xl shadow-2xl rounded-2xl p-8 space-y-6 border border-gray-200/80">
                     <div className="space-y-4">
                         <div>
                             <label htmlFor="email" className="block text-sm font-bold text-gray-700 mb-2">
@@ -67,7 +66,7 @@ const LoginPage: React.FC = () => {
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                className="w-full px-4 py-3 border-2 border-gray-200 bg-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
                                 placeholder="admin@example.com"
                                 autoComplete="email"
                             />
@@ -82,7 +81,7 @@ const LoginPage: React.FC = () => {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 required
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                className="w-full px-4 py-3 border-2 border-gray-200 bg-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
                                 placeholder="••••••••"
                                 autoComplete="current-password"
                             />
@@ -104,7 +103,7 @@ const LoginPage: React.FC = () => {
                     </div>
 
                     {error && (
-                        <p className="text-red-500 text-sm text-center bg-red-50 p-3 rounded-lg border border-red-200">
+                        <p className="text-red-600 text-sm text-center font-semibold bg-red-50 p-3 rounded-lg border border-red-200">
                             {error}
                         </p>
                     )}
@@ -112,7 +111,7 @@ const LoginPage: React.FC = () => {
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
                     >
                         {isLoading ? <SpinnerIcon className="w-6 h-6" /> : '로그인'}
                     </button>

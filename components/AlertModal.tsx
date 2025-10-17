@@ -15,7 +15,6 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
 
     useEffect(() => {
         if (isOpen) {
-            // Delay to allow initial (invisible) styles to be applied before transitioning to visible state
             const timer = setTimeout(() => setIsRendered(true), 10);
             return () => clearTimeout(timer);
         } else {
@@ -40,26 +39,25 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
     };
 
     return (
-        <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-400 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
+        <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
             <div
-                className={`bg-white rounded-lg shadow-2xl w-full max-w-sm overflow-hidden border border-gray-200 transition-all ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
-                style={{ transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+                className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
             >
-                <div className="p-6 text-center">
-                    <p id="alert-dialog-title" className="text-lg text-slate-700 whitespace-pre-line">{message}</p>
+                <div className="p-8 text-center">
+                    <p id="alert-dialog-title" className="text-lg text-slate-800 whitespace-pre-line font-medium leading-relaxed">{message}</p>
                 </div>
-                <div className={`bg-slate-50 p-3 ${onConfirm ? 'flex justify-around items-center' : 'text-center'}`}>
+                <div className={`bg-slate-50 p-3 ${onConfirm ? 'grid grid-cols-2 gap-3' : 'text-center'}`}>
                     {onConfirm ? (
                         <>
                             <button
                                 onClick={handleCancel}
-                                className="px-6 py-2 rounded-md font-semibold text-slate-600 bg-gray-200 hover:bg-gray-300 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-50 transition"
+                                className="px-6 py-3 rounded-xl font-bold text-slate-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-75 transition-transform active:scale-95"
                             >
                                 취소
                             </button>
                             <button
                                 onClick={handleConfirm}
-                                className={`text-white px-6 py-2 rounded-md font-semibold focus:outline-none focus:ring-2 focus:ring-opacity-50 transition ${confirmButtonClass || 'bg-gradient-to-b from-sky-400 to-sky-500 hover:from-sky-500 hover:to-sky-600 focus:ring-sky-500'}`}
+                                className={`text-white px-6 py-3 rounded-xl font-bold focus:outline-none focus:ring-2 focus:ring-opacity-75 transition-transform active:scale-95 ${confirmButtonClass || 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'}`}
                             >
                                 {confirmText || '확인'}
                             </button>
@@ -67,7 +65,7 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
                     ) : (
                         <button
                             onClick={onClose}
-                            className="bg-gradient-to-b from-sky-400 to-sky-500 text-white px-6 py-2 rounded-md font-semibold hover:from-sky-500 hover:to-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-opacity-50 transition"
+                            className="bg-blue-500 text-white w-full px-6 py-3 rounded-xl font-bold hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-transform active:scale-95"
                         >
                             확인
                         </button>

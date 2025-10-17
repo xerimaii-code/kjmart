@@ -61,11 +61,11 @@ const OrderRow = memo(({
         <div className={`relative ${isMenuOpen ? 'z-10' : ''}`}>
             <div
                 id={`order-item-${order.id}`}
-                className={`flex items-center bg-white transition-all duration-300 ease-in-out border-b border-gray-200 last:border-b-0 ${isHighlighted ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}
+                className={`flex items-center bg-white transition-all duration-300 ease-in-out border-b border-gray-200/80 last:border-b-0 ${isHighlighted ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}
             >
                 <div
                     onClick={onCardClick}
-                    className={`flex-grow p-4 cursor-pointer ${isCompleted ? 'opacity-60' : ''}`}
+                    className={`flex-grow p-4 cursor-pointer ${isCompleted ? 'opacity-70' : ''}`}
                     role="button"
                     aria-label={`${order.customer.name} 주문 보기`}
                 >
@@ -76,9 +76,9 @@ const OrderRow = memo(({
                                 <span className="truncate">{order.customer.name}</span>
                                 {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
                             </p>
-                            <p className="text-xs text-gray-500 mt-0.5">{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                            <p className="text-sm text-gray-500 mt-1">{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
                         </div>
-                        <p className="font-semibold text-gray-700 text-base tabular-nums flex-shrink-0">
+                        <p className="font-semibold text-gray-800 text-base tabular-nums tracking-tighter flex-shrink-0">
                             {order.total.toLocaleString()} 원
                         </p>
                     </div>
@@ -91,15 +91,15 @@ const OrderRow = memo(({
             </div>
 
             {isMenuOpen && (
-                <div className="absolute top-12 right-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-20 py-1" onClick={(e) => e.stopPropagation()}>
+                <div className="absolute top-12 right-4 w-52 bg-white rounded-xl shadow-2xl border border-gray-200/60 z-20 py-2 animate-fade-in-down" onClick={(e) => e.stopPropagation()}>
                     {actionMenuItems.map(item => (
                         <button
                             key={item.id}
                             onClick={item.onClick}
-                            className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 ${item.className || 'text-gray-700'}`}
+                            className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 transition-colors ${item.className || 'text-gray-700'}`}
                         >
                             {item.icon}
-                            <span>{item.label}</span>
+                            <span className="font-medium">{item.label}</span>
                         </button>
                     ))}
                 </div>
@@ -120,7 +120,6 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
     const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
     
-    // Helper to format a Date object into 'YYYY-MM-DD' string based on local timezone
     const getLocalDateString = (date: Date) => {
         const year = date.getFullYear();
         const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -318,18 +317,18 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     }, [openDetailModal, showAlert]);
 
     return (
-        <div className="h-full flex flex-col bg-gray-100">
-            <div className="fixed-filter p-3 bg-white border-b border-gray-200 shadow-sm">
+        <div className="h-full flex flex-col bg-transparent">
+            <div className="fixed-filter p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
                 <div className="flex justify-between items-center gap-4">
                     <h2 className="text-xl font-bold text-gray-800 flex-shrink-0">발주 내역</h2>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 text-sm flex-shrink min-w-0">
-                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-1.5 border border-gray-300 rounded-md text-gray-700 w-full" aria-label="시작일" />
-                        <span className="text-gray-500">~</span>
-                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-1.5 border border-gray-300 rounded-md text-gray-700 w-full" aria-label="종료일" />
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm flex-shrink min-w-0">
+                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-full bg-white/80" aria-label="시작일" />
+                        <span className="text-gray-500 font-semibold">~</span>
+                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-full bg-white/80" aria-label="종료일" />
                     </div>
                 </div>
             </div>
-            <div ref={listRef} className="scrollable-content p-2 space-y-3">
+            <div ref={listRef} className="scrollable-content p-3 space-y-4">
                 {isLoading ? (
                     <div className="flex items-center justify-center h-full pt-16">
                         <SpinnerIcon className="w-10 h-10 text-blue-500" />
@@ -344,8 +343,8 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                     groupedOrders.map(group => {
                         const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
                         return (
-                            <div key={group.date} className={`bg-white rounded-xl shadow-md ${isGroupActive ? 'relative z-10' : ''}`}>
-                                <div className="flex justify-between items-center p-4 bg-gray-50 border-b border-gray-200">
+                            <div key={group.date} className={`bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/60 ${isGroupActive ? 'relative z-10 overflow-visible' : 'overflow-hidden'}`}>
+                                <div className="flex justify-between items-center p-4 bg-white/60 border-b border-gray-200/80">
                                     <h3 className="font-bold text-gray-800 text-base" id={`date-header-${group.date}`}>
                                         {new Date(group.date).toLocaleDateString('ko-KR', {
                                             year: 'numeric',
@@ -356,7 +355,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                     </h3>
                                     <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
                                 </div>
-                                <div>
+                                <div className="divide-y divide-gray-200/60">
                                     {group.orders.map(order => (
                                         <OrderRow
                                             key={order.id}

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef, memo, lazy, Suspense } from 'react';
 import { useDataState, useDataActions, useUIActions } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
-import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon, ChatBubbleLeftIcon } from '../components/Icons';
+import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon, ChatBubbleLeftIcon, PlusCircleIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useOrderManager } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
@@ -21,7 +21,7 @@ interface NewOrderPageProps {
 const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
     if (!show) return null;
     return (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 mt-4 bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-full shadow-lg z-50 animate-fade-in-down">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 mt-4 bg-gray-900/80 backdrop-blur-sm text-white text-sm font-semibold py-2 px-4 rounded-full shadow-lg z-50 animate-fade-in-down">
             임시저장된 내용을 불러왔습니다.
         </div>
     );
@@ -30,25 +30,25 @@ const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
 const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void }) => {
     return (
         <div
-            className="flex items-center p-3 space-x-2 cursor-pointer hover:bg-gray-50"
+            className="flex items-center p-3.5 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
             onClick={() => onEdit(item)}
         >
             <div className="flex-grow min-w-0 pr-1">
-                <p className="font-semibold text-sm text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
+                <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
                     <span>{item.name}</span>
                 </p>
                 {item.memo && (
-                    <p className="text-xs text-blue-600 flex items-start gap-1 mt-0.5">
-                        <ChatBubbleLeftIcon className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                    <p className="text-xs text-blue-600 flex items-start gap-1.5 mt-1">
+                        <ChatBubbleLeftIcon className="w-4 h-4 flex-shrink-0 mt-px" />
                         <span className="break-all">{item.memo}</span>
                     </p>
                 )}
-                <p className="text-xs text-gray-500 mt-0.5">{item.price.toLocaleString()}원</p>
+                <p className="text-sm text-gray-500 mt-1">{item.price.toLocaleString()}원</p>
             </div>
-            <div className="flex items-center space-x-1.5 flex-shrink-0">
-                <span className="w-12 text-center text-gray-600 font-medium select-none text-sm">{item.quantity}</span>
-                <span className="w-8 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
-                <button onClick={(e) => { e.stopPropagation(); onRemove(item); }} className="text-gray-400 hover:text-rose-500 p-0.5 z-10 relative">
+            <div className="flex items-center space-x-2 flex-shrink-0">
+                <span className="w-14 text-center text-gray-800 font-bold text-lg select-none">{item.quantity}</span>
+                <span className="w-10 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
+                <button onClick={(e) => { e.stopPropagation(); onRemove(item); }} className="text-gray-400 hover:text-rose-500 p-1.5 rounded-full hover:bg-rose-50 z-10 relative transition-colors">
                     <RemoveIcon className="w-5 h-5"/>
                 </button>
             </div>
@@ -121,7 +121,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     const debouncedDraftData = useDebounce(draftDataToSave, 500);
 
-    // Load draft on mount
     useEffect(() => {
         getDraft<NewOrderDraft>(DRAFT_KEY).then(draft => {
             if (draft) {
@@ -142,7 +141,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         });
     }, [resetItems]);
 
-    // Save draft on change
     useEffect(() => {
         if (isDraftLoading) return;
 
@@ -152,7 +150,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             deleteDraft(DRAFT_KEY);
         }
     }, [debouncedDraftData, isDraftLoading]);
-    // --- End Draft Logic ---
 
     useEffect(() => {
         if (scrollableContainerRef.current) {
@@ -243,6 +240,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             console.error("Failed to save order:", error);
             showAlert("발주 저장에 실패했습니다.");
             setIsSaving(false);
+        } finally {
+            setIsSaving(false);
         }
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
@@ -297,20 +296,18 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     if (isDraftLoading) {
         return (
-            <div className="w-full h-full flex items-center justify-center bg-gray-50">
+            <div className="w-full h-full flex items-center justify-center bg-transparent">
                 <SpinnerIcon className="w-10 h-10 text-blue-500" />
             </div>
         );
     }
 
     return (
-        <div className="h-full flex flex-col relative">
+        <div className="h-full flex flex-col relative bg-transparent">
             <DraftLoadedToast show={showDraftLoadedToast} />
-            <div className="p-2 bg-white shadow-md flex-shrink-0 z-20">
+            <div className="p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-20 border-b border-gray-200/80">
                 <div className="flex gap-2">
-                    {/* Left Column for inputs */}
                     <div className="flex flex-col gap-2 flex-grow">
-                        {/* Customer Search */}
                         <div className="relative">
                             <input
                                 ref={customerSearchInputRef}
@@ -326,16 +323,16 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 }}
                                 placeholder="거래처 검색"
                                 readOnly={isCustomerSelected}
-                                className={`w-full p-2 h-11 border ${isCustomerSelected ? 'border-blue-400 bg-blue-50 pr-24' : 'border-gray-300'} rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors`}
+                                className={`w-full p-3 h-12 border-2 ${isCustomerSelected ? 'border-blue-500 bg-blue-50 pr-28 font-semibold text-blue-800' : 'border-gray-300 bg-white'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors duration-200 text-base`}
                                 autoComplete="off"
                             />
                              {isCustomerSelected && (
                                 <button
                                     onClick={handleClearCustomer}
-                                    className="absolute top-1/2 right-2 -translate-y-1/2 h-8 px-3 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300"
+                                    className="absolute top-1/2 right-2.5 -translate-y-1/2 h-9 px-4 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-95"
                                     aria-label="거래처 변경"
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.13-6.36M20 15a9 9 0 01-14.13 6.36" />
                                     </svg>
                                     <span>변경</span>
@@ -352,7 +349,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             />
                         </div>
                         
-                        {/* Product Search */}
                         <div className="relative">
                             <input
                                 ref={productSearchInputRef}
@@ -367,11 +363,11 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                     productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
                                 }}
                                 placeholder={isCustomerSelected ? "품목명 또는 바코드 검색" : "거래처를 먼저 선택하세요"}
-                                className="w-full p-2 h-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-24"
+                                className="w-full p-3 h-12 border-2 border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors duration-200 text-base pr-28"
                                 disabled={!isCustomerSelected}
                                 autoComplete="off"
                             />
-                            <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
+                            <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center">
                                 <ToggleSwitch
                                     id="new-order-box-unit"
                                     label="박스"
@@ -393,30 +389,30 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                         </div>
                     </div>
                     
-                    {/* Right Column for Scan Button */}
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 ml-2">
                         <button
                             onClick={handleOpenScanner}
-                            className="h-full w-24 bg-blue-600 text-white rounded-lg p-2 flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition disabled:bg-gray-400"
+                            className="h-full w-24 bg-blue-600 text-white rounded-xl p-2 flex flex-col items-center justify-center gap-1.5 font-bold hover:bg-blue-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30"
                             disabled={!isCustomerSelected}
                             aria-label="바코드 스캔"
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
                             <span className="text-sm">스캔</span>
                         </button>
                     </div>
                 </div>
             </div>
 
-            <div ref={scrollableContainerRef} className="scrollable-content p-2 pb-32">
+            <div ref={scrollableContainerRef} className="scrollable-content p-3 pb-40">
                  {items.length === 0 ? (
-                    <div className="relative flex flex-col items-center justify-center h-full text-gray-400">
+                    <div className="relative flex flex-col items-center justify-center h-full text-gray-400 mt-[-5rem]">
+                        <PlusCircleIcon className="w-16 h-16 text-gray-300 mb-4"/>
                         <p className="text-center text-lg font-semibold">발주 품목이 없습니다</p>
                         <p className="text-sm">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>
                     </div>
                 ) : (
-                    <div className="bg-white rounded-lg shadow-md border border-gray-200/80 overflow-hidden">
-                        <div className="divide-y divide-gray-200">
+                    <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
+                        <div className="divide-y divide-gray-100">
                             {items.map((item) => (
                                 <OrderItemRow 
                                     key={item.barcode} 
@@ -430,22 +426,22 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 )}
             </div>
 
-            <footer className="absolute bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-lg border-t border-gray-200/60 shadow-[0_-5px_25px_rgba(0,0,0,0.1)]">
-                <div className="flex justify-between items-center font-bold mb-3">
+            <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60">
+                <div className="flex justify-between items-center font-bold mb-3 px-2">
                     <span className="text-lg text-gray-600">총 합계:</span>
-                    <span className="text-2xl text-gray-800">{totalAmount.toLocaleString()} 원</span>
+                    <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                 </div>
                  <div className="flex items-stretch gap-2">
                     <button 
                         onClick={handleResetOrder} 
-                        className="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0"
+                        className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95"
                     >
                         <TrashIcon className="w-5 h-5" />
                     </button>
                     <button 
                         onClick={() => setIsMemoModalOpen(true)} 
                         disabled={items.length === 0}
-                        className="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                        className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed active:scale-95"
                     >
                         <DocumentTextIcon className="w-5 h-5"/>
                         <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>
@@ -453,7 +449,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                     <button 
                         onClick={handleSaveOrder} 
                         disabled={isSaving || items.length === 0 || !isCustomerSelected}
-                        className="flex-grow bg-gradient-to-b from-blue-500 to-blue-600 text-white p-3 rounded-xl font-bold text-base hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30 disabled:from-gray-400 disabled:to-gray-500 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center"
+                        className="flex-grow bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
                     >
                         {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '신규 발주 저장'}
                     </button>

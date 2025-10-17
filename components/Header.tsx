@@ -45,12 +45,12 @@ const Header: React.FC = () => {
         return date.toLocaleTimeString('ko-KR', {
             hour: '2-digit',
             minute: '2-digit',
-            hour12: true,
+            second: '2-digit',
+            hour12: false,
         });
     };
 
     const handleExitFullscreen = async () => {
-        // Add vendor prefixes for cross-browser compatibility
         const exitFullscreen =
             document.exitFullscreen ||
             (document as any).webkitExitFullscreen ||
@@ -59,40 +59,45 @@ const Header: React.FC = () => {
     
         if (document.fullscreenElement && exitFullscreen) {
             try {
-                // Not all prefixed versions return a promise, but await is safe.
                 await exitFullscreen.call(document);
             } catch (err) {
                  console.error(`Error attempting to exit fullscreen: ${(err as Error).message}`);
             }
         }
     };
+    
+    const StatusIndicator = () => (
+        <div className="w-4 h-4 flex items-center justify-center">
+            {isSyncing ? (
+                <SpinnerIcon className="w-4 h-4 text-blue-500" title="데이터 동기화 중..." />
+            ) : (
+                <div 
+                    className={`relative w-2.5 h-2.5 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
+                    title={isOnline ? '온라인' : '오프라인'}
+                    aria-label={isOnline ? '온라인 상태' : '오프라인 상태'}
+                >
+                    {isOnline && <div className="absolute inset-0 w-full h-full bg-green-400 rounded-full animate-ping opacity-75"></div>}
+                </div>
+            )}
+        </div>
+    );
 
     return (
-        <header id="app-header" className="bg-gradient-to-b from-white to-gray-100 px-4 flex justify-between items-center h-12 flex-shrink-0 shadow-sm border-b border-gray-200">
-            <div className="flex items-center gap-2.5">
-                <h1 className="text-lg font-bold text-gray-800">경진마트 발주관리</h1>
-                <div className="w-4 h-4 flex items-center justify-center">
-                    {isSyncing ? (
-                        <SpinnerIcon className="w-4 h-4 text-blue-500" title="데이터 동기화 중..." />
-                    ) : (
-                        <span 
-                            className={`w-3 h-3 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}
-                            title={isOnline ? '온라인' : '오프라인'}
-                            aria-label={isOnline ? '온라인 상태' : '오프라인 상태'}
-                        />
-                    )}
-                </div>
+        <header id="app-header" className="bg-white/60 backdrop-blur-xl px-4 flex justify-between items-center h-14 flex-shrink-0 border-b border-gray-200/80">
+            <div className="flex items-center gap-3">
+                <h1 className="text-xl font-extrabold text-gray-800 tracking-tight">발주관리</h1>
+                <StatusIndicator />
             </div>
             
             <div className="flex items-center space-x-3">
                 <div className="text-right">
-                    <div className="text-xs font-semibold text-gray-700">{formatDate(currentDateTime)}</div>
-                    <div className="text-sm font-bold text-gray-800 tabular-nums">{formatTime(currentDateTime)}</div>
+                    <div className="text-xs font-semibold text-gray-600">{formatDate(currentDateTime)}</div>
+                    <div className="text-base font-bold text-gray-800 tabular-nums">{formatTime(currentDateTime)}</div>
                 </div>
                 {isFullscreen && (
                     <button 
                         onClick={handleExitFullscreen}
-                        className="text-gray-500 hover:bg-gray-200 rounded-full p-1 transition-colors"
+                        className="text-gray-500 hover:bg-gray-200 rounded-full p-1.5 transition-colors"
                         aria-label="전체화면 종료"
                         title="전체화면 종료"
                     >

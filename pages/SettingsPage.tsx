@@ -128,16 +128,16 @@ const SyncSection: React.FC<{
     return (
         <div className="space-y-4">
             <h3 className="text-base font-bold text-gray-700 flex items-center gap-2">
-                <GoogleDriveIcon className="w-6 h-6" />
+                <GoogleDriveIcon className="w-6 h-6 text-gray-600" />
                 <span>Google Drive {dataTypeKorean} 데이터 동기화</span>
             </h3>
 
-            <div className="relative p-4 border border-gray-200 rounded-lg">
-                <div className="space-y-3">
+            <div className="relative p-4 border-2 border-gray-200 rounded-xl bg-gray-50/50">
+                <div className="space-y-4">
                     {settings?.fileId ? (
                         <>
-                            <div className="flex items-center justify-between p-2 bg-gray-50 rounded-md">
-                                <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-gray-200">
+                                <div className="flex items-center gap-2.5 min-w-0">
                                     <DocumentIcon className="w-5 h-5 text-gray-500 flex-shrink-0" />
                                     <span className="text-sm text-gray-800 font-medium truncate" title={settings.fileName}>{settings.fileName}</span>
                                 </div>
@@ -148,14 +148,15 @@ const SyncSection: React.FC<{
                                     마지막 동기화: {new Date(settings.lastSyncTime).toLocaleString()}
                                 </p>
                             )}
-                            <ToggleSwitch
-                                id={`autosync-${dataType}`}
-                                label="자동 동기화"
-                                checked={settings.autoSync}
-                                onChange={handleAutoSyncToggle}
-                                color="blue"
-                                className="justify-center"
-                            />
+                            <div className="p-2.5 bg-white rounded-lg border border-gray-200 flex justify-center">
+                                <ToggleSwitch
+                                    id={`autosync-${dataType}`}
+                                    label="자동 동기화"
+                                    checked={settings.autoSync}
+                                    onChange={handleAutoSyncToggle}
+                                    color="blue"
+                                />
+                            </div>
                         </>
                     ) : (
                         <p className="text-sm text-gray-500 text-center py-4">Google Drive에 있는 엑셀 파일을 선택하여 데이터를 동기화하세요.</p>
@@ -165,7 +166,7 @@ const SyncSection: React.FC<{
                         <button
                             onClick={handleSelectFile}
                             disabled={isSyncing || isPicking}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
                         >
                             {isPicking ? (
                                 <SpinnerIcon className="w-5 h-5" />
@@ -174,7 +175,7 @@ const SyncSection: React.FC<{
                             )}
                             <span className="truncate">
                                 {isPicking
-                                    ? '인증/선택 창...'
+                                    ? '인증/선택...'
                                     : settings?.fileId
                                     ? '파일 변경'
                                     : '파일 선택'}
@@ -183,7 +184,7 @@ const SyncSection: React.FC<{
                         <button
                             onClick={handleSync}
                             disabled={!settings?.fileId || isSyncing || isPicking}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-sky-600 text-white font-semibold rounded-md hover:bg-sky-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-sky-600 text-white font-semibold rounded-lg hover:bg-sky-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
                         >
                             {isSyncing ? (
                                 <SpinnerIcon className="w-5 h-5" />
@@ -357,7 +358,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     };
 
     return (
-        <div className="h-full flex flex-col bg-gray-100">
+        <div className="h-full flex flex-col bg-transparent">
             <input
                 type="file"
                 ref={fileInputRef}
@@ -366,15 +367,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 accept=".xlsx, .xls"
             />
             {isLoading && (
-                 <div className="fixed inset-0 bg-white/70 flex flex-col items-center justify-center z-50">
+                 <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-50">
                     <SpinnerIcon className="w-10 h-10 text-blue-500" />
                     {loadingMessage && <p className="mt-4 text-lg font-semibold text-gray-700">{loadingMessage}</p>}
                 </div>
             )}
-            <div className="fixed-filter p-3 bg-white border-b border-gray-200 shadow-sm">
+            <div className="fixed-filter p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
                 <h2 className="text-xl font-bold text-gray-800">설정</h2>
             </div>
-            <div className="scrollable-content p-2 space-y-3">
+            <div className="scrollable-content p-3 space-y-3">
 
                 <CollapsibleCard title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
                     <div className="flex items-center justify-between">
@@ -386,7 +387,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             id="camera-select"
                             value={selectedCameraId || ''}
                             onChange={handleCameraChange}
-                            className="text-sm border border-gray-300 rounded-md p-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[50%]"
+                            className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[50%] bg-white"
                         >
                             <option value="">시스템 기본값</option>
                             {cameras.map((camera, index) => (
@@ -399,7 +400,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                      {isInstallPromptAvailable && (
                         <button
                             onClick={triggerInstallPrompt}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-500 text-white font-semibold rounded-md hover:bg-green-600 transition"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition active:scale-95"
                         >
                             <DownloadIcon className="w-5 h-5" />
                             <span>홈 화면에 앱 설치</span>
@@ -408,7 +409,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 </CollapsibleCard>
 
                 <CollapsibleCard title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                          <span className="text-sm font-medium text-gray-700">스캔 시 진동</span>
                          <ToggleSwitch
                             id="vibrate-scan"
@@ -417,7 +418,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             label=""
                          />
                     </div>
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                          <span className="text-sm font-medium text-gray-700">스캔 시 효과음</span>
                          <ToggleSwitch
                             id="sound-scan"
@@ -431,20 +432,20 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
                     <SyncSection dataType="customer" />
                     <SyncSection dataType="product" />
-                    <div className="pt-4 mt-4 border-t border-gray-200">
+                    <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
                         <h4 className="text-sm font-bold text-gray-600 mb-2">로컬 파일로 데이터 업데이트</h4>
                         <div className="grid grid-cols-2 gap-3">
                              <button
                                 onClick={() => handleFileImportClick('customer')}
                                 disabled={isImporting !== null}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
                             >
                                 {isImporting === 'customer' ? <SpinnerIcon className="w-5 h-5" /> : <span>거래처 가져오기</span>}
                             </button>
                             <button
                                 onClick={() => handleFileImportClick('product')}
                                 disabled={isImporting !== null}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-100 transition disabled:bg-gray-200 disabled:cursor-not-allowed"
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
                             >
                                 {isImporting === 'product' ? <SpinnerIcon className="w-5 h-5" /> : <span>상품 가져오기</span>}
                             </button>
@@ -456,14 +457,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     <div className="grid grid-cols-2 gap-3">
                         <button
                             onClick={handleBackup}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-100 text-blue-800 font-semibold rounded-md hover:bg-blue-200 transition"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
                         >
                             <DownloadIcon className="w-5 h-5" />
                             <span>백업</span>
                         </button>
                         <button
                             onClick={handleRestore}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-orange-100 text-orange-800 font-semibold rounded-md hover:bg-orange-200 transition"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-100 text-orange-800 font-semibold rounded-lg hover:bg-orange-200 transition active:scale-95"
                         >
                             <UploadIcon className="w-5 h-5" />
                             <span>복원</span>
@@ -471,19 +472,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     </div>
                     <button
                         onClick={handleClearOrders}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-100 text-red-800 font-semibold rounded-md hover:bg-red-200 transition"
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-100 text-red-800 font-semibold rounded-lg hover:bg-red-200 transition active:scale-95"
                     >
                         <TrashIcon className="w-5 h-5" />
                         <span>발주 내역 전체 삭제</span>
                     </button>
                 </CollapsibleCard>
                 
-                 {/* 계정 */}
                  <div className="p-4">
                     <p className="text-xs text-center text-gray-500 mb-2">로그인된 계정: {user?.email}</p>
                     <button
                         onClick={logout}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 text-white font-semibold rounded-md hover:bg-gray-700 transition"
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-800 transition active:scale-95"
                     >
                         <LogoutIcon className="w-5 h-5" />
                         <span>로그아웃</span>

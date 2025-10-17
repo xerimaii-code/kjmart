@@ -12,23 +12,29 @@ const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, icon, children
     const [isOpen, setIsOpen] = useState(initiallyOpen);
 
     return (
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
+        <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
             <button
-                className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 transition-colors border-b border-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="w-full flex justify-between items-center p-4 bg-white/60 hover:bg-gray-50/80 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
             >
-                <h3 className="font-bold text-gray-800 text-base flex items-center gap-2">
+                <h3 className="font-bold text-gray-800 text-base flex items-center gap-3">
                     {icon}
                     <span>{title}</span>
                 </h3>
-                <ChevronDownIcon className={`w-5 h-5 text-gray-500 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+                <ChevronDownIcon className={`w-6 h-6 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
-            {isOpen && (
-                <div className="p-4 space-y-4 animate-fade-in-down">
-                    {children}
+            <div 
+                className={`grid transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+            >
+                <div className="overflow-hidden">
+                    <div className="p-4 pt-2 border-t border-gray-200/80">
+                         <div className="space-y-4">
+                            {children}
+                        </div>
+                    </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 };

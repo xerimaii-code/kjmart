@@ -27,7 +27,7 @@ const pageComponents: { [key in Page]: React.LazyExoticComponent<React.FC<{ isAc
 
 // Fallback UI for suspense
 const PageSuspenseFallback: React.FC = () => (
-    <div className="w-full h-full flex items-center justify-center bg-gray-50">
+    <div className="w-full h-full flex items-center justify-center bg-transparent">
         <SpinnerIcon className="w-10 h-10 text-blue-500" />
     </div>
 );
@@ -47,66 +47,51 @@ const TabButton: React.FC<{
 }> = ({ page, label, Icon, isActive, onClick }) => (
     <button
         onClick={() => onClick(page)}
-        className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:bg-gray-100 ${
+        className={`relative flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
             isActive 
                 ? 'text-blue-600' 
-                : 'text-gray-500 hover:text-gray-800'
+                : 'text-gray-500 hover:text-gray-900'
         }`}
         aria-current={isActive ? 'page' : undefined}
     >
-        <Icon className="w-5 h-5" />
-        <span>{label}</span>
+        <div className="relative z-10 flex items-center justify-center gap-2">
+            <Icon className="w-5 h-5" />
+            <span>{label}</span>
+        </div>
+        {isActive && (
+            <div 
+                className="absolute inset-0 bg-blue-100 rounded-lg"
+            />
+        )}
     </button>
 );
 
 const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
-    const navRef = useRef<HTMLElement>(null);
-    const [indicatorStyle, setIndicatorStyle] = useState({});
-
-    useEffect(() => {
-        if (navRef.current) {
-            const activeTabElement = navRef.current.querySelector(`button[aria-current="page"]`) as HTMLButtonElement;
-            if (activeTabElement) {
-                const { offsetLeft, clientWidth } = activeTabElement;
-                setIndicatorStyle({
-                    left: `${offsetLeft + clientWidth * 0.2}px`, // Center the 60% width indicator
-                    width: `${clientWidth * 0.6}px`,
-                });
-            }
-        }
-    }, [activePage]);
-    
     return (
-        <nav ref={navRef} className="relative w-full bg-slate-50 flex justify-around items-center flex-shrink-0 shadow-sm">
-            <TabButton
-                page="history"
-                label="발주내역"
-                Icon={HistoryIcon}
-                isActive={activePage === 'history'}
-                onClick={setActivePage}
-            />
-            <TabButton
-                page="new-order"
-                label="신규발주"
-                Icon={NewOrderIcon}
-                isActive={activePage === 'new-order'}
-                onClick={setActivePage}
-            />
-            <TabButton
-                page="settings"
-                label="설정"
-                Icon={SettingsIcon}
-                isActive={activePage === 'settings'}
-                onClick={setActivePage}
-            />
-            {/* Sliding Indicator */}
-            <div 
-                className="absolute bottom-0 h-1 bg-blue-500 rounded-full"
-                style={{
-                    ...indicatorStyle,
-                    transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-                }}
-            />
+        <nav className="w-full bg-white/60 backdrop-blur-lg flex justify-around items-center flex-shrink-0 p-2 border-b border-gray-200/80">
+            <div className="flex w-full justify-around items-center h-full gap-2">
+                <TabButton
+                    page="history"
+                    label="발주내역"
+                    Icon={HistoryIcon}
+                    isActive={activePage === 'history'}
+                    onClick={setActivePage}
+                />
+                <TabButton
+                    page="new-order"
+                    label="신규발주"
+                    Icon={NewOrderIcon}
+                    isActive={activePage === 'new-order'}
+                    onClick={setActivePage}
+                />
+                <TabButton
+                    page="settings"
+                    label="설정"
+                    Icon={SettingsIcon}
+                    isActive={activePage === 'settings'}
+                    onClick={setActivePage}
+                />
+            </div>
         </nav>
     );
 };
@@ -158,7 +143,7 @@ const AppContent: React.FC = () => {
 
 
     return (
-        <div className="h-full w-full flex flex-col bg-gray-50">
+        <div className="h-full w-full flex flex-col bg-transparent">
             <Header />
             <TopTabBar activePage={activePage} setActivePage={handleNavigation} />
             <main

@@ -12,8 +12,6 @@
     <meta name="apple-mobile-web-app-title" content="발주 관리">
     
     <!-- iOS Splash Screen Support -->
-    <!-- The following links provide startup images for various iOS devices. -->
-    <!-- You will need to create and place these image files in a /splash/ directory. -->
     <link href="/splash/iphone5_splash.png" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
     <link href="/splash/iphone6_splash.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)" rel="apple-touch-startup-image" />
     <link href="/splash/iphoneplus_splash.png" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3)" rel="apple-touch-startup-image" />
@@ -28,61 +26,86 @@
     <!-- Font Loading Optimization -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <!-- es-module-shims polyfill must be loaded synchronously (blocking) before any import maps or modules. -->
     <script src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+        :root {
+            --background-start-rgb: 243 244 246; /* gray-100 */
+            --background-end-rgb: 229 231 235; /* gray-200 */
+            --surface-primary-rgb: 255 255 255; /* white */
+            --surface-secondary-rgb: 249 250 251; /* gray-50 */
+            --primary-rgb: 59 130 246; /* blue-500 */
+            --primary-dark-rgb: 37 99 235; /* blue-600 */
+            --primary-light-rgb: 219 234 254; /* blue-100 */
+            --text-primary-rgb: 17 24 39; /* gray-900 */
+            --text-secondary-rgb: 75 85 99; /* gray-500 */
+            --border-color-rgb: 229 231 235; /* gray-200 */
+            --shadow-color-rgb: 110 120 140;
+            --danger-rgb: 239 68 68; /* red-500 */
+            --success-rgb: 34 197 94; /* green-500 */
+        }
+
         html, body, #root {
             height: 100%;
             overflow: hidden;
             font-family: 'Inter', sans-serif;
-            /* Disable text selection globally for a more native app-like feel */
-            -webkit-user-select: none; /* Safari */
-            -ms-user-select: none; /* IE 10+ and Edge */
-            user-select: none; /* Standard syntax */
-            -webkit-touch-callout: none; /* iOS Safari */
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
         }
-        /* Re-enable text selection for input fields where it's expected */
+        
+        body {
+            background: linear-gradient(170deg, rgb(var(--background-start-rgb)) 0%, rgb(var(--background-end-rgb)) 100%);
+        }
+
         input, textarea, [contenteditable="true"] {
             -webkit-user-select: text;
             -ms-user-select: text;
             user-select: text;
         }
+
         .main-content {
-            /* height property removed to allow flexbox to correctly size the element */
             scrollbar-gutter: stable;
         }
-        /* Custom scrollbar for better mobile experience */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
-        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+        /* Modern Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(var(--text-secondary-rgb), 0.3); border-radius: 6px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(var(--text-secondary-rgb), 0.5); }
+
         .fixed-filter { flex-shrink: 0; }
         .scrollable-content { flex-grow: 1; overflow-y: auto; }
 
         /* Style for Window Controls Overlay & iOS Safe Area */
         #app-header {
-            -webkit-app-region: drag; /* Make the header draggable */
-             /* Add padding for the iOS notch area */
+            -webkit-app-region: drag;
             padding-top: env(safe-area-inset-top);
-            height: calc(3rem + env(safe-area-inset-top)); /* 3rem is h-12 from Tailwind */
+            height: calc(3.5rem + env(safe-area-inset-top)); /* 3.5rem is h-14 from Tailwind */
         }
-
-        /* Make sure any interactive elements inside the header are NOT draggable */
         #app-header button, #app-header a, #app-header input, #app-header select {
             -webkit-app-region: no-drag;
         }
         
-        /* Custom animation */
+        /* Custom animations */
         @keyframes fadeInDown {
-          from { opacity: 0; transform: translateY(-10px); }
+          from { opacity: 0; transform: translateY(-12px); }
           to { opacity: 1; transform: translateY(0); }
         }
         .animate-fade-in-down {
-          animation: fadeInDown 0.3s ease-out forwards;
+          animation: fadeInDown 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
         }
     </style>
 <script type="importmap">
@@ -99,8 +122,8 @@
 }
 </script>
 </head>
-<body class="bg-gray-200 antialiased">
-    <div id="root" class="h-full w-full bg-gray-50"></div>
+<body class="antialiased">
+    <div id="root" class="h-full w-full bg-transparent"></div>
     <script type="module" src="/index.tsx"></script>
 </body>
 </html>
