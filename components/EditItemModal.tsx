@@ -69,12 +69,23 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
                             <label htmlFor="edit-quantity" className="block text-sm font-medium text-gray-700 mb-2 text-center">수량 수정</label>
                             <div className="flex items-center justify-center space-x-2">
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
-                                <input 
-                                    ref={inputRef} id="edit-quantity" type="number" value={quantity}
+                                <input
+                                    ref={inputRef}
+                                    id="edit-quantity"
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="-?[0-9]*"
+                                    value={quantity}
                                     onChange={(e) => {
                                         const value = e.target.value;
-                                        if (value === '' || value === '-') setQuantity(value);
-                                        else { const num = parseInt(value, 10); if (!isNaN(num)) setQuantity(num); }
+                                        if (value === '' || value === '-') {
+                                            setQuantity(value);
+                                        } else {
+                                            const num = parseInt(value, 10);
+                                            if (!isNaN(num)) {
+                                                setQuantity(num);
+                                            }
+                                        }
                                     }}
                                     onKeyDown={handleKeyDown}
                                     className="w-full h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-xl text-gray-800 font-bold text-3xl focus:outline-none"

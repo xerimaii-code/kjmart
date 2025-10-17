@@ -87,6 +87,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             hints.set(ZXing.DecodeHintType.ASSUME_GS1, true);
             codeReaderRef.current = new ZXing.BrowserMultiFormatReader(hints);
             
+            // This flag prevents the scan callback from firing multiple times in quick succession.
+            const isHandlingResult = { current: false };
+
             const tryStartScanning = async (deviceId: string | null) => {
                 const baseVideoConstraints: MediaTrackConstraints = {
                     deviceId: deviceId ? { exact: deviceId } : undefined,
@@ -103,8 +106,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 let lastError: unknown = null;
                 for (const constraints of constraintsToTry) {
                     try {
-                        await codeReaderRef.current.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
-                            if (result) {
+                        const codeReader = codeReaderRef.current;
+                        await codeReader.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
+                            if (result && !isHandlingResult.current) {
+                                isHandlingResult.current = true; // Set flag to prevent re-entry
+                                codeReader.reset(); // Stop scanning immediately to release the camera
+
                                 const shouldVibrate = JSON.parse(localStorage.getItem('setting:vibrateOnScan') ?? 'true');
                                 const shouldSound = JSON.parse(localStorage.getItem('setting:soundOnScan') ?? 'true');
 
