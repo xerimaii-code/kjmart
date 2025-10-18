@@ -134,7 +134,35 @@ export const parseExcelFile = (file: File | Blob): Promise<any[]> => {
                     // Empty sheet or header-only sheet
                     return resolve([]);
                 }
-                resolve(json.slice(1)); // Return rows, excluding header
+                
+                const dataRows = json.slice(1); // Exclude header
+
+                const isRowEmpty = (row: any[]): boolean => {
+                    if (!row || row.length === 0) {
+                        return true;
+                    }
+                    // A row is considered empty if every cell is null, undefined, or just whitespace.
+                    return row.every(cell => cell === null || cell === undefined || String(cell).trim() === '');
+                };
+
+                let lastNonEmptyRowIndex = -1;
+                // Iterate from the end to find the last row with content
+                for (let i = dataRows.length - 1; i >= 0; i--) {
+                    if (!isRowEmpty(dataRows[i])) {
+                        lastNonEmptyRowIndex = i;
+                        break;
+                    }
+                }
+                
+                if (lastNonEmptyRowIndex === -1) {
+                    // All data rows were empty
+                    return resolve([]);
+                }
+
+                // Slice the array to include all rows up to the last non-empty one
+                const trimmedData = dataRows.slice(0, lastNonEmptyRowIndex + 1);
+                resolve(trimmedData);
+
             } catch (error) {
                 reject(error);
             }
