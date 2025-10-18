@@ -59,7 +59,7 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
 
     return (
         <div 
-            className={`fixed inset-0 z-50 flex items-end justify-center transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} 
+            className={`fixed inset-0 z-[60] flex items-end justify-center transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} 
             onClick={onClose} 
             role="dialog" 
             aria-modal="true"
@@ -80,7 +80,8 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
                             <input 
                                 ref={inputRef}
                                 id="quantity-input"
-                                type="number" 
+                                type="text" 
+                                inputMode="numeric"
                                 value={quantity}
                                 onChange={(e) => {
                                     const value = e.target.value;

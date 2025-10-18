@@ -12,20 +12,44 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
     const dragStartCoords = useRef({ x: 0, y: 0 });
     const dragDirection = useRef<'horizontal' | 'vertical' | 'none'>('none');
     
-    // State for the transform value in pixels
     const [translateX, setTranslateX] = useState(0);
-    // State to control whether CSS animations are active
     const [isAnimating, setIsAnimating] = useState(true);
 
-    // Update transform position programmatically when activeIndex changes (e.g., from a tab click)
+    // Effect for handling navigation via tab clicks and snapping back after a swipe
     useEffect(() => {
-        // Only update if the container is ready and not being actively dragged
-        if (containerRef.current && !isDragging.current) {
-            const parentWidth = containerRef.current.parentElement!.clientWidth;
-            setIsAnimating(true); // Ensure animations are enabled for the transition
+        if (containerRef.current?.parentElement && !isDragging.current) {
+            const parentWidth = containerRef.current.parentElement.clientWidth;
+            setIsAnimating(true);
             setTranslateX(-activeIndex * parentWidth);
         }
     }, [activeIndex, containerRef]);
+
+    // Effect for handling window resize to prevent misalignment
+    useEffect(() => {
+        let resizeAnimationTimer: number;
+
+        const handleResize = () => {
+            if (containerRef.current?.parentElement) {
+                const parentWidth = containerRef.current.parentElement.clientWidth;
+                // Instantly snap to the correct position without animation
+                setIsAnimating(false);
+                setTranslateX(-activeIndex * parentWidth);
+                
+                // Re-enable animation shortly after so future navigations are animated
+                clearTimeout(resizeAnimationTimer);
+                resizeAnimationTimer = window.setTimeout(() => setIsAnimating(true), 50);
+            }
+        };
+
+        window.addEventListener('resize', handleResize);
+
+        // Cleanup
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            clearTimeout(resizeAnimationTimer);
+        };
+    }, [activeIndex, containerRef]);
+
 
     const getPositionX = (event: React.TouchEvent) => event.touches[0].clientX;
 
@@ -112,7 +136,7 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
     // Style object to be applied to the swipeable container
     const containerStyle: React.CSSProperties = {
         transform: `translateX(${translateX}px)`,
-        transition: isAnimating ? 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none',
+        transition: isAnimating ? 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'none',
     };
 
     return { onTouchStart, onTouchMove, onTouchEnd, containerStyle };

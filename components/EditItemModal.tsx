@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { OrderItem } from '../types';
 import ToggleSwitch from './ToggleSwitch';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
+import { useDataState } from '../context/AppContext';
+import { isSaleActive } from '../hooks/useOrderManager';
 
 interface EditItemModalProps {
     isOpen: boolean;
@@ -10,13 +12,19 @@ interface EditItemModalProps {
     onSave: (details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => void;
 }
 
-export default function EditItemModal({ isOpen, item, onClose, onSave }: EditItemModalProps) {
+export default function EditItemModal({ isOpen, item, onSave, onClose }: EditItemModalProps) {
     const [quantity, setQuantity] = useState<number | string>(1);
     const [unit, setUnit] = useState<'개' | '박스'>('개');
     const [memo, setMemo] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const modalContentRef = useRef<HTMLDivElement>(null);
     const [isRendered, setIsRendered] = useState(false);
+
+    const { products } = useDataState();
+    const product = useMemo(() => {
+        if (!item) return null;
+        return products.find(p => p.barcode === item.barcode);
+    }, [item, products]);
 
     useAdjustForKeyboard(modalContentRef, isOpen);
 
@@ -44,6 +52,7 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
         const finalQuantity = Number(quantity);
         if (isNaN(finalQuantity)) return;
         onSave({ quantity: finalQuantity, unit, memo: memo.trim() });
+        onClose();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -62,7 +71,31 @@ export default function EditItemModal({ isOpen, item, onClose, onSave }: EditIte
             <div ref={modalContentRef} className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
                     <h3 id="editItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={item.name}>{item.name}</h3>
-                    <p className="text-center text-sm text-gray-500 mb-4">{item.price.toLocaleString()}원</p>
+                    {product ? (
+                        <div className="text-center text-sm text-gray-600 mb-4 space-y-1">
+                            <p className="flex justify-center items-center flex-wrap gap-x-3">
+                                <span>
+                                    <span className="font-medium">단가:</span> <span className="font-bold text-gray-800">{product.costPrice.toLocaleString()}원</span>
+                                    <span className="mx-1.5 text-gray-300">/</span>
+                                    <span className="font-medium">판가:</span> <span className="font-bold text-gray-800">{product.sellingPrice.toLocaleString()}원</span>
+                                </span>
+                                {product.salePrice && (
+                                    <span className={isSaleActive(product.saleEndDate) ? "text-red-600" : "text-gray-500"}>
+                                        <span className="font-medium">행사가:</span> <span className="font-bold">{product.salePrice}</span>
+                                    </span>
+                                )}
+                            </p>
+                            {(product.saleEndDate || product.supplierName) && (
+                                <p className="text-xs text-gray-500">
+                                    {product.saleEndDate && `행사종료: ${product.saleEndDate}`}
+                                    {product.supplierName && ` (${product.supplierName})`}
+                                </p>
+                            )}
+                            <p className="font-bold text-blue-600 pt-1">발주단가: {item.price.toLocaleString()}원</p>
+                        </div>
+                   ) : (
+                        <p className="text-center text-sm text-gray-500 mb-4">발주단가: {item.price.toLocaleString()}원</p>
+                   )}
                     
                     <div className="space-y-4">
                         <div>

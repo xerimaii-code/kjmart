@@ -1,4 +1,3 @@
-
 export interface Customer {
     comcode: string;
     name: string;
@@ -6,11 +5,18 @@ export interface Customer {
 
 export interface Product {
     barcode: string;
-    name:string;
-    price: number;
+    name: string;
+    costPrice: number;      // 단가 (매입가)
+    sellingPrice: number;   // 판가 (판매가)
+    salePrice?: string;     // 행사가
+    saleEndDate?: string;   // 행사 종료일 (YYYY-MM-DD)
+    supplierName?: string;  // 거래처명
 }
 
-export interface OrderItem extends Product {
+export interface OrderItem {
+    barcode: string;
+    name: string;
+    price: number; // 거래 시점의 확정 단가 (매입가)
     quantity: number;
     unit: '개' | '박스';
     memo?: string;
@@ -34,9 +40,9 @@ export interface Order {
     items?: OrderItem[];
 }
 
-export type Page = 'new-order' | 'history' | 'settings';
+export type Page = 'new-order' | 'history' | 'settings' | 'product-inquiry';
 
-export type ScannerContext = 'new-order' | 'modal' | null;
+export type ScannerContext = 'new-order' | 'modal' | 'product-inquiry' | null;
 
 // --- Draft Types for IndexedDB ---
 export interface NewOrderDraft {

@@ -30,6 +30,7 @@ const MemoModal: React.FC<MemoModalProps> = ({ isOpen, onClose, onSave, initialM
 
     const handleSave = () => {
         onSave(memo);
+        onClose();
     };
 
     return (

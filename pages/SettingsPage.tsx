@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
+import { useDataState, useDataActions, useAlert, usePWAInstall } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
@@ -26,7 +26,7 @@ const SyncSection: React.FC<{
     dataType: 'customer' | 'product';
 }> = ({ dataType }) => {
     const { setCustomers, setProducts } = useDataActions();
-    const { showToast, showAlert } = useUIActions();
+    const { showToast, showAlert } = useAlert();
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
     const [isPicking, setIsPicking] = useState(false);
@@ -204,8 +204,8 @@ const SyncSection: React.FC<{
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId } = useDataState();
     const { setCustomers, setProducts, setSelectedCameraId, clearOrders } = useDataActions();
-    const { isInstallPromptAvailable } = useUIState();
-    const { showAlert, showToast, triggerInstallPrompt } = useUIActions();
+    const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
+    const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
 
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);

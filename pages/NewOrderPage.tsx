@@ -1,16 +1,15 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef, memo, lazy, Suspense } from 'react';
-import { useDataState, useDataActions, useUIActions } from '../context/AppContext';
+import React, { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
+import { useDataState, useDataActions, useAlert, useScanner, useMiscUI } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
 import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon, ChatBubbleLeftIcon, PlusCircleIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
-import { useOrderManager } from '../hooks/useOrderManager';
+import { useOrderManager, isSaleActive } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from '../components/SearchDropdown';
-
-const AddItemModal = lazy(() => import('../components/AddItemModal'));
-const EditItemModal = lazy(() => import('../components/EditItemModal'));
-const MemoModal = lazy(() => import('../components/MemoModal'));
+import AddItemModal from '../components/AddItemModal';
+import EditItemModal from '../components/EditItemModal';
+import MemoModal from '../components/MemoModal';
 
 const DRAFT_KEY = 'new-order-draft';
 
@@ -57,11 +56,37 @@ const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit
 });
 OrderItemRow.displayName = 'OrderItemRow';
 
+const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: Product) => void }> = ({ product, onClick }) => {
+    const saleIsActive = isSaleActive(product.saleEndDate);
+    const hasSalePrice = !!product.salePrice;
+
+    return (
+        <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
+            <p className="font-semibold">{product.name} <span className="text-sm text-gray-500">({product.barcode})</span></p>
+            <div className="text-sm mt-1 flex flex-wrap gap-x-3 items-center">
+                <span className="text-gray-500">
+                    판가: <span className={`${(saleIsActive && hasSalePrice) ? 'line-through' : 'font-bold text-gray-800'}`}>{product.sellingPrice?.toLocaleString()}원</span>
+                </span>
+                {hasSalePrice && (
+                    <span className="text-red-600 font-bold">
+                        행사가: {product.salePrice}
+                    </span>
+                )}
+            </div>
+            {saleIsActive && hasSalePrice && product.saleEndDate && (
+                 <p className="text-xs text-blue-600 font-semibold mt-1">행사 종료: ~{product.saleEndDate}</p>
+            )}
+        </div>
+    );
+};
+
 
 const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const { customers, products } = useDataState();
     const { addOrder } = useDataActions();
-    const { showAlert, openScanner, setLastModifiedOrderId } = useUIActions();
+    const { showAlert } = useAlert();
+    const { openScanner } = useScanner();
+    const { setLastModifiedOrderId } = useMiscUI();
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
@@ -69,7 +94,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const [productSearch, setProductSearch] = useState('');
     const debouncedProductSearch = useDebounce(productSearch, 200);
     const [memo, setMemo] = useState('');
-    const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
@@ -78,14 +102,16 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     
-    const [productForModal, setProductForModal] = useState<Product | null>(null);
-    const [existingItemForModal, setExistingItemForModal] = useState<OrderItem | null>(null);
-    const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
     const [isSaving, setIsSaving] = useState(false);
-    const [addItemTrigger, setAddItemTrigger] = useState<'scan' | 'search'>('search');
     
     const [isDraftLoading, setIsDraftLoading] = useState(true);
     const [showDraftLoadedToast, setShowDraftLoadedToast] = useState(false);
+
+    // --- Local Modal State ---
+    const [addItemModal, setAddItemModal] = useState<{ isOpen: boolean; product: Product | null; existingItem: OrderItem | null; trigger: 'scan' | 'search' }>({ isOpen: false, product: null, existingItem: null, trigger: 'search' });
+    const [editItemModal, setEditItemModal] = useState<{ isOpen: boolean; item: OrderItem | null }>({ isOpen: false, item: null });
+    const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
+
 
     const productSearchInputRef = useRef<HTMLInputElement>(null);
     const customerSearchInputRef = useRef<HTMLInputElement>(null);
@@ -120,6 +146,14 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     }), [selectedCustomer, items, memo, isBoxUnitDefault]);
 
     const debouncedDraftData = useDebounce(draftDataToSave, 500);
+
+    useEffect(() => {
+        if (!isActive) {
+            setAddItemModal(prev => ({...prev, isOpen: false}));
+            setEditItemModal({ isOpen: false, item: null });
+            setIsMemoModalOpen(false);
+        }
+    }, [isActive]);
 
     useEffect(() => {
         getDraft<NewOrderDraft>(DRAFT_KEY).then(draft => {
@@ -245,35 +279,36 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
-    const handleAddProductFromSearch = (product: Product) => {
-        setAddItemTrigger('search');
+    const handleAddProductFromSearch = useCallback((product: Product) => {
         const existingItem = items.find(item => item.barcode === product.barcode);
-        setProductForModal(product);
-        setExistingItemForModal(existingItem || null);
+        setAddItemModal({
+            isOpen: true,
+            product: product,
+            existingItem: existingItem || null,
+            trigger: 'search'
+        });
         setProductSearch('');
         setShowProductDropdown(false);
         productSearchInputRef.current?.blur();
-    };
-
-    const handleScanSuccess = useCallback((barcode: string) => {
-        const product = products.find(p => p.barcode === barcode);
-        if (product) {
-            setAddItemTrigger('scan');
-            const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
-            setProductForModal(product);
-            setExistingItemForModal(existingItem || null);
-        } else {
-            showAlert("등록되지 않은 바코드입니다.");
-        }
-    }, [products, showAlert]);
+    }, [items]);
 
     const handleOpenScanner = useCallback(() => {
         if (!isCustomerSelected) {
             showAlert("먼저 거래처를 선택해주세요.");
             return;
         }
-        openScanner('new-order', handleScanSuccess, true);
-    }, [isCustomerSelected, showAlert, openScanner, handleScanSuccess]);
+        const onScan = (barcode: string) => {
+            const product = products.find(p => p.barcode === barcode);
+            if (product) {
+                const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
+                setAddItemModal({ isOpen: true, product, existingItem, trigger: 'scan' });
+            } else {
+                showAlert("등록되지 않은 바코드입니다.");
+            }
+        };
+        openScanner('new-order', onScan, true);
+    }, [isCustomerSelected, showAlert, openScanner, products, itemsRef]);
+
 
     const handleRemoveItem = useCallback((item: OrderItem) => {
         showAlert(
@@ -284,14 +319,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         );
     }, [showAlert, removeItem]);
 
-    const handleAddItemFromModal = useCallback((product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
-        addOrUpdateItem(product, details);
-        setProductForModal(null);
-        setExistingItemForModal(null);
-    }, [addOrUpdateItem]);
-
     const handleEditItem = useCallback((item: OrderItem) => {
-        setEditingItem(item);
+        setEditItemModal({ isOpen: true, item: item });
     }, []);
 
     if (isDraftLoading) {
@@ -305,8 +334,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col relative bg-transparent">
             <DraftLoadedToast show={showDraftLoadedToast} />
-            <div className="p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-20 border-b border-gray-200/80">
-                <div className="flex gap-2">
+            <div className="w-full p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-20 border-b border-gray-200/80">
+                <div className="flex gap-2 w-full max-w-xl mx-auto">
                     <div className="flex flex-col gap-2 flex-grow">
                         <div className="relative">
                             <input
@@ -380,9 +409,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             <SearchDropdown<Product>
                                 items={filteredProducts}
                                 renderItem={(p) => (
-                                    <div onClick={() => handleAddProductFromSearch(p)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700">
-                                        <div>{p.name} <span className="text-sm text-gray-500">({p.barcode})</span></div>
-                                    </div>
+                                    <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />
                                 )}
                                 show={showProductDropdown}
                             />
@@ -439,7 +466,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                         <TrashIcon className="w-5 h-5" />
                     </button>
                     <button 
-                        onClick={() => setIsMemoModalOpen(true)} 
+                        onClick={() => setIsMemoModalOpen(true)}
                         disabled={items.length === 0}
                         className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed active:scale-95"
                     >
@@ -455,43 +482,43 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                     </button>
                 </div>
             </footer>
+            
+            {/* --- Modals --- */}
+            <AddItemModal
+                isOpen={addItemModal.isOpen}
+                product={addItemModal.product}
+                existingItem={addItemModal.existingItem}
+                onClose={() => setAddItemModal(prev => ({ ...prev, isOpen: false }))}
+                onAdd={(details) => {
+                    if (addItemModal.product) {
+                        addOrUpdateItem(addItemModal.product, details);
+                    }
+                }}
+                onNextScan={() => {
+                    setAddItemModal(prev => ({ ...prev, isOpen: false }));
+                    handleOpenScanner();
+                }}
+                trigger={addItemModal.trigger}
+                initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
+            />
 
-            <Suspense fallback={null}>
-                {isMemoModalOpen && <MemoModal
-                    isOpen={isMemoModalOpen}
-                    onClose={() => setIsMemoModalOpen(false)}
-                    onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }}
-                    initialMemo={memo}
-                />}
-                {!!productForModal && <AddItemModal
-                    isOpen={!!productForModal}
-                    product={productForModal}
-                    existingItem={existingItemForModal}
-                    onClose={() => {
-                        setProductForModal(null);
-                        setExistingItemForModal(null);
-                    }}
-                    onAdd={(details) => {
-                        if (productForModal) {
-                            handleAddItemFromModal(productForModal, details);
-                        }
-                    }}
-                    onNextScan={handleOpenScanner}
-                    trigger={addItemTrigger}
-                    initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
-                />}
-                {!!editingItem && <EditItemModal
-                    isOpen={!!editingItem}
-                    item={editingItem}
-                    onClose={() => setEditingItem(null)}
-                    onSave={(updatedDetails) => {
-                        if (editingItem) {
-                            updateItem(editingItem.barcode, updatedDetails);
-                        }
-                        setEditingItem(null);
-                    }}
-                />}
-            </Suspense>
+            <EditItemModal
+                isOpen={editItemModal.isOpen}
+                item={editItemModal.item}
+                onClose={() => setEditItemModal({ isOpen: false, item: null })}
+                onSave={(updatedDetails) => {
+                    if (editItemModal.item) {
+                        updateItem(editItemModal.item.barcode, updatedDetails);
+                    }
+                }}
+            />
+
+            <MemoModal
+                isOpen={isMemoModalOpen}
+                initialMemo={memo}
+                onClose={() => setIsMemoModalOpen(false)}
+                onSave={(newMemo) => setMemo(newMemo)}
+            />
         </div>
     );
 };

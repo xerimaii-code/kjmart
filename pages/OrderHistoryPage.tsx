@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
-import { useDataActions, useUIActions, useUIState } from '../context/AppContext';
+import { useDataActions, useAlert, useModals, useMiscUI } from '../context/AppContext';
 import { Order } from '../types';
 import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon, SpinnerIcon } from '../components/Icons';
 import { exportToSMS } from '../services/dataService';
@@ -112,8 +112,9 @@ OrderRow.displayName = 'OrderRow';
 
 const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const { deleteOrder, updateOrderStatus } = useDataActions();
-    const { lastModifiedOrderId } = useUIState();
-    const { openDetailModal, showAlert, setLastModifiedOrderId, openDeliveryModal } = useUIActions();
+    const { showAlert } = useAlert();
+    const { openDetailModal, openDeliveryModal } = useModals();
+    const { lastModifiedOrderId, setLastModifiedOrderId } = useMiscUI();
 
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -321,57 +322,59 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             <div className="fixed-filter p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
                 <div className="flex justify-between items-center gap-4">
                     <h2 className="text-xl font-bold text-gray-800 flex-shrink-0">발주 내역</h2>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm flex-shrink min-w-0">
-                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-full bg-white/80" aria-label="시작일" />
+                    <div className="flex items-center gap-2 text-sm">
+                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-36 bg-white/80" aria-label="시작일" />
                         <span className="text-gray-500 font-semibold">~</span>
-                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-full bg-white/80" aria-label="종료일" />
+                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-36 bg-white/80" aria-label="종료일" />
                     </div>
                 </div>
             </div>
-            <div ref={listRef} className="scrollable-content p-3 space-y-4">
+            <div ref={listRef} className="scrollable-content">
                 {isLoading ? (
                     <div className="flex items-center justify-center h-full pt-16">
                         <SpinnerIcon className="w-10 h-10 text-blue-500" />
                     </div>
                 ) : groupedOrders.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-400 pt-16 text-center">
+                    <div className="p-3 flex flex-col items-center justify-center h-full text-gray-400 pt-16 text-center">
                         <ArchiveBoxIcon className="w-16 h-16 text-gray-300 mb-4" />
                         <p className="text-lg font-semibold">선택한 기간에 발주 내역이 없습니다</p>
                         <p className="text-sm mt-1">다른 기간을 선택하거나 신규 발주를 생성해보세요.</p>
                     </div>
                 ) : (
-                    groupedOrders.map(group => {
-                        const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
-                        return (
-                            <div key={group.date} className={`bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/60 ${isGroupActive ? 'relative z-10 overflow-visible' : 'overflow-hidden'}`}>
-                                <div className="flex justify-between items-center p-4 bg-white/60 border-b border-gray-200/80">
-                                    <h3 className="font-bold text-gray-800 text-base" id={`date-header-${group.date}`}>
-                                        {new Date(group.date).toLocaleDateString('ko-KR', {
-                                            year: 'numeric',
-                                            month: 'long',
-                                            day: 'numeric',
-                                            weekday: 'short',
-                                        })}
-                                    </h3>
-                                    <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
+                    <div className="p-3 space-y-4">
+                        {groupedOrders.map(group => {
+                            const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
+                            return (
+                                <div key={group.date} className={`bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/60 ${isGroupActive ? 'relative z-10 overflow-visible' : 'overflow-hidden'}`}>
+                                    <div className="flex justify-between items-center p-4 bg-white/60 border-b border-gray-200/80">
+                                        <h3 className="font-bold text-gray-800 text-base" id={`date-header-${group.date}`}>
+                                            {new Date(group.date).toLocaleDateString('ko-KR', {
+                                                year: 'numeric',
+                                                month: 'long',
+                                                day: 'numeric',
+                                                weekday: 'short',
+                                            })}
+                                        </h3>
+                                        <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
+                                    </div>
+                                    <div className="divide-y divide-gray-200/60">
+                                        {group.orders.map(order => (
+                                            <OrderRow
+                                                key={order.id}
+                                                order={order}
+                                                isHighlighted={order.id === lastModifiedOrderId}
+                                                isMenuOpen={activeMenuOrderId === order.id}
+                                                hasDraft={draftKeys.has(order.id)}
+                                                onCardClick={() => handleCardClick(order)}
+                                                onMenuToggle={(e) => handleMenuToggle(e, order.id)}
+                                                actionMenuItems={getActionMenuItems(order)}
+                                            />
+                                        ))}
+                                    </div>
                                 </div>
-                                <div className="divide-y divide-gray-200/60">
-                                    {group.orders.map(order => (
-                                        <OrderRow
-                                            key={order.id}
-                                            order={order}
-                                            isHighlighted={order.id === lastModifiedOrderId}
-                                            isMenuOpen={activeMenuOrderId === order.id}
-                                            hasDraft={draftKeys.has(order.id)}
-                                            onCardClick={() => handleCardClick(order)}
-                                            onMenuToggle={(e) => handleMenuToggle(e, order.id)}
-                                            actionMenuItems={getActionMenuItems(order)}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        )
-                    })
+                            )
+                        })}
+                    </div>
                 )}
             </div>
         </div>

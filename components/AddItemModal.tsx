@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Product, OrderItem } from '../types';
 import ToggleSwitch from './ToggleSwitch';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
+import { isSaleActive } from '../hooks/useOrderManager';
 
 interface AddItemModalProps {
     isOpen: boolean;
@@ -53,6 +54,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         const finalQuantity = Number(quantity);
         if (isNaN(finalQuantity)) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
+        onClose();
     };
 
     const handleAddAndScan = () => {
@@ -70,7 +72,26 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
             <div ref={modalContentRef} className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
                     <h3 id="addItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
-                    <p className="text-center text-sm text-gray-500 mb-4">{product.price.toLocaleString()}원</p>
+                    <div className="text-center text-sm text-gray-600 mb-4 space-y-1">
+                        <p className="flex justify-center items-center flex-wrap gap-x-3">
+                            <span>
+                                <span className="font-medium">단가:</span> <span className="font-bold text-gray-800">{product.costPrice.toLocaleString()}원</span>
+                                <span className="mx-1.5 text-gray-300">/</span>
+                                <span className="font-medium">판가:</span> <span className="font-bold text-gray-800">{product.sellingPrice.toLocaleString()}원</span>
+                            </span>
+                            {product.salePrice && (
+                                <span className={isSaleActive(product.saleEndDate) ? "text-red-600" : "text-gray-500"}>
+                                    <span className="font-medium">행사가:</span> <span className="font-bold">{product.salePrice}</span>
+                                </span>
+                            )}
+                        </p>
+                        {(product.saleEndDate || product.supplierName) && (
+                            <p className="text-xs text-gray-500">
+                                {product.saleEndDate && `행사종료: ${product.saleEndDate}`}
+                                {product.supplierName && ` (${product.supplierName})`}
+                            </p>
+                        )}
+                    </div>
                     {existingItem && (
                         <div className="text-center text-sm font-semibold text-blue-700 bg-blue-100 p-2.5 rounded-lg mb-4">
                             이미 <span className="font-bold">{existingItem.quantity}{existingItem.unit}</span>가 담겨있습니다. 추가 수량을 입력하세요.
@@ -140,4 +161,5 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     );
 };
 
+// FIX: Add default export for lazy loading
 export default AddItemModal;

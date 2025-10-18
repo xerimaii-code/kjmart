@@ -1,16 +1,15 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect, memo, lazy, Suspense } from 'react';
-import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
+import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
+import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
 import { Order, OrderItem, Product, EditedOrderDraft } from '../types';
-import { PlusCircleIcon, RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon } from './Icons';
+import { RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon } from './Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
-import { useOrderManager } from '../hooks/useOrderManager';
+import { isSaleActive } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from './SearchDropdown';
-
-const AddItemModal = lazy(() => import('./AddItemModal'));
-const EditItemModal = lazy(() => import('./EditItemModal'));
-const MemoModal = lazy(() => import('./MemoModal'));
+import AddItemModal from './AddItemModal';
+import EditItemModal from './EditItemModal';
+import MemoModal from './MemoModal';
 
 const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
     if (!items) return [];
@@ -19,7 +18,7 @@ const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
     }));
 };
 
-const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; isCompleted: boolean, isNew: boolean, isModified: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, isCompleted, isNew, isModified, onEdit, onRemove }, ref) => {
+const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; product: Product | undefined; isCompleted: boolean, isNew: boolean, isModified: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, product, isCompleted, isNew, isModified, onEdit, onRemove }, ref) => {
     return (
         <div
             ref={ref}
@@ -32,13 +31,39 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; i
                     {isModified && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5 tracking-wide">수정</span>}
                     <span>{item.name}</span>
                 </p>
+                
+                {product ? (
+                    <div className="text-sm text-gray-600 mt-1.5">
+                        <div>
+                            <span>
+                                (<b className="font-black text-gray-900">{item.price.toLocaleString()}</b>
+                                /
+                                {product.sellingPrice.toLocaleString()})
+                            </span>
+                            {product.salePrice && (
+                                <span className={`ml-1.5 font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-500'}`}>
+                                    / ({product.salePrice})
+                                </span>
+                            )}
+                        </div>
+                        {product.salePrice && product.saleEndDate && (
+                             <div className={`mt-1 text-xs font-semibold ${isSaleActive(product.saleEndDate) ? 'text-blue-600' : 'text-gray-500'}`}>
+                                행사종료: {product.saleEndDate}
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <p className="text-sm text-gray-500 mt-1">
+                        발주단가: <span className="font-bold text-gray-800">{item.price.toLocaleString()}원</span>
+                    </p>
+                )}
+
                 {item.memo && (
                     <p className="text-xs text-blue-600 flex items-start gap-1.5 mt-1">
                         <ChatBubbleLeftIcon className="w-4 h-4 flex-shrink-0 mt-px" />
                         <span className="break-all">{item.memo}</span>
                     </p>
                 )}
-                <p className="text-sm text-gray-500 mt-1">{item.price.toLocaleString()}원</p>
             </div>
             <div className="flex items-center space-x-2 flex-shrink-0">
                 <span className="w-14 text-center text-gray-800 font-bold text-lg select-none">{item.quantity}</span>
@@ -54,69 +79,145 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; i
 }));
 EditedItemRow.displayName = 'EditedItemRow';
 
+const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: Product) => void }> = ({ product, onClick }) => {
+    const saleIsActive = isSaleActive(product.saleEndDate);
+    const hasSalePrice = !!product.salePrice;
+
+    return (
+        <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
+            <p className="font-semibold">{product.name} <span className="text-sm text-gray-500">({product.barcode})</span></p>
+            <div className="text-sm mt-1 flex flex-wrap gap-x-3 items-center">
+                <span className="text-gray-500">
+                    판가: <span className={`${(saleIsActive && hasSalePrice) ? 'line-through' : 'font-bold text-gray-800'}`}>{product.sellingPrice?.toLocaleString()}원</span>
+                </span>
+                {hasSalePrice && (
+                    <span className="text-red-600 font-bold">
+                        행사가: {product.salePrice}
+                    </span>
+                )}
+            </div>
+            {saleIsActive && hasSalePrice && product.saleEndDate && (
+                 <p className="text-xs text-blue-600 font-semibold mt-1">행사 종료: ~{product.saleEndDate}</p>
+            )}
+        </div>
+    );
+};
+
 
 const OrderDetailModal: React.FC = () => {
     const { products } = useDataState();
     const { updateOrder } = useDataActions();
-    const { editingOrder: order } = useUIState();
-    const { closeDetailModal, showAlert, openScanner, setLastModifiedOrderId } = useUIActions();
+    const { editingOrder: order, closeDetailModal } = useModals();
+    const { showAlert } = useAlert();
+    const { openScanner } = useScanner();
+    const { setLastModifiedOrderId } = useMiscUI();
     
     const isCompleted = useMemo(() => !!order?.completedAt || !!order?.completionDetails, [order]);
+    
+    // --- Local State Management ---
+    const [editedItems, setEditedItems] = useState<OrderItem[]>([]);
+    const [memo, setMemo] = useState('');
+    const [isDraftLoading, setIsDraftLoading] = useState(true);
     
     const [productSearch, setProductSearch] = useState('');
     const debouncedProductSearch = useDebounce(productSearch, 200);
     const [showDropdown, setShowDropdown] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
-    const [addItemTrigger, setAddItemTrigger] = useState<'scan' | 'search'>('search');
-    
-    const [addItemModalState, setAddItemModalState] = useState<{ product: Product | null; existingItem: OrderItem | null; initialUnit: '개' | '박스'; }>({ product: null, existingItem: null, initialUnit: '개' });
     
     const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
-    const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
-    const [memo, setMemo] = useState('');
-    const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
     const [isMemoSectionOpen, setIsMemoSectionOpen] = useState(false);
+    
+    const [isRendered, setIsRendered] = useState(false);
+
+    // --- Local Modal State ---
+    const [addItemModal, setAddItemModal] = useState<{ isOpen: boolean; product: Product | null; existingItem: OrderItem | null; trigger: 'scan' | 'search' }>({ isOpen: false, product: null, existingItem: null, trigger: 'search' });
+    const [editItemModal, setEditItemModal] = useState<{ isOpen: boolean; item: OrderItem | null }>({ isOpen: false, item: null });
+    const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
+    
+    // --- Refs ---
     const productSearchBlurTimeout = useRef<number | null>(null);
     const productSearchInputRef = useRef<HTMLInputElement | null>(null);
-
-    const [isDraftLoading, setIsDraftLoading] = useState(true);
-    const [draft, setDraft] = useState<EditedOrderDraft | null>(null);
-
     const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
     const lastItemCount = useRef(0);
-    
-    const [isRendered, setIsRendered] = useState(false);
+
+    const productsMap = useMemo(() => {
+        const map = new Map<string, Product>();
+        products.forEach(p => map.set(p.barcode, p));
+        return map;
+    }, [products]);
 
     useEffect(() => {
         const timer = setTimeout(() => setIsRendered(true), 10);
         return () => clearTimeout(timer);
     }, []);
 
+    // --- Data Initialization and Draft Loading ---
     useEffect(() => {
         if (order) {
             setIsDraftLoading(true);
             getDraft<EditedOrderDraft>(order.id)
-                .then(setDraft)
-                .catch(err => { console.error(`Failed to load draft for order ${order.id}:`, err); setDraft(null); })
-                .finally(() => { setIsDraftLoading(false); });
+                .then(draft => {
+                    if (draft) {
+                        setEditedItems(draft.items);
+                        setMemo(draft.memo);
+                    } else {
+                        setEditedItems(order.items || []);
+                        setMemo(order.memo || '');
+                    }
+                })
+                .catch(err => {
+                    console.error(`Failed to load draft for order ${order.id}:`, err);
+                    setEditedItems(order.items || []);
+                    setMemo(order.memo || '');
+                })
+                .finally(() => setIsDraftLoading(false));
         }
     }, [order]);
 
-    const initialData = useMemo(() => {
-        if (!order) return { items: [], memo: '' };
-        if (isDraftLoading) return { items: [], memo: '' }; 
-        if (draft) return { items: draft.items, memo: draft.memo };
-        return { items: order.items || [], memo: order.memo || '' };
-    }, [order, draft, isDraftLoading]);
-    
-    const { items: editedItems, addOrUpdateItem, updateItem, removeItem, totalAmount } = useOrderManager({ initialItems: initialData.items });
-    
-    const editedItemsRef = useRef(editedItems);
-    useEffect(() => { editedItemsRef.current = editedItems; }, [editedItems]);
 
-    useEffect(() => { setMemo(initialData.memo); }, [initialData.memo]);
+    // --- Item Management Logic ---
+    const totalAmount = useMemo(() => Math.floor(editedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0)), [editedItems]);
 
+    const addOrUpdateItem = useCallback((product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
+        setEditedItems(prevItems => {
+            const existingItemIndex = prevItems.findIndex(i => i.barcode === product.barcode);
+            const priceToUse = product.costPrice;
+
+            if (existingItemIndex > -1) {
+                const updatedItems = [...prevItems];
+                const existingItem = updatedItems[existingItemIndex];
+                updatedItems[existingItemIndex] = {
+                    ...existingItem,
+                    quantity: existingItem.quantity + details.quantity,
+                    unit: details.unit,
+                    memo: details.memo || '',
+                    price: priceToUse,
+                };
+                return updatedItems;
+            } else {
+                const newItem: OrderItem = {
+                    barcode: product.barcode,
+                    name: product.name,
+                    price: priceToUse,
+                    quantity: details.quantity,
+                    unit: details.unit,
+                    memo: details.memo || '',
+                };
+                return [...prevItems, newItem];
+            }
+        });
+    }, []);
+
+    const updateItem = useCallback((barcode: string, newValues: Partial<OrderItem>) => {
+        setEditedItems(prev => prev.map(item => item.barcode === barcode ? { ...item, ...newValues } : item));
+    }, []);
+
+    const removeItem = useCallback((barcode: string) => {
+        setEditedItems(prev => prev.filter(item => item.barcode !== barcode));
+    }, []);
+
+    // --- Draft Saving Logic ---
     const serverStateJSON = useMemo(() => {
         if (!order) return '';
         return JSON.stringify({ items: normalizeItemsForComparison(order.items), memo: order.memo || '' });
@@ -140,7 +241,7 @@ const OrderDetailModal: React.FC = () => {
     
     const handleAnimatedClose = useCallback(() => {
         setIsRendered(false);
-        setTimeout(closeDetailModal, 400);
+        setTimeout(closeDetailModal, 500);
     }, [closeDetailModal]);
     
     const handleCancelAndDiscard = () => {
@@ -176,19 +277,17 @@ const OrderDetailModal: React.FC = () => {
     const handleScanSuccess = useCallback((barcode: string) => {
         const product = products.find(p => p.barcode === barcode);
         if (product) {
-            setAddItemTrigger('scan');
-            const existingItem = editedItemsRef.current.find(item => item.barcode === product.barcode);
+            const existingItem = editedItems.find(item => item.barcode === product.barcode);
             const originalItem = order?.items?.find(item => item.barcode === product.barcode);
             let unitForModal: '개' | '박스' = isBoxUnitDefault ? '박스' : '개';
             if (existingItem) unitForModal = existingItem.unit;
             else if (originalItem) unitForModal = originalItem.unit;
-            setAddItemModalState({ product: product, existingItem: existingItem || null, initialUnit: unitForModal });
+            
+            setAddItemModal({ isOpen: true, product, existingItem, trigger: 'scan' });
         } else {
             showAlert("등록되지 않은 바코드입니다.");
         }
-    }, [products, showAlert, order, isBoxUnitDefault]);
-    
-    const handleNextScan = () => openScanner('modal', handleScanSuccess, true);
+    }, [products, showAlert, order, isBoxUnitDefault, editedItems]);
 
     const filteredProducts = useMemo(() => {
         const searchTerm = debouncedProductSearch.trim().toLowerCase();
@@ -197,13 +296,13 @@ const OrderDetailModal: React.FC = () => {
     }, [products, debouncedProductSearch]);
 
     const handleProductSelect = (product: Product) => {
-        setAddItemTrigger('search');
         const existingItem = editedItems.find(item => item.barcode === product.barcode);
         const originalItem = order?.items?.find(item => item.barcode === product.barcode);
         let unitForModal: '개' | '박스' = isBoxUnitDefault ? '박스' : '개';
         if (existingItem) unitForModal = existingItem.unit;
         else if (originalItem) unitForModal = originalItem.unit;
-        setAddItemModalState({ product: product, existingItem: existingItem || null, initialUnit: unitForModal });
+        
+        setAddItemModal({ isOpen: true, product, existingItem, trigger: 'search' });
         setProductSearch('');
         setShowDropdown(false);
         productSearchInputRef.current?.blur();
@@ -222,16 +321,6 @@ const OrderDetailModal: React.FC = () => {
         handleAnimatedClose();
         showAlert("발주 내역이 수정되었습니다.");
     };
-    
-    const handleAddItem = useCallback(({ quantity, unit, memo }: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
-        if (addItemModalState.product) {
-            addOrUpdateItem(addItemModalState.product, { quantity, unit, memo });
-            setQuickAddedBarcode(addItemModalState.product.barcode);
-            setAddItemModalState({ product: null, existingItem: null, initialUnit: '개' });
-        }
-    }, [addOrUpdateItem, addItemModalState.product]);
-
-    const initialSettingsForModal = useMemo(() => ({ unit: addItemModalState.initialUnit }), [addItemModalState.initialUnit]);
 
     useEffect(() => {
         if (scrollableContainerRef.current && quickAddedBarcode) {
@@ -252,7 +341,9 @@ const OrderDetailModal: React.FC = () => {
         showAlert(`'${itemToRemove.name}' 품목을 삭제하시겠습니까?`, () => removeItem(itemToRemove.barcode), '삭제', 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500');
     }, [showAlert, removeItem]);
 
-    const handleEditItem = useCallback((item: OrderItem) => setEditingItem(item), []);
+    const handleEditItem = useCallback((item: OrderItem) => {
+        setEditItemModal({ isOpen: true, item: item });
+    }, []);
 
     if (!order) return null;
 
@@ -274,7 +365,7 @@ const OrderDetailModal: React.FC = () => {
 
     return (
         <div className={`fixed inset-0 bg-black z-30 flex items-end justify-center transition-opacity duration-400 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}>
-            <div className={`bg-gray-50 h-[95dvh] w-full max-w-3xl rounded-t-2xl flex flex-col relative ${isRendered ? 'translate-y-0' : 'translate-y-full'}`} style={{ transition: 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)' }}>
+            <div className={`bg-gray-50 h-[95dvh] w-full max-w-3xl rounded-t-2xl flex flex-col relative ${isRendered ? 'translate-y-0' : 'translate-y-full'}`} style={{ transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
                 <header className="p-4 bg-white/80 backdrop-blur-lg border-b border-gray-200/80 flex-shrink-0 z-10">
                     <div className="flex justify-between items-center">
                         <div className="flex-1 min-w-0">
@@ -312,7 +403,13 @@ const OrderDetailModal: React.FC = () => {
                             <div className="relative flex-grow">
                                 <input ref={productSearchInputRef} type="text" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} onFocus={() => { if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current); setShowDropdown(true); }} onBlur={() => { productSearchBlurTimeout.current = window.setTimeout(() => setShowDropdown(false), 200); }} placeholder="품목명 또는 바코드 검색" className="w-full p-3 h-12 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-28 transition text-base" autoComplete="off" />
                                 <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center"><ToggleSwitch id="modal-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" /></div>
-                                <SearchDropdown<Product> items={filteredProducts} renderItem={(p) => (<div onClick={() => handleProductSelect(p)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700"><div>{p.name} <span className="text-sm text-gray-500">({p.barcode})</span></div></div>)} show={showDropdown} />
+                                <SearchDropdown<Product>
+                                    items={filteredProducts}
+                                    renderItem={(p) => (
+                                        <ProductSearchResultItem product={p} onClick={handleProductSelect} />
+                                    )}
+                                    show={showDropdown}
+                                />
                             </div>
                             <button onClick={() => openScanner('modal', handleScanSuccess, true)} className="flex-shrink-0 h-12 w-24 bg-blue-600 text-white rounded-xl flex items-center justify-center gap-2 font-bold hover:bg-blue-700 transition active:scale-95" aria-label="바코드 스캔"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg><span className="text-sm">스캔</span></button>
                         </div>
@@ -325,7 +422,7 @@ const OrderDetailModal: React.FC = () => {
                      ) : editedItems.length === 0 ? (
                         <div className="relative flex flex-col items-center justify-center h-full text-gray-400 p-8 mt-[-5rem]"><DocumentIcon className="w-16 h-16 text-gray-300 mb-4" /><p className="text-center text-lg font-semibold">품목이 없습니다</p>{!isCompleted && <p className="text-sm mt-1">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>}</div>
                     ) : (
-                        <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden"><div className="divide-y divide-gray-100">{editedItems.map((item) => { const originalItemJSON = originalItemsMap.get(item.barcode); const isNew = !originalItemJSON; const isModified = !isNew && originalItemJSON !== JSON.stringify(normalizeItemsForComparison([item])[0]); return <EditedItemRow key={item.barcode} ref={el => { if (el) itemRefs.current.set(item.barcode, el); }} item={item} isCompleted={isCompleted} isNew={isNew} isModified={isModified} onEdit={handleEditItem} onRemove={handleRemoveItem} />; })}</div></div>
+                        <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden"><div className="divide-y divide-gray-100">{editedItems.map((item) => { const originalItemJSON = originalItemsMap.get(item.barcode); const isNew = !originalItemJSON; const isModified = !isNew && originalItemJSON !== JSON.stringify(normalizeItemsForComparison([item])[0]); const product = productsMap.get(item.barcode); return <EditedItemRow key={item.barcode} ref={el => { if (el) itemRefs.current.set(item.barcode, el); }} item={item} product={product} isCompleted={isCompleted} isNew={isNew} isModified={isModified} onEdit={handleEditItem} onRemove={handleRemoveItem} />; })}</div></div>
                     )}
                 </div>
 
@@ -336,8 +433,44 @@ const OrderDetailModal: React.FC = () => {
                 </footer>
                 )}
             </div>
-            
-             <Suspense fallback={null}>{!!addItemModalState.product && <AddItemModal isOpen={!!addItemModalState.product} product={addItemModalState.product} existingItem={addItemModalState.existingItem} onClose={() => { setAddItemModalState({ product: null, existingItem: null, initialUnit: '개' }); }} onAdd={handleAddItem} onNextScan={handleNextScan} trigger={addItemTrigger} initialSettings={initialSettingsForModal}/>}{!!editingItem && <EditItemModal isOpen={!!editingItem} item={editingItem} onClose={() => setEditingItem(null)} onSave={(updatedDetails) => { if (editingItem) { updateItem(editingItem.barcode, updatedDetails); } setEditingItem(null); }}/>}{isMemoModalOpen && <MemoModal isOpen={isMemoModalOpen} onClose={() => setIsMemoModalOpen(false)} onSave={(newMemo) => { setMemo(newMemo); setIsMemoModalOpen(false); }} initialMemo={memo}/>}</Suspense>
+
+            {/* --- Modals --- */}
+            <AddItemModal
+                isOpen={addItemModal.isOpen}
+                product={addItemModal.product}
+                existingItem={addItemModal.existingItem}
+                onClose={() => setAddItemModal(prev => ({ ...prev, isOpen: false }))}
+                onAdd={(details) => {
+                    if (addItemModal.product) {
+                        addOrUpdateItem(addItemModal.product, details);
+                        setQuickAddedBarcode(addItemModal.product.barcode);
+                    }
+                }}
+                onNextScan={() => {
+                    setAddItemModal(prev => ({ ...prev, isOpen: false }));
+                    openScanner('modal', handleScanSuccess, true);
+                }}
+                trigger={addItemModal.trigger}
+                initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
+            />
+
+            <EditItemModal
+                isOpen={editItemModal.isOpen}
+                item={editItemModal.item}
+                onClose={() => setEditItemModal({ isOpen: false, item: null })}
+                onSave={(updatedDetails) => {
+                    if (editItemModal.item) {
+                        updateItem(editItemModal.item.barcode, updatedDetails);
+                    }
+                }}
+            />
+
+            <MemoModal
+                isOpen={isMemoModalOpen}
+                initialMemo={memo}
+                onClose={() => setIsMemoModalOpen(false)}
+                onSave={(newMemo) => setMemo(newMemo)}
+            />
         </div>
     );
 };

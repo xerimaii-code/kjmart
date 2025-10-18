@@ -1,9 +1,9 @@
-import React, { useState, lazy, Suspense, useRef, useEffect } from 'react';
-import { AppProvider, useUIActions, useUIState } from './context/AppContext';
+import React, { useState, lazy, Suspense, useRef, useMemo } from 'react';
+import { AppProvider, useModals, useScanner } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { Page, Order, OrderItem } from './types';
+import { Page } from './types';
 import Header from './components/Header';
-import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon } from './components/Icons';
+import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon, SearchIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS } from './services/dataService';
@@ -14,13 +14,17 @@ import { useSwipeNavigation } from './hooks/useSwipeNavigation';
 const NewOrderPage = lazy(() => import('./pages/NewOrderPage'));
 const OrderHistoryPage = lazy(() => import('./pages/OrderHistoryPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const ProductInquiryPage = lazy(() => import('./pages/ProductInquiryPage'));
 const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
 const ScannerModal = lazy(() => import('./components/ScannerModal'));
+
+const pages: Page[] = ['history', 'new-order', 'product-inquiry', 'settings'];
 
 // Page component mapping for dynamic rendering
 const pageComponents: { [key in Page]: React.LazyExoticComponent<React.FC<{ isActive: boolean }>> } = {
     'history': OrderHistoryPage,
     'new-order': NewOrderPage,
+    'product-inquiry': ProductInquiryPage,
     'settings': SettingsPage,
 };
 
@@ -84,6 +88,13 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
                     isActive={activePage === 'new-order'}
                     onClick={setActivePage}
                 />
+                 <TabButton
+                    page="product-inquiry"
+                    label="상품조회"
+                    Icon={SearchIcon}
+                    isActive={activePage === 'product-inquiry'}
+                    onClick={setActivePage}
+                />
                 <TabButton
                     page="settings"
                     label="설정"
@@ -97,24 +108,20 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 };
 // --- End Top Tab Bar Component ---
 
-
-const pages: Page[] = ['history', 'new-order', 'settings'];
-
 const AppContent: React.FC = () => {
-    const [activePage, setActivePage] = useState<Page>('new-order');
+    const [activePage, setActivePage] = useState<Page>('product-inquiry');
     const { 
-        isDetailModalOpen, 
-        isScannerOpen,
-        onScanSuccess,
+        isDetailModalOpen,
         isDeliveryModalOpen,
         orderToExport,
-     } = useUIState();
-    const { 
-        closeScanner,
-        hideAlert,
         closeDeliveryModal,
-     } = useUIActions();
+     } = useModals();
+    const { isScannerOpen, onScanSuccess, closeScanner } = useScanner();
+
     const { updateOrderStatus } = useDataActions();
+    
+    const swipeContainerRef = useRef<HTMLDivElement>(null);
+    const activePageIndex = useMemo(() => pages.indexOf(activePage), [activePage]);
 
     const handleExportConfirm = (deliveryType: '일반배송' | '택배배송') => {
         if (orderToExport) {
@@ -125,47 +132,37 @@ const AppContent: React.FC = () => {
         closeDeliveryModal();
     };
 
-    const currentPageIndex = pages.indexOf(activePage);
-    const swipeContainerRef = useRef<HTMLDivElement>(null);
-
     const handleNavigation = (targetPage: Page) => {
         if (targetPage === activePage) return;
-        hideAlert(); // Dismiss any open alerts on main navigation
         setActivePage(targetPage);
     };
 
     const { onTouchStart, onTouchMove, onTouchEnd, containerStyle } = useSwipeNavigation({
         items: pages,
-        activeIndex: currentPageIndex,
-        onNavigate: (page) => handleNavigation(page),
+        activeIndex: activePageIndex,
+        onNavigate: handleNavigation,
         containerRef: swipeContainerRef,
     });
-
 
     return (
         <div className="h-full w-full flex flex-col bg-transparent">
             <Header />
             <TopTabBar activePage={activePage} setActivePage={handleNavigation} />
-            <main
-                className="main-content flex-grow relative overflow-x-hidden"
-                onTouchStart={onTouchStart}
-                onTouchMove={onTouchMove}
-                onTouchEnd={onTouchEnd}
-            >
+            <main className="main-content flex-grow relative overflow-x-hidden">
                 <div
                     ref={swipeContainerRef}
-                    className="h-full flex absolute top-0 left-0"
-                    style={{
-                        width: `${pages.length * 100}%`,
-                        ...containerStyle
-                    }}
+                    className="h-full w-full flex"
+                    style={{ ...containerStyle, width: `${pages.length * 100}%` }}
+                    onTouchStart={onTouchStart}
+                    onTouchMove={onTouchMove}
+                    onTouchEnd={onTouchEnd}
                 >
-                    {pages.map(page => {
+                    {pages.map((page, index) => {
                         const PageComponent = pageComponents[page];
                         return (
-                            <div key={page} className="h-full" style={{ width: `${100 / pages.length}%` }}>
+                            <div key={page} className="h-full w-full flex-shrink-0" style={{ width: `${100 / pages.length}%` }}>
                                 <Suspense fallback={<PageSuspenseFallback />}>
-                                    <PageComponent isActive={activePage === page} />
+                                    <PageComponent isActive={index === activePageIndex} />
                                 </Suspense>
                             </div>
                         );

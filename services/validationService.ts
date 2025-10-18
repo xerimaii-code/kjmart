@@ -12,15 +12,22 @@ export const validateCustomer = (item: unknown): item is Customer => {
 export const validateProduct = (item: unknown): item is Product => {
     if (!isObject(item)) return false;
     const maybeProduct = item as Product;
+    // FIX: A Product has 'costPrice' and 'sellingPrice', not 'price'.
     return typeof maybeProduct.barcode === 'string' &&
            typeof maybeProduct.name === 'string' &&
-           typeof maybeProduct.price === 'number';
+           typeof maybeProduct.costPrice === 'number' &&
+           typeof maybeProduct.sellingPrice === 'number';
 };
 
 export const validateOrderItem = (item: unknown): item is OrderItem => {
-    if (!validateProduct(item)) return false;
-    const typedItem = item as OrderItem; // We know it's at least a Product
-    return typeof typedItem.quantity === 'number' &&
+    // FIX: Rewrote to correctly validate an OrderItem's properties independently.
+    // The previous logic incorrectly called validateProduct, which checks for different fields.
+    if (!isObject(item)) return false;
+    const typedItem = item as OrderItem;
+    return typeof typedItem.barcode === 'string' &&
+           typeof typedItem.name === 'string' &&
+           typeof typedItem.price === 'number' &&
+           typeof typedItem.quantity === 'number' &&
            (typedItem.unit === '개' || typedItem.unit === '박스') &&
            (typeof typedItem.memo === 'string' || typeof typedItem.memo === 'undefined');
 };

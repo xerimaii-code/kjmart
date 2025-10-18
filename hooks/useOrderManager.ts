@@ -6,8 +6,21 @@ interface UseOrderManagerProps {
     onItemsChange?: (items: OrderItem[]) => void;
 }
 
+// Helper to check if a sale is active for a product
+export const isSaleActive = (saleEndDate?: string): boolean => {
+    if (!saleEndDate) return false;
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Set to start of today for accurate date comparison
+        const endDate = new Date(saleEndDate);
+        return endDate >= today;
+    } catch {
+        return false;
+    }
+};
+
+
 // Helper to ensure item properties are consistent, preventing false change detection.
-// This creates a clean object with a defined property order and ensures optional fields are handled consistently.
 const normalizeItems = (items: OrderItem[]): OrderItem[] => {
     if (!items) return [];
     return items.map(item => ({
@@ -16,9 +29,6 @@ const normalizeItems = (items: OrderItem[]): OrderItem[] => {
         price: item.price,
         quantity: item.quantity,
         unit: item.unit,
-        // CRITICAL FIX: Ensure `memo` is always a defined string.
-        // `item.memo || ''` converts `undefined`, `null`, or `''` into a consistent `''`.
-        // This is vital for `JSON.stringify` comparisons to work reliably when checking for changes.
         memo: item.memo || '',
     }));
 };
@@ -28,11 +38,7 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
     const [items, setItems] = useState<OrderItem[]>(() => normalizeItems(initialItems));
 
     // Synchronize the internal state with the initialItems prop when it changes
-    // (e.g., when a draft is loaded or a different order is displayed).
     useEffect(() => {
-        // This effect should only run when the initialItems prop changes.
-        // The previous implementation had a bug where it also depended on the internal `items` state,
-        // which caused any new item additions to be immediately reverted.
         setItems(normalizeItems(initialItems));
     }, [initialItems]);
 
@@ -42,22 +48,10 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
             onItemsChange(items);
         }
     }, [items, onItemsChange]);
-
-    const addItem = useCallback((
-        product: Product, 
-        options: { isBoxUnit: boolean; quantity?: number; memo?: string; }
-    ) => {
-        const newUnit = options.isBoxUnit ? '박스' : '개';
-        const newItem: OrderItem = { ...product, quantity: options.quantity ?? 1, unit: newUnit, memo: options.memo };
-        
-        // Ensure state remains normalized after adding
-        setItems(prevItems => normalizeItems([...prevItems, newItem]));
-    }, []);
     
     const updateItem = useCallback((barcode: string, newValues: Partial<OrderItem>) => {
         setItems(prev => {
             const updatedItems = prev.map(item => item.barcode === barcode ? { ...item, ...newValues } : item);
-            // Ensure state remains normalized after update
             return normalizeItems(updatedItems);
         });
     }, []);
@@ -66,6 +60,9 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         setItems(prevItems => {
             const existingItemIndex = prevItems.findIndex(i => i.barcode === product.barcode);
             
+            // 발주 품목의 단가는 상품의 매입 단가(costPrice)를 사용
+            const priceToUse = product.costPrice;
+
             if (existingItemIndex > -1) {
                 const updatedItems = [...prevItems];
                 const existingItem = updatedItems[existingItemIndex];
@@ -74,11 +71,14 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
                     quantity: existingItem.quantity + details.quantity,
                     unit: details.unit,
                     memo: details.memo || '',
+                    price: priceToUse, // 가격 변동 시 업데이트
                 };
                 return normalizeItems(updatedItems);
             } else {
                 const newItem: OrderItem = {
-                    ...product,
+                    barcode: product.barcode,
+                    name: product.name,
+                    price: priceToUse,
                     quantity: details.quantity,
                     unit: details.unit,
                     memo: details.memo || '',
@@ -102,7 +102,6 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
 
     return {
         items,
-        addItem,
         updateItem,
         addOrUpdateItem,
         removeItem,
