@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
-import { useDataState, useDataActions, useUIActions } from '../context/AppContext';
+import { useDataState, useDataActions, useAlert, useScanner, useMiscUI, useModals } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
 import { RemoveIcon, DocumentTextIcon, SpinnerIcon, TrashIcon, ChatBubbleLeftIcon, PlusCircleIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
@@ -9,6 +9,7 @@ import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from '../components/SearchDropdown';
 
 const DRAFT_KEY = 'new-order-draft';
+const MAX_SEARCH_RESULTS = 50;
 
 interface NewOrderPageProps {
     isActive: boolean;
@@ -59,20 +60,48 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
 
     return (
         <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
-            <p className="font-semibold">{product.name} <span className="text-sm text-gray-500">({product.barcode})</span></p>
-            <div className="text-sm mt-1 flex flex-wrap gap-x-3 items-center">
-                <span className="text-gray-500">
-                    판가: <span className={`${(saleIsActive && hasSalePrice) ? 'line-through' : 'font-bold text-gray-800'}`}>{product.sellingPrice?.toLocaleString()}원</span>
-                </span>
-                {hasSalePrice && (
-                    <span className="text-red-600 font-bold">
-                        행사가: {product.salePrice}
-                    </span>
+            <div className="flex flex-col items-start w-full space-y-1">
+                {/* Line 1: Product Name & Sale Badge */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
+                    {saleIsActive && hasSalePrice && (
+                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
+                    )}
+                </div>
+                
+                {/* Line 2: Prices */}
+                <div className="text-sm text-gray-700 font-medium">
+                    {saleIsActive && hasSalePrice ? (
+                        <>
+                            <span>{product.costPrice?.toLocaleString()}</span>
+                            <span className="text-gray-400 mx-0.5">/</span>
+                            <span className="line-through text-gray-400">{product.sellingPrice?.toLocaleString()}</span>
+                            <span className="text-red-600 font-bold ml-1.5">{product.salePrice}</span>
+                        </>
+                    ) : (
+                        <span>
+                            {product.costPrice?.toLocaleString()}
+                            <span className="text-gray-400 mx-0.5">/</span>
+                            {product.sellingPrice?.toLocaleString()}
+                        </span>
+                    )}
+                </div>
+
+                {/* Line 3: Event Info */}
+                {(product.saleEndDate || product.supplierName) && (
+                    <div className="text-xs text-gray-500">
+                        {product.saleEndDate && (
+                            <span className={saleIsActive ? 'font-bold text-blue-600' : ''}>
+                                행사종료: {product.saleEndDate}
+                            </span>
+                        )}
+                        {product.saleEndDate && product.supplierName && <span className="mx-1">|</span>}
+                        {product.supplierName && (
+                            <span>거래처: {product.supplierName}</span>
+                        )}
+                    </div>
                 )}
             </div>
-            {saleIsActive && hasSalePrice && product.saleEndDate && (
-                 <p className="text-xs text-blue-600 font-semibold mt-1">행사 종료: ~{product.saleEndDate}</p>
-            )}
         </div>
     );
 };
@@ -81,17 +110,10 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
 const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const { customers, products } = useDataState();
     const { addOrder } = useDataActions();
-    const { 
-        showAlert, 
-        openScanner, 
-        setLastModifiedOrderId, 
-        openAddItemModal, 
-        openEditItemModal, 
-        openMemoModal,
-        closeAddItemModal,
-        closeEditItemModal,
-        closeMemoModal 
-    } = useUIActions();
+    const { showAlert } = useAlert();
+    const { openScanner } = useScanner();
+    const { setLastModifiedOrderId } = useMiscUI();
+    const { openAddItemModal, openEditItemModal, openMemoModal } = useModals();
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
@@ -146,17 +168,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     const debouncedDraftData = useDebounce(draftDataToSave, 500);
 
-    // This effect ensures that if the user swipes away from the New Order page,
-    // any modals opened from this page are closed, preventing them from
-    // "leaking" onto other pages.
-    useEffect(() => {
-        if (!isActive) {
-            closeAddItemModal();
-            closeEditItemModal();
-            closeMemoModal();
-        }
-    }, [isActive, closeAddItemModal, closeEditItemModal, closeMemoModal]);
-
     useEffect(() => {
         getDraft<NewOrderDraft>(DRAFT_KEY).then(draft => {
             if (draft) {
@@ -181,9 +192,11 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         if (isDraftLoading) return;
 
         if (debouncedDraftData.selectedCustomer || debouncedDraftData.items.length > 0 || debouncedDraftData.memo) {
-            saveDraft(DRAFT_KEY, debouncedDraftData as NewOrderDraft);
+            saveDraft(DRAFT_KEY, debouncedDraftData as NewOrderDraft)
+                .catch(err => console.warn("Could not save new order draft:", err));
         } else {
-            deleteDraft(DRAFT_KEY);
+            deleteDraft(DRAFT_KEY)
+                .catch(err => console.warn("Could not delete new order draft:", err));
         }
     }, [debouncedDraftData, isDraftLoading]);
 
@@ -205,7 +218,17 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const filteredProducts = useMemo(() => {
         const searchTerm = debouncedProductSearch.trim().toLowerCase();
         if (!searchTerm) return [];
-        return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm));
+        
+        const results: Product[] = [];
+        for (const p of products) {
+            if (p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm)) {
+                results.push(p);
+                if (results.length >= MAX_SEARCH_RESULTS) {
+                    break;
+                }
+            }
+        }
+        return results;
     }, [products, debouncedProductSearch]);
 
     const handleSelectCustomer = (customer: Customer) => {
@@ -243,7 +266,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         showAlert(
             "작성 중인 모든 내용을 초기화하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
             () => {
-                deleteDraft(DRAFT_KEY);
+                deleteDraft(DRAFT_KEY)
+                    .catch(err => console.warn("Could not delete draft on reset:", err));
                 resetOrder();
             },
             '초기화',
@@ -270,7 +294,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 memo: memo.trim(),
             });
             setLastModifiedOrderId(newOrderId);
-            await deleteDraft(DRAFT_KEY);
+            await deleteDraft(DRAFT_KEY).catch(err => console.warn("Could not delete draft after saving order:", err));
             resetOrder({ preventFocus: true });
         } catch (error) {
             console.error("Failed to save order:", error);
@@ -281,21 +305,21 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
-    const handleAddProductFromSearch = (product: Product) => {
+    const handleAddProductFromSearch = useCallback((product: Product) => {
         const existingItem = items.find(item => item.barcode === product.barcode);
         openAddItemModal({
-            product: product,
+            product,
             existingItem: existingItem || null,
-            onAdd: (details) => addOrUpdateItem(product, details),
             trigger: 'search',
-            initialSettings: { unit: isBoxUnitDefault ? '박스' : '개' },
+            onAdd: (details) => addOrUpdateItem(product, details),
+            initialSettings: { unit: isBoxUnitDefault ? '박스' : '개' }
         });
         setProductSearch('');
         setShowProductDropdown(false);
         productSearchInputRef.current?.blur();
-    };
+    }, [items, openAddItemModal, addOrUpdateItem, isBoxUnitDefault]);
 
-    const handleOpenScanner = useCallback(() => {
+    const handleOpenScanner: () => void = useCallback(() => {
         if (!isCustomerSelected) {
             showAlert("먼저 거래처를 선택해주세요.");
             return;
@@ -306,10 +330,10 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
                 openAddItemModal({
                     product,
-                    existingItem: existingItem || null,
+                    existingItem,
+                    trigger: 'scan',
                     onAdd: (details) => addOrUpdateItem(product, details),
                     onNextScan: handleOpenScanner,
-                    trigger: 'scan',
                     initialSettings: { unit: isBoxUnitDefault ? '박스' : '개' }
                 });
             } else {
@@ -331,12 +355,17 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     const handleEditItem = useCallback((item: OrderItem) => {
         openEditItemModal({
-            item,
-            onSave: (updatedDetails) => {
-                updateItem(item.barcode, updatedDetails);
-            },
+            item: item,
+            onSave: (updatedDetails) => updateItem(item.barcode, updatedDetails)
         });
     }, [openEditItemModal, updateItem]);
+
+    const handleOpenMemoModal = useCallback(() => {
+        openMemoModal({
+            initialMemo: memo,
+            onSave: (newMemo) => setMemo(newMemo),
+        });
+    }, [memo, openMemoModal]);
 
     if (isDraftLoading) {
         return (
@@ -349,8 +378,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col relative bg-transparent">
             <DraftLoadedToast show={showDraftLoadedToast} />
-            <div className="p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-20 border-b border-gray-200/80">
-                <div className="flex gap-2">
+            <div className="w-full p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-20 border-b border-gray-200/80">
+                <div className="flex gap-2 w-full max-w-2xl mx-auto">
                     <div className="flex flex-col gap-2 flex-grow">
                         <div className="relative">
                             <input
@@ -447,13 +476,13 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
             <div ref={scrollableContainerRef} className="scrollable-content p-3 pb-40">
                  {items.length === 0 ? (
-                    <div className="relative flex flex-col items-center justify-center h-full text-gray-400 mt-[-5rem]">
+                    <div className="relative flex flex-col items-center justify-center h-full text-gray-400 mt-[-5rem] max-w-2xl mx-auto">
                         <PlusCircleIcon className="w-16 h-16 text-gray-300 mb-4"/>
                         <p className="text-center text-lg font-semibold">발주 품목이 없습니다</p>
                         <p className="text-sm">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>
                     </div>
                 ) : (
-                    <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
+                    <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden max-w-2xl mx-auto">
                         <div className="divide-y divide-gray-100">
                             {items.map((item) => (
                                 <OrderItemRow 
@@ -469,35 +498,34 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             </div>
 
             <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60">
-                <div className="flex justify-between items-center font-bold mb-3 px-2">
-                    <span className="text-lg text-gray-600">총 합계:</span>
-                    <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
-                </div>
-                 <div className="flex items-stretch gap-2">
-                    <button 
-                        onClick={handleResetOrder} 
-                        className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95"
-                    >
-                        <TrashIcon className="w-5 h-5" />
-                    </button>
-                    <button 
-                        onClick={() => openMemoModal({
-                            initialMemo: memo,
-                            onSave: (newMemo) => { setMemo(newMemo); }
-                        })}
-                        disabled={items.length === 0}
-                        className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed active:scale-95"
-                    >
-                        <DocumentTextIcon className="w-5 h-5"/>
-                        <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>
-                    </button>
-                    <button 
-                        onClick={handleSaveOrder} 
-                        disabled={isSaving || items.length === 0 || !isCustomerSelected}
-                        className="flex-grow bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
-                    >
-                        {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '신규 발주 저장'}
-                    </button>
+                <div className="max-w-2xl mx-auto">
+                    <div className="flex justify-between items-center font-bold mb-3 px-2">
+                        <span className="text-lg text-gray-600">총 합계:</span>
+                        <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
+                    </div>
+                     <div className="flex items-stretch gap-2">
+                        <button 
+                            onClick={handleResetOrder} 
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95"
+                        >
+                            <TrashIcon className="w-5 h-5" />
+                        </button>
+                        <button 
+                            onClick={handleOpenMemoModal}
+                            disabled={items.length === 0}
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed active:scale-95"
+                        >
+                            <DocumentTextIcon className="w-5 h-5"/>
+                            <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>
+                        </button>
+                        <button 
+                            onClick={handleSaveOrder} 
+                            disabled={isSaving || items.length === 0 || !isCustomerSelected}
+                            className="flex-grow bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
+                        >
+                            {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '신규 발주 저장'}
+                        </button>
+                    </div>
                 </div>
             </footer>
         </div>
