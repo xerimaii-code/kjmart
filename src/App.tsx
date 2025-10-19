@@ -1,25 +1,25 @@
 import React, { useState, lazy, Suspense, useRef, useMemo } from 'react';
-import { AppProvider, useModals, useScanner } from '../context/AppContext';
-import { AuthProvider, useAuth } from '../context/AuthContext';
-import { Page } from '../types';
-import Header from '../components/Header';
-import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon, SearchIcon } from '../components/Icons';
-import LoginPage from '../pages/LoginPage';
-import DeliveryTypeModal from '../components/DeliveryTypeModal';
-import { exportToXLS } from '../services/dataService';
-import { useDataActions } from '../context/AppContext';
-import { useSwipeNavigation } from '../hooks/useSwipeNavigation';
+import { AppProvider, useModals, useScanner } from './context/AppContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { Page } from './types';
+import Header from './components/Header';
+import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon, SearchIcon } from './components/Icons';
+import LoginPage from './pages/LoginPage';
+import DeliveryTypeModal from './components/DeliveryTypeModal';
+import { exportToXLS } from './services/dataService';
+import { useDataActions } from './context/AppContext';
+import { useSwipeNavigation } from './hooks/useSwipeNavigation';
 
 // Lazy load pages and heavy modals
-const NewOrderPage = lazy(() => import('../pages/NewOrderPage'));
-const OrderHistoryPage = lazy(() => import('../pages/OrderHistoryPage'));
-const SettingsPage = lazy(() => import('../pages/SettingsPage'));
-const ProductInquiryPage = lazy(() => import('../pages/ProductInquiryPage'));
-const OrderDetailModal = lazy(() => import('../components/OrderDetailModal'));
-const ScannerModal = lazy(() => import('../components/ScannerModal'));
-const AddItemModal = lazy(() => import('../components/AddItemModal'));
-const EditItemModal = lazy(() => import('../components/EditItemModal'));
-const MemoModal = lazy(() => import('../components/MemoModal'));
+const NewOrderPage = lazy(() => import('./pages/NewOrderPage'));
+const OrderHistoryPage = lazy(() => import('./pages/OrderHistoryPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const ProductInquiryPage = lazy(() => import('./pages/ProductInquiryPage'));
+const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
+const ScannerModal = lazy(() => import('./components/ScannerModal'));
+const AddItemModal = lazy(() => import('./components/AddItemModal'));
+const EditItemModal = lazy(() => import('./components/EditItemModal'));
+const MemoModal = lazy(() => import('./components/MemoModal'));
 
 const pages: Page[] = ['history', 'new-order', 'product-inquiry', 'settings'];
 

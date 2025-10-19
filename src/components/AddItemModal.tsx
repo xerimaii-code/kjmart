@@ -161,5 +161,3 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         </div>
     );
 };
-
-export default AddItemModal;
