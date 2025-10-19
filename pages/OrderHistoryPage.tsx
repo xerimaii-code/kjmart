@@ -320,7 +320,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col bg-transparent">
             <div className="fixed-filter p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
-                <div className="flex justify-between items-center gap-4">
+                <div className="flex justify-between items-center gap-4 max-w-2xl mx-auto w-full">
                     <h2 className="text-xl font-bold text-gray-800 flex-shrink-0">발주 내역</h2>
                     <div className="flex items-center gap-2 text-sm">
                         <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-36 bg-white/80" aria-label="시작일" />
@@ -341,7 +341,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                         <p className="text-sm mt-1">다른 기간을 선택하거나 신규 발주를 생성해보세요.</p>
                     </div>
                 ) : (
-                    <div className="p-3 space-y-4">
+                    <div className="p-3 space-y-4 max-w-2xl mx-auto w-full">
                         {groupedOrders.map(group => {
                             const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
                             return (

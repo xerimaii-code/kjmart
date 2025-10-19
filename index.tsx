@@ -4,17 +4,15 @@ import App from './App';
 
 // --- PWA Service Worker Registration ---
 if ('serviceWorker' in navigator) {
-  // Use the window load event to keep the page load performant and ensure the document is in a valid state.
-  window.addEventListener('load', () => {
-    const swUrl = `${window.location.origin}/service-worker.js`;
-    navigator.serviceWorker.register(swUrl)
-      .then(registration => {
-        console.log('Service Worker registered successfully with scope:', registration.scope);
-      })
-      .catch(error => {
-        console.error('Service Worker registration failed:', error);
-      });
-  });
+  // Register the service worker as soon as the main script loads.
+  // The script is deferred, so the DOM is ready. We use a relative path to ensure it loads from the correct origin.
+  navigator.serviceWorker.register('service-worker.js')
+    .then(registration => {
+      console.log('Service Worker registered successfully with scope:', registration.scope);
+    })
+    .catch(error => {
+      console.error('Service Worker registration failed:', error);
+    });
 }
 // --- End of Service Worker Registration ---
 

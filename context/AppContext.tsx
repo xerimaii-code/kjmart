@@ -11,6 +11,24 @@ import Toast from '../components/Toast';
 
 // --- TYPE DEFINITIONS ---
 
+// Create types for the data passed to open functions to avoid circular dependencies
+export interface AddItemModalPayload {
+    product: Product;
+    existingItem: OrderItem | null;
+    onAdd: (details: { quantity: number; unit: '개' | '박스'; memo?: string }) => void;
+    onNextScan?: () => void;
+    trigger: 'scan' | 'search';
+    initialSettings?: { unit: '개' | '박스' };
+}
+export interface EditItemModalPayload {
+    item: OrderItem;
+    onSave: (details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => void;
+}
+export interface MemoModalPayload {
+    initialMemo: string;
+    onSave: (memo: string) => void;
+}
+
 interface SyncSettings {
     fileId: string;
     fileName: string;
@@ -57,6 +75,17 @@ interface ModalContextValue {
     orderToExport: Order | null;
     openDeliveryModal: (order: Order) => void;
     closeDeliveryModal: () => void;
+
+    // New modal properties
+    addItemModalProps: AddItemModalPayload | null;
+    editItemModalProps: EditItemModalPayload | null;
+    memoModalProps: MemoModalPayload | null;
+    openAddItemModal: (data: AddItemModalPayload) => void;
+    closeAddItemModal: () => void;
+    openEditItemModal: (data: EditItemModalPayload) => void;
+    closeEditItemModal: () => void;
+    openMemoModal: (data: MemoModalPayload) => void;
+    closeMemoModal: () => void;
 }
 
 // Scanner Context
@@ -124,6 +153,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [lastModifiedOrderId, setLastModifiedOrderId] = useState<number | null>(null);
     const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
     const [orderToExport, setOrderToExport] = useState<Order | null>(null);
+    const [addItemModalProps, setAddItemModalProps] = useState<AddItemModalPayload | null>(null);
+    const [editItemModalProps, setEditItemModalProps] = useState<EditItemModalPayload | null>(null);
+    const [memoModalProps, setMemoModalProps] = useState<MemoModalPayload | null>(null);
 
     // Alert Actions
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
@@ -154,7 +186,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isDeliveryModalOpen, orderToExport,
         openDeliveryModal: (order: Order) => { setOrderToExport(order); setIsDeliveryModalOpen(true); },
         closeDeliveryModal: () => { setIsDeliveryModalOpen(false); setOrderToExport(null); },
-    }), [isDetailModalOpen, editingOrder, isDeliveryModalOpen, orderToExport]);
+
+        addItemModalProps,
+        editItemModalProps,
+        memoModalProps,
+        openAddItemModal: (data) => setAddItemModalProps(data),
+        closeAddItemModal: () => setAddItemModalProps(null),
+        openEditItemModal: (data) => setEditItemModalProps(data),
+        closeEditItemModal: () => setEditItemModalProps(null),
+        openMemoModal: (data) => setMemoModalProps(data),
+        closeMemoModal: () => setMemoModalProps(null),
+    }), [isDetailModalOpen, editingOrder, isDeliveryModalOpen, orderToExport, addItemModalProps, editItemModalProps, memoModalProps]);
     
     const scannerContextValue = useMemo(() => ({
         isScannerOpen, scannerContext, isContinuousScan, onScanSuccess,

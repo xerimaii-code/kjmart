@@ -1,28 +1,33 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
-import { Order, OrderItem, Product, EditedOrderDraft } from '../types';
-import { RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon } from './Icons';
-import ToggleSwitch from '../components/ToggleSwitch';
-import { isSaleActive } from '../hooks/useOrderManager';
+import { OrderItem, Product, EditedOrderDraft } from '../types';
+import { RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon, BarcodeScannerIcon, SearchIcon, PencilSquareIcon, DocumentTextIcon, TrashIcon } from './Icons';
+import ToggleSwitch from './ToggleSwitch';
+import { isSaleActive, useOrderManager } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from './SearchDropdown';
-import AddItemModal from './AddItemModal';
-import EditItemModal from './EditItemModal';
-import MemoModal from './MemoModal';
 
-const normalizeItemsForComparison = (items: OrderItem[]): OrderItem[] => {
+const MAX_SEARCH_RESULTS = 50;
+
+// Helper to create a consistent, comparable representation of an item list.
+const normalizeItemsForComparison = (items: OrderItem[]): Omit<OrderItem, 'price'>[] => {
     if (!items) return [];
-    return items.map(({ barcode, name, price, quantity, unit, memo }) => ({
-        barcode, name, price, quantity, unit, memo: memo || '',
-    }));
+    // Price is excluded from comparison because it can be updated from product data
+    // but we only care about user-made changes (quantity, unit, memo).
+    return items.map(({ barcode, name, quantity, unit, memo }) => ({
+        barcode, name, quantity, unit, memo: memo || '',
+    })).sort((a, b) => a.barcode.localeCompare(b.barcode));
 };
+
+
+// --- Sub-components for the Modal ---
 
 const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; product: Product | undefined; isCompleted: boolean, isNew: boolean, isModified: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, product, isCompleted, isNew, isModified, onEdit, onRemove }, ref) => {
     return (
         <div
             ref={ref}
-            className={`flex items-center p-3.5 space-x-3 transition-all duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : ''} ${isNew ? 'animate-fade-in-down' : ''}`}
+            className={`flex items-center p-3.5 space-x-3 transition-colors duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
             onClick={() => !isCompleted && onEdit(item)}
         >
             <div className="flex-grow min-w-0 pr-1">
@@ -31,35 +36,25 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
                     {isModified && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5 tracking-wide">수정</span>}
                     <span>{item.name}</span>
                 </p>
-                
-                {product ? (
+                 {product ? (
                     <div className="text-sm text-gray-600 mt-1.5">
-                        <div>
-                            <span>
-                                (<b className="font-black text-gray-900">{item.price.toLocaleString()}</b>
-                                /
-                                {product.sellingPrice.toLocaleString()})
+                        <span>
+                            (<b className="font-bold text-gray-800">{item.price.toLocaleString()}</b>
+                            {' / '}
+                            <span className={isSaleActive(product.saleEndDate) && !!product.salePrice ? 'text-gray-500 line-through' : ''}>{product.sellingPrice.toLocaleString()}</span>)
+                        </span>
+                        {product.salePrice && (
+                            <span className={`ml-1.5 font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-500'}`}>
+                                ({product.salePrice})
                             </span>
-                            {product.salePrice && (
-                                <span className={`ml-1.5 font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-500'}`}>
-                                    / ({product.salePrice})
-                                </span>
-                            )}
-                        </div>
-                        {product.salePrice && product.saleEndDate && (
-                             <div className={`mt-1 text-xs font-semibold ${isSaleActive(product.saleEndDate) ? 'text-blue-600' : 'text-gray-500'}`}>
-                                행사종료: {product.saleEndDate}
-                            </div>
                         )}
                     </div>
                 ) : (
-                    <p className="text-sm text-gray-500 mt-1">
-                        발주단가: <span className="font-bold text-gray-800">{item.price.toLocaleString()}원</span>
-                    </p>
+                    <p className="text-sm text-gray-500 mt-1.5 font-bold text-blue-600">발주단가: {item.price.toLocaleString()}원</p>
                 )}
 
                 {item.memo && (
-                    <p className="text-xs text-blue-600 flex items-start gap-1.5 mt-1">
+                    <p className="text-xs text-blue-600 flex items-start gap-1.5 mt-1.5">
                         <ChatBubbleLeftIcon className="w-4 h-4 flex-shrink-0 mt-px" />
                         <span className="break-all">{item.memo}</span>
                     </p>
@@ -68,8 +63,8 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
             <div className="flex items-center space-x-2 flex-shrink-0">
                 <span className="w-14 text-center text-gray-800 font-bold text-lg select-none">{item.quantity}</span>
                 <span className="w-10 text-center text-gray-600 font-medium select-none text-sm">{item.unit}</span>
-                {!isCompleted && (
-                     <button onClick={(e) => onRemove(e, item)} className="text-gray-400 hover:text-rose-500 p-1.5 rounded-full hover:bg-rose-50 z-10 relative transition-colors">
+                 {!isCompleted && (
+                    <button onClick={(e) => onRemove(e, item)} className="text-gray-400 hover:text-rose-500 p-1.5 rounded-full hover:bg-rose-50 z-10 relative transition-colors">
                         <RemoveIcon className="w-5 h-5"/>
                     </button>
                 )}
@@ -85,392 +80,329 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
 
     return (
         <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
-            <p className="font-semibold">{product.name} <span className="text-sm text-gray-500">({product.barcode})</span></p>
-            <div className="text-sm mt-1 flex flex-wrap gap-x-3 items-center">
-                <span className="text-gray-500">
-                    판가: <span className={`${(saleIsActive && hasSalePrice) ? 'line-through' : 'font-bold text-gray-800'}`}>{product.sellingPrice?.toLocaleString()}원</span>
-                </span>
-                {hasSalePrice && (
-                    <span className="text-red-600 font-bold">
-                        행사가: {product.salePrice}
-                    </span>
+            <div className="flex flex-col items-start w-full space-y-1">
+                {/* Line 1: Product Name & Sale Badge */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
+                    {saleIsActive && hasSalePrice && (
+                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
+                    )}
+                </div>
+                
+                {/* Line 2: Prices */}
+                <div className="text-sm text-gray-700 font-medium">
+                    {saleIsActive && hasSalePrice ? (
+                        <>
+                            <span>{product.costPrice?.toLocaleString()}</span>
+                            <span className="text-gray-400 mx-0.5">/</span>
+                            <span className="line-through text-gray-400">{product.sellingPrice?.toLocaleString()}</span>
+                            <span className="text-red-600 font-bold ml-1.5">{product.salePrice}</span>
+                        </>
+                    ) : (
+                        <span>
+                            {product.costPrice?.toLocaleString()}
+                            <span className="text-gray-400 mx-0.5">/</span>
+                            {product.sellingPrice?.toLocaleString()}
+                        </span>
+                    )}
+                </div>
+
+                {/* Line 3: Event Info */}
+                {(product.saleEndDate || product.supplierName) && (
+                    <div className="text-xs text-gray-500">
+                        {product.saleEndDate && (
+                            <span className={saleIsActive ? 'font-bold text-blue-600' : ''}>
+                                행사종료: {product.saleEndDate}
+                            </span>
+                        )}
+                        {product.saleEndDate && product.supplierName && <span className="mx-1">|</span>}
+                        {product.supplierName && (
+                            <span>거래처: {product.supplierName}</span>
+                        )}
+                    </div>
                 )}
             </div>
-            {saleIsActive && hasSalePrice && product.saleEndDate && (
-                 <p className="text-xs text-blue-600 font-semibold mt-1">행사 종료: ~{product.saleEndDate}</p>
-            )}
         </div>
     );
 };
 
+// --- Main Modal Component ---
 
 const OrderDetailModal: React.FC = () => {
     const { products } = useDataState();
     const { updateOrder } = useDataActions();
-    const { editingOrder: order, closeDetailModal } = useModals();
-    const { showAlert } = useAlert();
+    const { showAlert, showToast } = useAlert();
+    const { editingOrder: originalOrder, closeDetailModal, openAddItemModal, openEditItemModal, openMemoModal } = useModals();
     const { openScanner } = useScanner();
     const { setLastModifiedOrderId } = useMiscUI();
-    
-    const isCompleted = useMemo(() => !!order?.completedAt || !!order?.completionDetails, [order]);
-    
-    // --- Local State Management ---
-    const [editedItems, setEditedItems] = useState<OrderItem[]>([]);
+
+    const [isRendered, setIsRendered] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [draftLoaded, setDraftLoaded] = useState(false);
+
     const [memo, setMemo] = useState('');
-    const [isDraftLoading, setIsDraftLoading] = useState(true);
-    
     const [productSearch, setProductSearch] = useState('');
     const debouncedProductSearch = useDebounce(productSearch, 200);
-    const [showDropdown, setShowDropdown] = useState(false);
+    const [showProductDropdown, setShowProductDropdown] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
-    
-    const [quickAddedBarcode, setQuickAddedBarcode] = useState<string | null>(null);
-    const [isMemoSectionOpen, setIsMemoSectionOpen] = useState(false);
-    
-    const [isRendered, setIsRendered] = useState(false);
 
-    // --- Local Modal State ---
-    const [addItemModal, setAddItemModal] = useState<{ isOpen: boolean; product: Product | null; existingItem: OrderItem | null; trigger: 'scan' | 'search' }>({ isOpen: false, product: null, existingItem: null, trigger: 'search' });
-    const [editItemModal, setEditItemModal] = useState<{ isOpen: boolean; item: OrderItem | null }>({ isOpen: false, item: null });
-    const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
-    
-    // --- Refs ---
+    const productSearchInputRef = useRef<HTMLInputElement>(null);
     const productSearchBlurTimeout = useRef<number | null>(null);
-    const productSearchInputRef = useRef<HTMLInputElement | null>(null);
-    const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
-    const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
-    const lastItemCount = useRef(0);
+    const itemsRef = useRef<OrderItem[]>([]);
 
-    const productsMap = useMemo(() => {
-        const map = new Map<string, Product>();
-        products.forEach(p => map.set(p.barcode, p));
-        return map;
-    }, [products]);
+    const { items, addOrUpdateItem, updateItem, removeItem, resetItems, totalAmount } = useOrderManager({
+        initialItems: originalOrder?.items || [],
+    });
+    useEffect(() => { itemsRef.current = items; }, [items]);
 
+    const isCompleted = useMemo(() => !!originalOrder?.completedAt || !!originalOrder?.completionDetails, [originalOrder]);
+    
+    // --- Draft Logic ---
+    useEffect(() => {
+        if (!originalOrder) return;
+        setMemo(originalOrder.memo || '');
+        resetItems(originalOrder.items || []);
+
+        getDraft<EditedOrderDraft>(originalOrder.id).then(draft => {
+            if (draft) {
+                showAlert(
+                    "임시 저장된 수정 내역이 있습니다.\n불러오시겠습니까?",
+                    () => { resetItems(draft.items); setMemo(draft.memo); setDraftLoaded(true); },
+                    '불러오기',
+                    'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500',
+                    () => { deleteDraft(originalOrder.id); setDraftLoaded(true); }
+                );
+            } else {
+                setDraftLoaded(true);
+            }
+        });
+    }, [originalOrder, resetItems, showAlert]);
+    
+    const originalItemsMemo = useMemo(() => normalizeItemsForComparison(originalOrder?.items || []), [originalOrder]);
+    const currentItemsMemo = useMemo(() => normalizeItemsForComparison(items), [items]);
+    const originalMemo = useMemo(() => originalOrder?.memo || '', [originalOrder]);
+    
+    const hasChanges = useMemo(() => {
+        if (!originalOrder) return false;
+        return JSON.stringify(originalItemsMemo) !== JSON.stringify(currentItemsMemo) || originalMemo !== memo;
+    }, [originalOrder, originalItemsMemo, currentItemsMemo, originalMemo, memo]);
+
+    const draftDataToSave = useMemo(() => ({ items, memo }), [items, memo]);
+    const debouncedDraftData = useDebounce(draftDataToSave, 500);
+
+    useEffect(() => {
+        if (!originalOrder || !draftLoaded || !hasChanges) return;
+        saveDraft(originalOrder.id, debouncedDraftData as EditedOrderDraft);
+    }, [debouncedDraftData, originalOrder, draftLoaded, hasChanges]);
+
+
+    // --- UI Effects ---
     useEffect(() => {
         const timer = setTimeout(() => setIsRendered(true), 10);
         return () => clearTimeout(timer);
     }, []);
 
-    // --- Data Initialization and Draft Loading ---
-    useEffect(() => {
-        if (order) {
-            setIsDraftLoading(true);
-            getDraft<EditedOrderDraft>(order.id)
-                .then(draft => {
-                    if (draft) {
-                        setEditedItems(draft.items);
-                        setMemo(draft.memo);
-                    } else {
-                        setEditedItems(order.items || []);
-                        setMemo(order.memo || '');
-                    }
-                })
-                .catch(err => {
-                    console.error(`Failed to load draft for order ${order.id}:`, err);
-                    setEditedItems(order.items || []);
-                    setMemo(order.memo || '');
-                })
-                .finally(() => setIsDraftLoading(false));
-        }
-    }, [order]);
-
-
-    // --- Item Management Logic ---
-    const totalAmount = useMemo(() => Math.floor(editedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0)), [editedItems]);
-
-    const addOrUpdateItem = useCallback((product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
-        setEditedItems(prevItems => {
-            const existingItemIndex = prevItems.findIndex(i => i.barcode === product.barcode);
-            const priceToUse = product.costPrice;
-
-            if (existingItemIndex > -1) {
-                const updatedItems = [...prevItems];
-                const existingItem = updatedItems[existingItemIndex];
-                updatedItems[existingItemIndex] = {
-                    ...existingItem,
-                    quantity: existingItem.quantity + details.quantity,
-                    unit: details.unit,
-                    memo: details.memo || '',
-                    price: priceToUse,
-                };
-                return updatedItems;
-            } else {
-                const newItem: OrderItem = {
-                    barcode: product.barcode,
-                    name: product.name,
-                    price: priceToUse,
-                    quantity: details.quantity,
-                    unit: details.unit,
-                    memo: details.memo || '',
-                };
-                return [...prevItems, newItem];
-            }
-        });
-    }, []);
-
-    const updateItem = useCallback((barcode: string, newValues: Partial<OrderItem>) => {
-        setEditedItems(prev => prev.map(item => item.barcode === barcode ? { ...item, ...newValues } : item));
-    }, []);
-
-    const removeItem = useCallback((barcode: string) => {
-        setEditedItems(prev => prev.filter(item => item.barcode !== barcode));
-    }, []);
-
-    // --- Draft Saving Logic ---
-    const serverStateJSON = useMemo(() => {
-        if (!order) return '';
-        return JSON.stringify({ items: normalizeItemsForComparison(order.items), memo: order.memo || '' });
-    }, [order]);
-    
-    const hasChanges = useMemo(() => {
-        if (isDraftLoading || !serverStateJSON) return false;
-        return JSON.stringify({ items: normalizeItemsForComparison(editedItems), memo }) !== serverStateJSON;
-    }, [editedItems, memo, serverStateJSON, isDraftLoading]);
-
-    const debouncedDraftData = useDebounce({ items: editedItems, memo }, 500);
-
-    useEffect(() => {
-        if (isDraftLoading || !order) return;
-        if (JSON.stringify({ items: normalizeItemsForComparison(debouncedDraftData.items), memo: debouncedDraftData.memo }) !== serverStateJSON) {
-            saveDraft(order.id, debouncedDraftData as EditedOrderDraft);
-        } else {
-            deleteDraft(order.id);
-        }
-    }, [debouncedDraftData, serverStateJSON, order, isDraftLoading]);
-    
-    const handleAnimatedClose = useCallback(() => {
-        setIsRendered(false);
-        setTimeout(closeDetailModal, 500);
-    }, [closeDetailModal]);
-    
-    const handleCancelAndDiscard = () => {
+    // --- Handlers ---
+    const handleClose = useCallback(() => {
         if (hasChanges) {
-             showAlert(
-                "수정사항을 저장하지 않고 취소하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
-                () => { if (order) deleteDraft(order.id); handleAnimatedClose(); },
-                '변경사항 폐기', 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+            showAlert(
+                "저장되지 않은 변경사항이 있습니다.\n변경사항은 임시 저장됩니다. 정말 닫으시겠습니까?",
+                closeDetailModal,
+                "닫기"
             );
         } else {
-            handleAnimatedClose();
+            closeDetailModal();
+        }
+    }, [hasChanges, showAlert, closeDetailModal]);
+    
+    const handleSave = async () => {
+        if (!originalOrder || !hasChanges) return;
+        setIsSaving(true);
+        try {
+            // FIX: The `updateOrder` action from the context expects a full Order object including the updated items.
+            const updatedOrderData = { ...originalOrder, items, itemCount: items.length, total: totalAmount, memo };
+            await updateOrder(updatedOrderData);
+            await deleteDraft(originalOrder.id);
+            setLastModifiedOrderId(originalOrder.id);
+            showToast('발주 내역이 성공적으로 수정되었습니다.', 'success');
+            closeDetailModal();
+        } catch (err) {
+            showAlert('저장에 실패했습니다.');
+        } finally {
+            setIsSaving(false);
         }
     };
-
-    useEffect(() => {
-        if (order) setIsMemoSectionOpen(false);
-    }, [order]);
     
-    useEffect(() => {
-        const handlePopState = (event: PopStateEvent) => {
-            if (order !== null) { event.preventDefault(); handleAnimatedClose(); }
-        };
-        window.history.pushState({ modal: 'open' }, '');
-        window.addEventListener('popstate', handlePopState);
-        return () => {
-            window.removeEventListener('popstate', handlePopState);
-            if (window.history.state && window.history.state.modal === 'open') {
-                window.history.back();
+    const handleAddProductFromSearch = useCallback((product: Product) => {
+        const existingItem = items.find(item => item.barcode === product.barcode);
+        openAddItemModal({
+            product,
+            existingItem: existingItem || null,
+            trigger: 'search',
+            onAdd: (details) => addOrUpdateItem(product, details),
+            initialSettings: { unit: isBoxUnitDefault ? '박스' : '개' }
+        });
+        setProductSearch('');
+        setShowProductDropdown(false);
+        productSearchInputRef.current?.blur();
+    }, [items, openAddItemModal, addOrUpdateItem, isBoxUnitDefault]);
+    
+    const handleOpenScanner = useCallback(() => {
+        const onScan = (barcode: string) => {
+            const product = products.find(p => p.barcode === barcode);
+            if (product) {
+                const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
+                openAddItemModal({
+                    product,
+                    existingItem,
+                    trigger: 'scan',
+                    onAdd: (details) => addOrUpdateItem(product, details),
+                    onNextScan: handleOpenScanner,
+                    initialSettings: { unit: isBoxUnitDefault ? '박스' : '개' }
+                });
+            } else {
+                showAlert("등록되지 않은 바코드입니다.");
             }
         };
-    }, [order, handleAnimatedClose]);
+        openScanner('modal', onScan, true);
+    }, [openScanner, products, itemsRef, openAddItemModal, addOrUpdateItem, isBoxUnitDefault]);
 
-    const handleScanSuccess = useCallback((barcode: string) => {
-        const product = products.find(p => p.barcode === barcode);
-        if (product) {
-            const existingItem = editedItems.find(item => item.barcode === product.barcode);
-            const originalItem = order?.items?.find(item => item.barcode === product.barcode);
-            let unitForModal: '개' | '박스' = isBoxUnitDefault ? '박스' : '개';
-            if (existingItem) unitForModal = existingItem.unit;
-            else if (originalItem) unitForModal = originalItem.unit;
-            
-            setAddItemModal({ isOpen: true, product, existingItem, trigger: 'scan' });
-        } else {
-            showAlert("등록되지 않은 바코드입니다.");
-        }
-    }, [products, showAlert, order, isBoxUnitDefault, editedItems]);
+    const handleEditItem = useCallback((item: OrderItem) => {
+        openEditItemModal({
+            item: item,
+            onSave: (updatedDetails) => updateItem(item.barcode, updatedDetails)
+        });
+    }, [openEditItemModal, updateItem]);
+    
+    const handleRemoveItem = useCallback((e: React.MouseEvent, item: OrderItem) => {
+        e.stopPropagation();
+        showAlert(
+            `'${item.name}' 품목을 삭제하시겠습니까?`,
+            () => removeItem(item.barcode),
+            '삭제',
+            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+        );
+    }, [showAlert, removeItem]);
 
+    const handleOpenMemoModal = useCallback(() => {
+        openMemoModal({ initialMemo: memo, onSave: (newMemo) => setMemo(newMemo) });
+    }, [memo, openMemoModal]);
+    
+    // --- Derived Data for Rendering ---
     const filteredProducts = useMemo(() => {
         const searchTerm = debouncedProductSearch.trim().toLowerCase();
         if (!searchTerm) return [];
-        return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm));
+        return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm)).slice(0, MAX_SEARCH_RESULTS);
     }, [products, debouncedProductSearch]);
 
-    const handleProductSelect = (product: Product) => {
-        const existingItem = editedItems.find(item => item.barcode === product.barcode);
-        const originalItem = order?.items?.find(item => item.barcode === product.barcode);
-        let unitForModal: '개' | '박스' = isBoxUnitDefault ? '박스' : '개';
-        if (existingItem) unitForModal = existingItem.unit;
-        else if (originalItem) unitForModal = originalItem.unit;
-        
-        setAddItemModal({ isOpen: true, product, existingItem, trigger: 'search' });
-        setProductSearch('');
-        setShowDropdown(false);
-        productSearchInputRef.current?.blur();
-    };
+    const { newItems, modifiedItems } = useMemo(() => {
+        const originalBarcodes = new Set(originalItemsMemo.map(i => i.barcode));
+        const originalItemMap = new Map(originalItemsMemo.map(i => [i.barcode, JSON.stringify(i)]));
+        const newItemsSet = new Set<string>();
+        const modifiedItemsSet = new Set<string>();
 
-    const handleSave = () => {
-        if (!order) return;
-        if (editedItems.length === 0) {
-            showAlert("품목이 없습니다. 발주를 저장할 수 없습니다.");
-            return;
-        }
-        const orderToUpdate: Order = { ...order, items: editedItems, total: totalAmount, memo: memo.trim(), date: new Date().toISOString() };
-        updateOrder(orderToUpdate);
-        setLastModifiedOrderId(order.id);
-        deleteDraft(order.id);
-        handleAnimatedClose();
-        showAlert("발주 내역이 수정되었습니다.");
-    };
+        items.forEach(item => {
+            const normalizedCurrentItem = normalizeItemsForComparison([item])[0];
+            if (!originalBarcodes.has(item.barcode)) {
+                newItemsSet.add(item.barcode);
+            } else if (originalItemMap.get(item.barcode) !== JSON.stringify(normalizedCurrentItem)) {
+                modifiedItemsSet.add(item.barcode);
+            }
+        });
+        return { newItems: newItemsSet, modifiedItems: modifiedItemsSet };
+    }, [items, originalItemsMemo]);
 
-    useEffect(() => {
-        if (scrollableContainerRef.current && quickAddedBarcode) {
-            const itemElement = itemRefs.current.get(quickAddedBarcode);
-            if (itemElement) itemElement.scrollIntoView({ behavior: 'auto', block: 'center' });
-            setQuickAddedBarcode(null);
-        } else if (scrollableContainerRef.current && editedItems.length > lastItemCount.current) {
-            const timer = setTimeout(() => {
-                if (scrollableContainerRef.current) scrollableContainerRef.current.scrollTo({ top: scrollableContainerRef.current.scrollHeight, behavior: 'auto' });
-            }, 50);
-            return () => clearTimeout(timer);
-        }
-        lastItemCount.current = editedItems.length;
-    }, [editedItems, quickAddedBarcode]);
-    
-    const handleRemoveItem = useCallback((e: React.MouseEvent, itemToRemove: OrderItem) => {
-        e.stopPropagation();
-        showAlert(`'${itemToRemove.name}' 품목을 삭제하시겠습니까?`, () => removeItem(itemToRemove.barcode), '삭제', 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500');
-    }, [showAlert, removeItem]);
-
-    const handleEditItem = useCallback((item: OrderItem) => {
-        setEditItemModal({ isOpen: true, item: item });
-    }, []);
-
-    if (!order) return null;
-
-    const getCompletionDisplay = () => {
-        const details = order.completionDetails;
-        let icon: React.ReactNode = null, textClass = '', bgClass = '', iconClass = '';
-        if (details?.type === 'sms') { icon = <SmsIcon className="w-5 h-5 mr-2" />; textClass = 'text-green-800'; bgClass = 'bg-green-100/70'; iconClass = 'text-green-600'; }
-        else if (details?.type === 'xls') { icon = <XlsIcon className="w-5 h-5 mr-2" />; textClass = 'text-blue-800'; bgClass = 'bg-blue-100/70'; iconClass = 'text-blue-600'; }
-        else if (order.completedAt) { icon = <CheckCircleIcon className="w-5 h-5 mr-2" />; textClass = 'text-gray-800'; bgClass = 'bg-gray-100'; iconClass = 'text-gray-600'; }
-        if (!icon) return null;
-        return <div className={`mt-3 p-2.5 rounded-lg flex items-center justify-center text-sm font-semibold ${bgClass} ${textClass}`}><span className={iconClass}>{icon}</span><span>완료된 발주 (내보내기 완료)</span></div>;
-    };
-
-    const originalItemsMap = useMemo(() => {
-        const map = new Map<string, string>();
-        if (order?.items) normalizeItemsForComparison(order.items).forEach(item => map.set(item.barcode, JSON.stringify(item)));
-        return map;
-    }, [order]);
+    if (!originalOrder) return null;
 
     return (
-        <div className={`fixed inset-0 bg-black z-30 flex items-end justify-center transition-opacity duration-400 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}>
-            <div className={`bg-gray-50 h-[95dvh] w-full max-w-3xl rounded-t-2xl flex flex-col relative ${isRendered ? 'translate-y-0' : 'translate-y-full'}`} style={{ transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
-                <header className="p-4 bg-white/80 backdrop-blur-lg border-b border-gray-200/80 flex-shrink-0 z-10">
-                    <div className="flex justify-between items-center">
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center">
-                                <h2 className="text-xl font-bold text-gray-800 truncate" title={order.customer.name}>{order.customer.name}</h2>
-                                {memo.trim() ? (
-                                    <button onClick={() => setIsMemoSectionOpen(prev => !prev)} className="ml-2 p-1.5 rounded-full hover:bg-gray-200 transition-colors flex-shrink-0" aria-expanded={isMemoSectionOpen} aria-controls="memo-section">
-                                        <ChatBubbleLeftIcon className="w-5 h-5 text-blue-600" title="메모 보기/숨기기"/>
-                                    </button>
-                                ) : (!isCompleted && (
-                                    <button onClick={() => setIsMemoModalOpen(true)} className="ml-2 text-sm font-semibold text-blue-600 hover:text-blue-800 flex-shrink-0 py-1 px-2 rounded-lg hover:bg-blue-100 transition-colors">메모 추가</button>
-                                ))}
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1 leading-tight">
-                                <p><span className="font-semibold w-[60px] inline-block">최초 발주:</span><span>{new Date(order.createdAt || order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</span></p>
-                                {order.createdAt && new Date(order.createdAt).getTime() !== new Date(order.date).getTime() && (
-                                    <p><span className="font-semibold w-[60px] inline-block">최종 수정:</span><span className="text-blue-600 font-medium">{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</span></p>
-                                )}
-                            </div>
+        <div className={`fixed inset-0 bg-black z-40 flex flex-col transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`}>
+            <div className={`w-full h-full flex flex-col bg-gray-100 transition-transform duration-300 ease-out ${isRendered ? 'translate-y-0' : 'translate-y-full'}`}>
+                <header className="bg-white/80 backdrop-blur-xl p-3 flex-shrink-0 border-b border-gray-200/80 z-20">
+                    <div className="flex items-center justify-between max-w-2xl mx-auto">
+                        <button onClick={handleClose} className="px-4 py-2 text-blue-600 font-semibold rounded-lg hover:bg-blue-100 transition">닫기</button>
+                        <div className="text-center">
+                            <h2 className="text-lg font-bold text-gray-800 truncate" title={originalOrder.customer.name}>{originalOrder.customer.name}</h2>
+                            <p className="text-xs text-gray-500">{new Date(originalOrder.date).toLocaleString('ko-KR')}</p>
                         </div>
-                        <button onClick={handleAnimatedClose} className="text-gray-500 hover:text-gray-800 transition-colors p-2 -mr-2"><svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                        <div className="w-16"></div>
                     </div>
-                    {isMemoSectionOpen && memo.trim() && (
-                        <div id="memo-section" className="mt-2 p-3 bg-gray-100 rounded-lg border border-gray-200 animate-fade-in-down">
-                            <div className="flex justify-between items-center mb-2"><h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">메모</h4>{!isCompleted && <button onClick={() => setIsMemoModalOpen(true)} className="text-sm font-semibold text-blue-600 hover:text-blue-800">수정</button>}</div>
-                            <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{memo}</p>
-                        </div>
-                    )}
-                    {isCompleted && getCompletionDisplay()}
                 </header>
-
+                
                 {!isCompleted && (
-                    <div className="p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-30 border-b border-gray-200/80">
-                        <div className="flex gap-2 items-center">
+                    <div className="p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-10 border-b border-gray-200/80">
+                         <div className="flex gap-2 w-full max-w-2xl mx-auto">
                             <div className="relative flex-grow">
-                                <input ref={productSearchInputRef} type="text" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} onFocus={() => { if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current); setShowDropdown(true); }} onBlur={() => { productSearchBlurTimeout.current = window.setTimeout(() => setShowDropdown(false), 200); }} placeholder="품목명 또는 바코드 검색" className="w-full p-3 h-12 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 pr-28 transition text-base" autoComplete="off" />
-                                <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center"><ToggleSwitch id="modal-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" /></div>
+                                <input
+                                    ref={productSearchInputRef} type="text" value={productSearch}
+                                    onChange={(e) => setProductSearch(e.target.value)}
+                                    onFocus={() => { if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current); setShowProductDropdown(true); }}
+                                    onBlur={() => { productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200); }}
+                                    placeholder="품목명 또는 바코드 검색"
+                                    className="w-full p-3 h-12 border-2 border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 text-base pr-28"
+                                />
+                                <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center">
+                                    <ToggleSwitch id="edit-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
+                                </div>
                                 <SearchDropdown<Product>
                                     items={filteredProducts}
-                                    renderItem={(p) => (
-                                        <ProductSearchResultItem product={p} onClick={handleProductSelect} />
-                                    )}
-                                    show={showDropdown}
+                                    renderItem={(p) => <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />}
+                                    show={showProductDropdown}
                                 />
                             </div>
-                            <button onClick={() => openScanner('modal', handleScanSuccess, true)} className="flex-shrink-0 h-12 w-24 bg-blue-600 text-white rounded-xl flex items-center justify-center gap-2 font-bold hover:bg-blue-700 transition active:scale-95" aria-label="바코드 스캔"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg><span className="text-sm">스캔</span></button>
+                            <button onClick={handleOpenScanner} className="h-12 w-20 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30">
+                                <BarcodeScannerIcon className="w-6 h-6" />
+                            </button>
                         </div>
                     </div>
                 )}
+
+                <main className="flex-grow overflow-y-auto">
+                    <div className="p-3 pb-40 max-w-2xl mx-auto">
+                        {isCompleted && (
+                            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded-r-lg mb-3" role="alert">
+                                <p className="font-bold">완료된 발주</p>
+                                <p className="text-sm">이 발주는 완료 처리되어 수정할 수 없습니다.</p>
+                            </div>
+                        )}
+                        <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
+                            <div className="divide-y divide-gray-100">
+                                {items.map(item => (
+                                    <EditedItemRow
+                                        key={item.barcode}
+                                        item={item}
+                                        product={products.find(p => p.barcode === item.barcode)}
+                                        isCompleted={isCompleted}
+                                        isNew={newItems.has(item.barcode)}
+                                        isModified={modifiedItems.has(item.barcode)}
+                                        onEdit={handleEditItem}
+                                        onRemove={handleRemoveItem}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </main>
                 
-                <div ref={scrollableContainerRef} className="scrollable-content p-3 pb-40 relative">
-                     {isDraftLoading ? (
-                        <div className="absolute inset-0 bg-gray-50/80 flex items-center justify-center z-20"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>
-                     ) : editedItems.length === 0 ? (
-                        <div className="relative flex flex-col items-center justify-center h-full text-gray-400 p-8 mt-[-5rem]"><DocumentIcon className="w-16 h-16 text-gray-300 mb-4" /><p className="text-center text-lg font-semibold">품목이 없습니다</p>{!isCompleted && <p className="text-sm mt-1">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>}</div>
-                    ) : (
-                        <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden"><div className="divide-y divide-gray-100">{editedItems.map((item) => { const originalItemJSON = originalItemsMap.get(item.barcode); const isNew = !originalItemJSON; const isModified = !isNew && originalItemJSON !== JSON.stringify(normalizeItemsForComparison([item])[0]); const product = productsMap.get(item.barcode); return <EditedItemRow key={item.barcode} ref={el => { if (el) itemRefs.current.set(item.barcode, el); }} item={item} product={product} isCompleted={isCompleted} isNew={isNew} isModified={isModified} onEdit={handleEditItem} onRemove={handleRemoveItem} />; })}</div></div>
-                    )}
-                </div>
-
-                {!isCompleted && (
-                 <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60">
-                    <div className="flex justify-between items-center mb-3 font-bold px-2"><span className="text-lg text-gray-600">총 합계:</span><span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span></div>
-                    <div className="flex items-stretch gap-2"><button onClick={handleCancelAndDiscard} className="px-6 py-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm active:scale-95">취소</button><button onClick={handleSave} disabled={!hasChanges || editedItems.length === 0} className="flex-grow bg-blue-600 text-white p-4 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed active:scale-95">수정사항 저장</button></div>
+                <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10">
+                    <div className="max-w-2xl mx-auto">
+                        <div className="flex justify-between items-center font-bold mb-3 px-2">
+                            <span className="text-lg text-gray-600">총 합계:</span>
+                            <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
+                        </div>
+                        {!isCompleted && (
+                             <div className="flex items-stretch gap-2">
+                                <button onClick={handleOpenMemoModal} className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95">
+                                    <DocumentTextIcon className="w-5 h-5"/>
+                                    <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>
+                                </button>
+                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="flex-grow bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95">
+                                    {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '변경사항 저장'}
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </footer>
-                )}
             </div>
-
-            {/* --- Modals --- */}
-            <AddItemModal
-                isOpen={addItemModal.isOpen}
-                product={addItemModal.product}
-                existingItem={addItemModal.existingItem}
-                onClose={() => setAddItemModal(prev => ({ ...prev, isOpen: false }))}
-                onAdd={(details) => {
-                    if (addItemModal.product) {
-                        addOrUpdateItem(addItemModal.product, details);
-                        setQuickAddedBarcode(addItemModal.product.barcode);
-                    }
-                }}
-                onNextScan={() => {
-                    setAddItemModal(prev => ({ ...prev, isOpen: false }));
-                    openScanner('modal', handleScanSuccess, true);
-                }}
-                trigger={addItemModal.trigger}
-                initialSettings={{ unit: isBoxUnitDefault ? '박스' : '개' }}
-            />
-
-            <EditItemModal
-                isOpen={editItemModal.isOpen}
-                item={editItemModal.item}
-                onClose={() => setEditItemModal({ isOpen: false, item: null })}
-                onSave={(updatedDetails) => {
-                    if (editItemModal.item) {
-                        updateItem(editItemModal.item.barcode, updatedDetails);
-                    }
-                }}
-            />
-
-            <MemoModal
-                isOpen={isMemoModalOpen}
-                initialMemo={memo}
-                onClose={() => setIsMemoModalOpen(false)}
-                onSave={(newMemo) => setMemo(newMemo)}
-            />
         </div>
     );
 };

@@ -4,48 +4,59 @@ import { Product } from '../types';
 import { SearchIcon, SpinnerIcon, BarcodeScannerIcon } from '../components/Icons';
 import { isSaleActive } from '../hooks/useOrderManager';
 
+const MAX_RESULTS_TO_DISPLAY = 100;
+
 const ProductCard: React.FC<{ product: Product, index: number }> = ({ product, index }) => {
     const saleIsActive = isSaleActive(product.saleEndDate);
     const hasSalePrice = !!product.salePrice;
 
     return (
         <div 
-            className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-md transition-shadow hover:shadow-lg animate-card-enter"
+            className="p-4 flex justify-between items-start gap-4 animate-card-enter"
             style={{ animationDelay: `${Math.min(index * 50, 500)}ms` }}
         >
-            <div className="flex justify-between items-start gap-3">
-                <div className="flex-grow min-w-0">
-                    <p className="font-bold text-gray-800 text-base break-words">{product.name}</p>
-                    <p className="text-sm text-gray-500 mt-1">{product.barcode}</p>
+            {/* Left side: Product Name, Sale Badge, and Barcode */}
+            <div className="flex-grow min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <p className="font-bold text-gray-800 text-base whitespace-pre-wrap">{product.name}</p>
+                    {saleIsActive && hasSalePrice && (
+                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
+                    )}
                 </div>
-                {product.supplierName && (
-                    <span className="flex-shrink-0 text-xs font-semibold text-white bg-gray-500 rounded-full px-2.5 py-1">{product.supplierName}</span>
-                )}
+                <p className="text-sm text-gray-500">{product.barcode}</p>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-gray-200/80 space-y-2 text-sm">
-                <div className="flex justify-between items-center">
-                    <span className="text-gray-600 font-medium">단가(매입):</span>
-                    <span className="font-bold text-gray-800">{product.costPrice?.toLocaleString()} 원</span>
+            {/* Right side: Price and Sale Info */}
+            <div className="flex-shrink-0 text-right space-y-1">
+                {/* Price Line */}
+                <div className="text-base font-medium text-gray-800">
+                    {saleIsActive && hasSalePrice ? (
+                        <>
+                            <span>{product.costPrice?.toLocaleString()}</span>
+                            <span className="text-gray-400 mx-0.5">/</span>
+                            <span className="line-through text-gray-400">{product.sellingPrice?.toLocaleString()}</span>
+                            <span className="text-red-600 font-bold ml-1.5">{product.salePrice}</span>
+                        </>
+                    ) : (
+                        <>
+                            <span>{product.costPrice?.toLocaleString()}</span>
+                            <span className="text-gray-400 mx-0.5">/</span>
+                            <span>{product.sellingPrice?.toLocaleString()}</span>
+                        </>
+                    )}
                 </div>
-                 <div className="flex justify-between items-center">
-                    <span className="text-gray-600 font-medium">판가:</span>
-                    <span className={`font-bold ${saleIsActive && hasSalePrice ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
-                        {product.sellingPrice?.toLocaleString()} 원
-                    </span>
-                </div>
-                {hasSalePrice && (
-                    <div className={`p-2 rounded-lg transition-colors ${saleIsActive ? 'bg-red-50' : 'bg-gray-100'}`}>
-                        <div className="flex justify-between items-center">
-                             <span className={`font-bold ${saleIsActive ? 'text-red-600' : 'text-gray-600'}`}>행사가:</span>
-                             <span className={`font-bold ${saleIsActive ? 'text-red-600' : 'text-gray-600'}`}>
-                                {product.salePrice}
-                            </span>
-                        </div>
+                
+                {/* Sale End Date and Supplier Line */}
+                {(product.saleEndDate || product.supplierName) && (
+                    <div className="text-xs text-gray-500">
                         {product.saleEndDate && (
-                            <p className={`text-sm text-right mt-1 font-semibold ${saleIsActive ? 'text-blue-600' : 'text-gray-500'}`}>
-                                ~ {product.saleEndDate}
-                            </p>
+                            <span className={saleIsActive ? 'font-bold text-blue-600' : ''}>
+                                행사종료: {product.saleEndDate}
+                            </span>
+                        )}
+                        {product.saleEndDate && product.supplierName && <span className="mx-1">|</span>}
+                        {product.supplierName && (
+                            <span>거래처: {product.supplierName}</span>
                         )}
                     </div>
                 )}
@@ -76,15 +87,19 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         );
     }, [openScanner]);
 
-    const filteredProducts = useMemo(() => {
+    const { displayedProducts, totalFound } = useMemo(() => {
         if (!activeSearchTerm) {
-            return [];
+            return { displayedProducts: [], totalFound: 0 };
         }
         const lowercasedFilter = activeSearchTerm.toLowerCase();
-        return products.filter(product =>
+        const filtered = products.filter(product =>
             product.name.toLowerCase().includes(lowercasedFilter) ||
             product.barcode.includes(lowercasedFilter)
         );
+        return {
+            displayedProducts: filtered.slice(0, MAX_RESULTS_TO_DISPLAY),
+            totalFound: filtered.length
+        };
     }, [activeSearchTerm, products]);
     
     const renderContent = () => {
@@ -110,7 +125,7 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             );
         }
 
-        if (filteredProducts.length === 0) {
+        if (displayedProducts.length === 0) {
             return (
                  <div className="flex items-center justify-center h-full text-center text-gray-500">
                      <div>
@@ -123,9 +138,18 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
         return (
             <div className="space-y-3">
-                {filteredProducts.map((product, index) => (
-                    <ProductCard key={product.barcode} product={product} index={index} />
-                ))}
+                <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
+                    <div className="divide-y divide-gray-200/80">
+                        {displayedProducts.map((product, index) => (
+                            <ProductCard key={product.barcode} product={product} index={index} />
+                        ))}
+                    </div>
+                </div>
+                {totalFound > MAX_RESULTS_TO_DISPLAY && (
+                    <div className="text-center text-sm font-semibold text-gray-600 bg-gray-100 p-3 rounded-lg">
+                        {totalFound.toLocaleString()}개의 검색 결과 중 첫 {MAX_RESULTS_TO_DISPLAY}개만 표시합니다.
+                    </div>
+                )}
             </div>
         );
     };
@@ -133,7 +157,7 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col bg-transparent">
             <div className="fixed-filter w-full p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80 z-10">
-                <form onSubmit={handleSearch} className="relative w-full max-w-xl mx-auto">
+                <form onSubmit={handleSearch} className="relative w-full max-w-2xl mx-auto">
                     <div className="absolute top-1/2 left-4 -translate-y-1/2 text-gray-400 pointer-events-none">
                         <SearchIcon className="w-5 h-5" />
                     </div>
@@ -164,7 +188,7 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </form>
             </div>
             <div className="scrollable-content p-3">
-                {renderContent()}
+                <div className="max-w-2xl mx-auto w-full h-full">{renderContent()}</div>
             </div>
         </div>
     );

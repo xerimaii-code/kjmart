@@ -17,6 +17,9 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const ProductInquiryPage = lazy(() => import('./pages/ProductInquiryPage'));
 const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
 const ScannerModal = lazy(() => import('./components/ScannerModal'));
+const AddItemModal = lazy(() => import('./components/AddItemModal'));
+const EditItemModal = lazy(() => import('./components/EditItemModal'));
+const MemoModal = lazy(() => import('./components/MemoModal'));
 
 const pages: Page[] = ['history', 'new-order', 'product-inquiry', 'settings'];
 
@@ -115,6 +118,12 @@ const AppContent: React.FC = () => {
         isDeliveryModalOpen,
         orderToExport,
         closeDeliveryModal,
+        addItemModalProps,
+        closeAddItemModal,
+        editItemModalProps,
+        closeEditItemModal,
+        memoModalProps,
+        closeMemoModal,
      } = useModals();
     const { isScannerOpen, onScanSuccess, closeScanner } = useScanner();
 
@@ -173,9 +182,35 @@ const AppContent: React.FC = () => {
             {/* Global Modals */}
             <Suspense fallback={null}>
               {isDetailModalOpen && <OrderDetailModal />}
-            </Suspense>
-            <Suspense fallback={null}>
-                {isScannerOpen && <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />}
+              {isScannerOpen && <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />}
+              {addItemModalProps && (
+                  <AddItemModal
+                      isOpen={true}
+                      product={addItemModalProps.product}
+                      existingItem={addItemModalProps.existingItem}
+                      onClose={closeAddItemModal}
+                      onAdd={addItemModalProps.onAdd}
+                      onNextScan={addItemModalProps.onNextScan}
+                      trigger={addItemModalProps.trigger}
+                      initialSettings={addItemModalProps.initialSettings}
+                  />
+              )}
+              {editItemModalProps && (
+                  <EditItemModal
+                      isOpen={true}
+                      item={editItemModalProps.item}
+                      onClose={closeEditItemModal}
+                      onSave={editItemModalProps.onSave}
+                  />
+              )}
+              {memoModalProps && (
+                  <MemoModal
+                      isOpen={true}
+                      initialMemo={memoModalProps.initialMemo}
+                      onClose={closeMemoModal}
+                      onSave={memoModalProps.onSave}
+                  />
+              )}
             </Suspense>
             <DeliveryTypeModal
                 isOpen={isDeliveryModalOpen}
