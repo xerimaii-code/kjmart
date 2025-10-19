@@ -52,15 +52,18 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
 
     const handleAdd = () => {
         const finalQuantity = Number(quantity);
-        if (isNaN(finalQuantity)) return;
-        onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
+        if (Number.isFinite(finalQuantity) && finalQuantity !== 0) {
+            onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
+        }
         onClose();
     };
 
     const handleAddAndScan = () => {
         const finalQuantity = Number(quantity);
-        if (isNaN(finalQuantity)) return;
-        onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
+        if (Number.isFinite(finalQuantity) && finalQuantity !== 0) {
+            onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
+        }
+        
         onClose();
         if (onNextScan) {
             onNextScan();
@@ -161,3 +164,5 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         </div>
     );
 };
+
+export default AddItemModal;
