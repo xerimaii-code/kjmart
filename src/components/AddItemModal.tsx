@@ -51,18 +51,26 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     if (!isOpen || !product) return null;
 
     const handleAdd = () => {
-        const finalQuantity = Number(quantity);
-        if (Number.isFinite(finalQuantity) && finalQuantity !== 0) {
-            onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
+        if (quantity === '' || quantity === '-') {
+            return; // Do not close, allow user to correct invalid input.
         }
+        const finalQuantity = Number(quantity);
+        if (!Number.isFinite(finalQuantity)) {
+            return; // Extra safety for invalid numbers
+        }
+        onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
         onClose();
     };
 
     const handleAddAndScan = () => {
-        const finalQuantity = Number(quantity);
-        if (Number.isFinite(finalQuantity) && finalQuantity !== 0) {
-            onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
+        if (quantity === '' || quantity === '-') {
+            return;
         }
+        const finalQuantity = Number(quantity);
+        if (!Number.isFinite(finalQuantity)) {
+            return;
+        }
+        onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
         
         onClose();
         if (onNextScan) {

@@ -49,8 +49,13 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
     if (!isOpen || !item) return null;
 
     const handleSave = () => {
+        if (quantity === '' || quantity === '-') {
+            return; // Do not close, allow user to correct invalid input.
+        }
         const finalQuantity = Number(quantity);
-        if (isNaN(finalQuantity)) return;
+        if (!Number.isFinite(finalQuantity)) {
+            return; // Extra safety for invalid numbers
+        }
         onSave({ quantity: finalQuantity, unit, memo: memo.trim() });
         onClose();
     };
