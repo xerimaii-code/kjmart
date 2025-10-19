@@ -105,25 +105,22 @@ const applyCellStyles = (worksheet: any, startRow: number, endRow: number, start
 
 // --- FILE PARSING ---
 
-const workerCode = `
-    const XLSX_CDN = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    try {
-        self.importScripts(XLSX_CDN);
-    } catch (e) {
-        self.postMessage({ success: false, error: "엑셀 라이브러리를 로드하는 데 실패했습니다." });
-        self.close();
-    }
+export const parseExcelFile = (file: File | Blob): Promise<any[]> => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            await loadScript(XLSX_CDN);
+        } catch (error) {
+            return reject(new Error("엑셀 라이브러리를 로드하는 데 실패했습니다."));
+        }
 
-    self.onmessage = (e) => {
-        const file = e.data;
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = (e) => {
             try {
-                if (!event.target?.result) {
+                if (!e.target?.result) {
                     throw new Error("파일을 읽을 수 없습니다.");
                 }
-                const data = new Uint8Array(event.target.result);
-                const workbook = self.XLSX.read(data, { type: 'array' });
+                const data = new Uint8Array(e.target.result as ArrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
                 
                 if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
                     throw new Error("엑셀 파일에서 시트를 찾을 수 없습니다.");
@@ -131,21 +128,25 @@ const workerCode = `
 
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
-                const json = self.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
                 
                 if (json.length < 2) {
-                    self.postMessage({ success: true, data: [] });
-                    return;
+                    // Empty sheet or header-only sheet
+                    return resolve([]);
                 }
                 
-                const dataRows = json.slice(1);
+                const dataRows = json.slice(1); // Exclude header
 
-                const isRowEmpty = (row) => {
-                    if (!row || row.length === 0) return true;
+                const isRowEmpty = (row: any[]): boolean => {
+                    if (!row || row.length === 0) {
+                        return true;
+                    }
+                    // A row is considered empty if every cell is null, undefined, or just whitespace.
                     return row.every(cell => cell === null || cell === undefined || String(cell).trim() === '');
                 };
 
                 let lastNonEmptyRowIndex = -1;
+                // Iterate from the end to find the last row with content
                 for (let i = dataRows.length - 1; i >= 0; i--) {
                     if (!isRowEmpty(dataRows[i])) {
                         lastNonEmptyRowIndex = i;
@@ -154,47 +155,20 @@ const workerCode = `
                 }
                 
                 if (lastNonEmptyRowIndex === -1) {
-                    self.postMessage({ success: true, data: [] });
-                    return;
+                    // All data rows were empty
+                    return resolve([]);
                 }
 
+                // Slice the array to include all rows up to the last non-empty one
                 const trimmedData = dataRows.slice(0, lastNonEmptyRowIndex + 1);
-                self.postMessage({ success: true, data: trimmedData });
+                resolve(trimmedData);
 
             } catch (error) {
-                self.postMessage({ success: false, error: error.message });
+                reject(error);
             }
         };
-        reader.onerror = () => {
-             self.postMessage({ success: false, error: "Worker에서 파일을 읽을 수 없습니다." });
-        };
+        reader.onerror = reject;
         reader.readAsArrayBuffer(file);
-    };
-`;
-
-export const parseExcelFile = (file: File | Blob): Promise<any[]> => {
-    return new Promise((resolve, reject) => {
-        const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
-        const workerUrl = URL.createObjectURL(workerBlob);
-        const worker = new Worker(workerUrl);
-
-        worker.onmessage = (e) => {
-            if (e.data.success) {
-                resolve(e.data.data);
-            } else {
-                reject(new Error(e.data.error));
-            }
-            worker.terminate();
-            URL.revokeObjectURL(workerUrl);
-        };
-
-        worker.onerror = (e) => {
-            reject(new Error(`Worker error: ${e.message}`));
-            worker.terminate();
-            URL.revokeObjectURL(workerUrl);
-        };
-
-        worker.postMessage(file);
     });
 };
 

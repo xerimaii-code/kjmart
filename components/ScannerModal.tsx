@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useDataState, useAlert, useDataActions } from '../context/AppContext';
+import { useDataState, useUIActions, useDataActions } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
 import { SpinnerIcon } from './Icons';
 import './ScannerModal.css';
@@ -31,7 +31,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const codeReaderRef = useRef<any>(null);
     const { selectedCameraId } = useDataState();
     const { setSelectedCameraId } = useDataActions();
-    const { showAlert } = useAlert();
+    const { showAlert } = useUIActions();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
 
     const playBeep = useCallback(() => {

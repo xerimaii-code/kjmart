@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
 import { initDB } from '../services/dbService';
 
-// 관리자 이메일 목록 (이곳을 수정하여 실제 관리자 이메일로 변경하세요)
-const ADMIN_EMAILS = ['xerimaii@gmail.com'];
+// 관리자 이메일 (이곳을 수정하여 실제 관리자 이메일로 변경하세요)
+const ADMIN_EMAIL = 'xerimaii@gmail.com';
 
 interface AuthContextType {
     user: User | null;
@@ -55,8 +55,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await signOut(auth);
     };
     
-    // Check if the user's email is in the admin list (case-insensitive).
-    const isAdmin = user?.email ? ADMIN_EMAILS.map(email => email.toLowerCase()).includes(user.email.toLowerCase()) : false;
+    const isAdmin = user?.email === ADMIN_EMAIL;
 
     const value = {
         user,

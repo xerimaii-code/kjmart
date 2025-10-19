@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
 import { ExitFullscreenIcon, SpinnerIcon } from './Icons';
-import { useSyncState } from '../context/AppContext';
+import { useUIState } from '../context/AppContext';
 
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [currentDateTime, setCurrentDateTime] = useState(new Date());
     const [isOnline, setIsOnline] = useState(navigator.onLine);
-    const { isSyncing } = useSyncState();
+    const { isSyncing } = useUIState();
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);

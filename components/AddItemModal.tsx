@@ -71,22 +71,24 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
             <div ref={modalContentRef} className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
-                    <h3 id="addItemModalTitle" className="text-2xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
-                    <div className="text-center text-gray-600 mb-4 space-y-1">
-                        <p className="flex justify-center items-baseline flex-wrap gap-x-3 text-lg">
+                    <h3 id="addItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
+                    <div className="text-center text-sm text-gray-600 mb-4 space-y-1">
+                        <p className="flex justify-center items-center flex-wrap gap-x-3">
                             <span>
-                                (<span className="font-bold text-gray-800">{product.costPrice.toLocaleString()} / {product.sellingPrice.toLocaleString()}</span>)
+                                <span className="font-medium">단가:</span> <span className="font-bold text-gray-800">{product.costPrice.toLocaleString()}원</span>
+                                <span className="mx-1.5 text-gray-300">/</span>
+                                <span className="font-medium">판가:</span> <span className="font-bold text-gray-800">{product.sellingPrice.toLocaleString()}원</span>
                             </span>
                             {product.salePrice && (
-                                <span className={`font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-700'}`}>
-                                    ({product.salePrice})
+                                <span className={isSaleActive(product.saleEndDate) ? "text-red-600" : "text-gray-500"}>
+                                    <span className="font-medium">행사가:</span> <span className="font-bold">{product.salePrice}</span>
                                 </span>
                             )}
                         </p>
                         {(product.saleEndDate || product.supplierName) && (
-                             <p className="text-gray-500 flex justify-center items-baseline gap-x-1.5 flex-wrap">
-                                {product.saleEndDate && <span className="text-base">{`행사종료: ${product.saleEndDate}`}</span>}
-                                {product.supplierName && <span className="text-xs">{`(${product.supplierName})`}</span>}
+                            <p className="text-xs text-gray-500">
+                                {product.saleEndDate && `행사종료: ${product.saleEndDate}`}
+                                {product.supplierName && ` (${product.supplierName})`}
                             </p>
                         )}
                     </div>
@@ -99,7 +101,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                     <div className="space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2 text-center">수량</label>
-                            <div className="flex justify-center items-center gap-2">
+                            <div className="flex items-center justify-center space-x-2">
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
                                 <input
                                     ref={inputRef}
@@ -159,4 +161,5 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     );
 };
 
+// FIX: Add default export for lazy loading
 export default AddItemModal;

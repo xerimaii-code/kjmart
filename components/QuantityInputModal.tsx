@@ -75,7 +75,7 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
                     
                     <div>
                         <label htmlFor="quantity-input" className="block text-sm font-medium text-gray-700 mb-1 text-center">수량</label>
-                        <div className="flex justify-center items-center gap-2">
+                        <div className="flex items-center justify-center space-x-2">
                             <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-12 h-12 bg-gray-200 text-gray-700 text-2xl font-bold rounded-lg transition hover:bg-gray-300 active:scale-95 flex-shrink-0 flex items-center justify-center" aria-label="수량 감소">-</button>
                             <input 
                                 ref={inputRef}
@@ -94,7 +94,7 @@ const QuantityInputModal: React.FC<QuantityInputModalProps> = ({ isOpen, itemNam
                                     }
                                 }}
                                 onKeyDown={handleKeyDown}
-                                className="w-24 h-12 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-2xl focus:outline-none"
+                                className="w-full h-12 text-center border-2 border-blue-500 bg-blue-50 rounded-lg text-gray-800 font-bold text-2xl focus:outline-none"
                                 autoComplete="off"
                                 pattern="-?\d*"
                             />

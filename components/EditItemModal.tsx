@@ -70,35 +70,37 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="editItemModalTitle">
             <div ref={modalContentRef} className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
-                    <h3 id="editItemModalTitle" className="text-2xl font-bold text-gray-800 text-center mb-1 truncate" title={item.name}>{item.name}</h3>
+                    <h3 id="editItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={item.name}>{item.name}</h3>
                     {product ? (
-                        <div className="text-center text-gray-600 mb-4 space-y-1">
-                            <p className="flex justify-center items-baseline flex-wrap gap-x-3 text-lg">
+                        <div className="text-center text-sm text-gray-600 mb-4 space-y-1">
+                            <p className="flex justify-center items-center flex-wrap gap-x-3">
                                 <span>
-                                    (<span className="font-bold text-gray-800">{product.costPrice.toLocaleString()} / {product.sellingPrice.toLocaleString()}</span>)
+                                    <span className="font-medium">단가:</span> <span className="font-bold text-gray-800">{product.costPrice.toLocaleString()}원</span>
+                                    <span className="mx-1.5 text-gray-300">/</span>
+                                    <span className="font-medium">판가:</span> <span className="font-bold text-gray-800">{product.sellingPrice.toLocaleString()}원</span>
                                 </span>
                                 {product.salePrice && (
-                                    <span className={`font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-700'}`}>
-                                        ({product.salePrice})
+                                    <span className={isSaleActive(product.saleEndDate) ? "text-red-600" : "text-gray-500"}>
+                                        <span className="font-medium">행사가:</span> <span className="font-bold">{product.salePrice}</span>
                                     </span>
                                 )}
                             </p>
                             {(product.saleEndDate || product.supplierName) && (
-                                <p className="text-gray-500 flex justify-center items-baseline gap-x-1.5 flex-wrap">
-                                    {product.saleEndDate && <span className="text-base">{`행사종료: ${product.saleEndDate}`}</span>}
-                                    {product.supplierName && <span className="text-xs">{`(${product.supplierName})`}</span>}
+                                <p className="text-xs text-gray-500">
+                                    {product.saleEndDate && `행사종료: ${product.saleEndDate}`}
+                                    {product.supplierName && ` (${product.supplierName})`}
                                 </p>
                             )}
-                            <p className="font-bold text-blue-600 pt-1 text-lg">발주단가: {item.price.toLocaleString()}원</p>
+                            <p className="font-bold text-blue-600 pt-1">발주단가: {item.price.toLocaleString()}원</p>
                         </div>
                    ) : (
-                        <p className="text-center text-lg text-gray-500 mb-4">발주단가: {item.price.toLocaleString()}원</p>
+                        <p className="text-center text-sm text-gray-500 mb-4">발주단가: {item.price.toLocaleString()}원</p>
                    )}
                     
                     <div className="space-y-4">
                         <div>
                             <label htmlFor="edit-quantity" className="block text-sm font-medium text-gray-700 mb-2 text-center">수량 수정</label>
-                            <div className="flex justify-center items-center gap-2">
+                            <div className="flex items-center justify-center space-x-2">
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
                                 <input
                                     ref={inputRef}
@@ -119,7 +121,7 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
                                         }
                                     }}
                                     onKeyDown={handleKeyDown}
-                                    className="w-24 h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-xl text-gray-800 font-bold text-3xl focus:outline-none"
+                                    className="w-full h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-xl text-gray-800 font-bold text-3xl focus:outline-none"
                                     autoComplete="off"
                                 />
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 증가">+</button>
