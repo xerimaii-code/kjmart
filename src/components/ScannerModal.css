@@ -1,0 +1,60 @@
+/* src/components/ScannerModal.css */
+.scanner-corner {
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    border: 6px solid white;
+    border-radius: 8px;
+}
+
+.top-left {
+    top: -8px;
+    left: -8px;
+    border-right: none;
+    border-bottom: none;
+}
+
+.top-right {
+    top: -8px;
+    right: -8px;
+    border-left: none;
+    border-bottom: none;
+}
+
+.bottom-left {
+    bottom: -8px;
+    left: -8px;
+    border-right: none;
+    border-top: none;
+}
+
+.bottom-right {
+    bottom: -8px;
+    right: -8px;
+    border-left: none;
+    border-top: none;
+}
+
+.scanner-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 4px;
+    background: linear-gradient(to right, transparent, rgba(255, 0, 0, 0.8), transparent);
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.8);
+    border-radius: 2px;
+    animation: scan 2.5s infinite cubic-bezier(0.5, 0, 0.5, 1);
+}
+
+@keyframes scan {
+    0% {
+        top: 0;
+    }
+    50% {
+        top: calc(100% - 4px);
+    }
+    100% {
+        top: 0;
+    }
+}
