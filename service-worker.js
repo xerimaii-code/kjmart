@@ -1,4 +1,5 @@
 
+
 const CACHE_NAME = 'kjmart-app-cache-v1';
 // This list includes the essential files for the app shell to work offline.
 const URLS_TO_CACHE = [
@@ -8,8 +9,7 @@ const URLS_TO_CACHE = [
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/apple-touch-icon.png',
-  'https://cdn.tailwindcss.com',
-  'https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js'
+  'https://cdn.tailwindcss.com'
 ];
 
 /**
