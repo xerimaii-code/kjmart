@@ -61,7 +61,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         const finalQuantity = Number(quantity);
         if (isNaN(finalQuantity)) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
-        if (onNextScan) onNextScan();
+        onClose();
+        if (onNextScan) {
+            onNextScan();
+        }
     };
     
     const isContinuousScan = trigger === 'scan' && onNextScan;
