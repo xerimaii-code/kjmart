@@ -206,7 +206,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         <div className="scanner-corner top-right"></div>
                         <div className="scanner-corner bottom-left"></div>
                         <div className="scanner-corner bottom-right"></div>
-                        <div className="scanner-line"></div>
                     </div>
                     <p className="text-white text-center mt-6 text-lg font-semibold tracking-wide">바코드를 영역 안에 맞춰주세요</p>
                 </div>
