@@ -69,6 +69,10 @@
             user-select: text;
         }
 
+        .main-content {
+            scrollbar-gutter: stable;
+        }
+
         /* Modern Scrollbar */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -76,11 +80,7 @@
         ::-webkit-scrollbar-thumb:hover { background: rgba(var(--text-secondary-rgb), 0.5); }
 
         .fixed-filter { flex-shrink: 0; }
-        .scrollable-content { 
-            flex-grow: 1; 
-            overflow-y: auto; 
-            scrollbar-gutter: stable;
-        }
+        .scrollable-content { flex-grow: 1; overflow-y: auto; }
 
         /* Style for Window Controls Overlay & iOS Safe Area */
         #app-header {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useDataState, useDataActions, useAlert, usePWAInstall } from '../context/AppContext';
+import { useDataState, useDataActions, useUIActions, useUIState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
@@ -26,7 +26,7 @@ const SyncSection: React.FC<{
     dataType: 'customer' | 'product';
 }> = ({ dataType }) => {
     const { setCustomers, setProducts } = useDataActions();
-    const { showToast, showAlert } = useAlert();
+    const { showToast, showAlert } = useUIActions();
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
     const [isPicking, setIsPicking] = useState(false);
@@ -204,8 +204,8 @@ const SyncSection: React.FC<{
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId } = useDataState();
     const { setCustomers, setProducts, setSelectedCameraId, clearOrders } = useDataActions();
-    const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
-    const { showAlert, showToast } = useAlert();
+    const { isInstallPromptAvailable } = useUIState();
+    const { showAlert, showToast, triggerInstallPrompt } = useUIActions();
     const { logout, user } = useAuth();
 
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -373,125 +373,122 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 </div>
             )}
             <div className="fixed-filter p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
-                <div className="max-w-2xl mx-auto w-full">
-                    <h2 className="text-xl font-bold text-gray-800">설정</h2>
-                </div>
+                <h2 className="text-xl font-bold text-gray-800">설정</h2>
             </div>
-            <div className="scrollable-content p-3">
-                <div className="space-y-3 max-w-2xl mx-auto w-full">
-                    <CollapsibleCard title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
-                        <div className="flex items-center justify-between">
-                            <label htmlFor="camera-select" className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                                <CameraIcon className="w-5 h-5 text-gray-500"/>
-                                <span>기본 카메라 선택</span>
-                            </label>
-                            <select
-                                id="camera-select"
-                                value={selectedCameraId || ''}
-                                onChange={handleCameraChange}
-                                className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[50%] bg-white"
-                            >
-                                <option value="">시스템 기본값</option>
-                                {cameras.map((camera, index) => (
-                                    <option key={camera.deviceId} value={camera.deviceId}>
-                                        {camera.label || `카메라 ${index + 1}`}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                         {isInstallPromptAvailable && (
-                            <button
-                                onClick={triggerInstallPrompt}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition active:scale-95"
-                            >
-                                <DownloadIcon className="w-5 h-5" />
-                                <span>홈 화면에 앱 설치</span>
-                            </button>
-                        )}
-                    </CollapsibleCard>
+            <div className="scrollable-content p-3 space-y-3">
 
-                    <CollapsibleCard title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
-                        <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                             <span className="text-sm font-medium text-gray-700">스캔 시 진동</span>
-                             <ToggleSwitch
-                                id="vibrate-scan"
-                                checked={vibrateOnScan ?? false}
-                                onChange={setVibrateOnScan}
-                                label=""
-                             />
-                        </div>
-                        <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                             <span className="text-sm font-medium text-gray-700">스캔 시 효과음</span>
-                             <ToggleSwitch
-                                id="sound-scan"
-                                checked={soundOnScan ?? false}
-                                onChange={setSoundOnScan}
-                                label=""
-                             />
-                        </div>
-                    </CollapsibleCard>
-                    
-                    <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
-                        <SyncSection dataType="customer" />
-                        <SyncSection dataType="product" />
-                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">로컬 파일로 데이터 업데이트</h4>
-                            <div className="grid grid-cols-2 gap-3">
-                                 <button
-                                    onClick={() => handleFileImportClick('customer')}
-                                    disabled={isImporting !== null}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                                >
-                                    {isImporting === 'customer' ? <SpinnerIcon className="w-5 h-5" /> : <span>거래처 가져오기</span>}
-                                </button>
-                                <button
-                                    onClick={() => handleFileImportClick('product')}
-                                    disabled={isImporting !== null}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                                >
-                                    {isImporting === 'product' ? <SpinnerIcon className="w-5 h-5" /> : <span>상품 가져오기</span>}
-                                </button>
-                            </div>
-                        </div>
-                    </CollapsibleCard>
-                    
-                    <CollapsibleCard title="데이터 백업 및 복원" icon={<ArrowLongRightIcon className="w-5 h-5 text-gray-500"/>}>
+                <CollapsibleCard title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
+                    <div className="flex items-center justify-between">
+                        <label htmlFor="camera-select" className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                            <CameraIcon className="w-5 h-5 text-gray-500"/>
+                            <span>기본 카메라 선택</span>
+                        </label>
+                        <select
+                            id="camera-select"
+                            value={selectedCameraId || ''}
+                            onChange={handleCameraChange}
+                            className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[50%] bg-white"
+                        >
+                            <option value="">시스템 기본값</option>
+                            {cameras.map((camera, index) => (
+                                <option key={camera.deviceId} value={camera.deviceId}>
+                                    {camera.label || `카메라 ${index + 1}`}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                     {isInstallPromptAvailable && (
+                        <button
+                            onClick={triggerInstallPrompt}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition active:scale-95"
+                        >
+                            <DownloadIcon className="w-5 h-5" />
+                            <span>홈 화면에 앱 설치</span>
+                        </button>
+                    )}
+                </CollapsibleCard>
+
+                <CollapsibleCard title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
+                    <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                         <span className="text-sm font-medium text-gray-700">스캔 시 진동</span>
+                         <ToggleSwitch
+                            id="vibrate-scan"
+                            checked={vibrateOnScan ?? false}
+                            onChange={setVibrateOnScan}
+                            label=""
+                         />
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                         <span className="text-sm font-medium text-gray-700">스캔 시 효과음</span>
+                         <ToggleSwitch
+                            id="sound-scan"
+                            checked={soundOnScan ?? false}
+                            onChange={setSoundOnScan}
+                            label=""
+                         />
+                    </div>
+                </CollapsibleCard>
+                
+                <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
+                    <SyncSection dataType="customer" />
+                    <SyncSection dataType="product" />
+                    <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                        <h4 className="text-sm font-bold text-gray-600 mb-2">로컬 파일로 데이터 업데이트</h4>
                         <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={handleBackup}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
+                             <button
+                                onClick={() => handleFileImportClick('customer')}
+                                disabled={isImporting !== null}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
                             >
-                                <DownloadIcon className="w-5 h-5" />
-                                <span>백업</span>
+                                {isImporting === 'customer' ? <SpinnerIcon className="w-5 h-5" /> : <span>거래처 가져오기</span>}
                             </button>
                             <button
-                                onClick={handleRestore}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-100 text-orange-800 font-semibold rounded-lg hover:bg-orange-200 transition active:scale-95"
+                                onClick={() => handleFileImportClick('product')}
+                                disabled={isImporting !== null}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
                             >
-                                <UploadIcon className="w-5 h-5" />
-                                <span>복원</span>
+                                {isImporting === 'product' ? <SpinnerIcon className="w-5 h-5" /> : <span>상품 가져오기</span>}
                             </button>
                         </div>
+                    </div>
+                </CollapsibleCard>
+                
+                <CollapsibleCard title="데이터 백업 및 복원" icon={<ArrowLongRightIcon className="w-5 h-5 text-gray-500"/>}>
+                    <div className="grid grid-cols-2 gap-3">
                         <button
-                            onClick={handleClearOrders}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-100 text-red-800 font-semibold rounded-lg hover:bg-red-200 transition active:scale-95"
+                            onClick={handleBackup}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
                         >
-                            <TrashIcon className="w-5 h-5" />
-                            <span>발주 내역 전체 삭제</span>
+                            <DownloadIcon className="w-5 h-5" />
+                            <span>백업</span>
                         </button>
-                    </CollapsibleCard>
-                    
-                     <div className="p-4">
-                        <p className="text-xs text-center text-gray-500 mb-2">로그인된 계정: {user?.email}</p>
                         <button
-                            onClick={logout}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-800 transition active:scale-95"
+                            onClick={handleRestore}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-100 text-orange-800 font-semibold rounded-lg hover:bg-orange-200 transition active:scale-95"
                         >
-                            <LogoutIcon className="w-5 h-5" />
-                            <span>로그아웃</span>
+                            <UploadIcon className="w-5 h-5" />
+                            <span>복원</span>
                         </button>
-                     </div>
-                </div>
+                    </div>
+                    <button
+                        onClick={handleClearOrders}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-100 text-red-800 font-semibold rounded-lg hover:bg-red-200 transition active:scale-95"
+                    >
+                        <TrashIcon className="w-5 h-5" />
+                        <span>발주 내역 전체 삭제</span>
+                    </button>
+                </CollapsibleCard>
+                
+                 <div className="p-4">
+                    <p className="text-xs text-center text-gray-500 mb-2">로그인된 계정: {user?.email}</p>
+                    <button
+                        onClick={logout}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-800 transition active:scale-95"
+                    >
+                        <LogoutIcon className="w-5 h-5" />
+                        <span>로그아웃</span>
+                    </button>
+                 </div>
             </div>
         </div>
     );

@@ -99,9 +99,7 @@ export const listenToStore = <T>(storeName: string, callback: (items: T[]) => vo
     const storeRef = ref(db, storeName);
     return onValue(storeRef, (snapshot) => {
         const data = snapshot.val();
-        // Firebase can return an object with null values for deleted children,
-        // which Object.values will include. We filter these out to prevent errors.
-        const itemsArray = data ? Object.values(data).filter(item => item != null) as T[] : [];
+        const itemsArray = data ? Object.values(data) as T[] : [];
         callback(itemsArray);
     }, (error) => {
         console.error(`Error listening to store ${storeName}:`, error);

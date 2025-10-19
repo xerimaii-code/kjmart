@@ -1,5 +1,5 @@
 import React, { useState, lazy, Suspense, useRef, useMemo } from 'react';
-import { AppProvider, useModals, useScanner } from './context/AppContext';
+import { AppProvider, useUIActions, useUIState } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import Header from './components/Header';
@@ -114,19 +114,26 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 const AppContent: React.FC = () => {
     const [activePage, setActivePage] = useState<Page>('product-inquiry');
     const { 
-        isDetailModalOpen,
+        isDetailModalOpen, 
+        isScannerOpen,
+        onScanSuccess,
         isDeliveryModalOpen,
         orderToExport,
-        closeDeliveryModal,
+        isAddItemModalOpen,
         addItemModalProps,
-        closeAddItemModal,
+        isEditItemModalOpen,
         editItemModalProps,
-        closeEditItemModal,
+        isMemoModalOpen,
         memoModalProps,
+     } = useUIState();
+    const { 
+        closeScanner,
+        hideAlert,
+        closeDeliveryModal,
+        closeAddItemModal,
+        closeEditItemModal,
         closeMemoModal,
-     } = useModals();
-    const { isScannerOpen, onScanSuccess, closeScanner } = useScanner();
-
+     } = useUIActions();
     const { updateOrderStatus } = useDataActions();
     
     const swipeContainerRef = useRef<HTMLDivElement>(null);
@@ -143,6 +150,7 @@ const AppContent: React.FC = () => {
 
     const handleNavigation = (targetPage: Page) => {
         if (targetPage === activePage) return;
+        hideAlert(); // Dismiss any open alerts on main navigation
         setActivePage(targetPage);
     };
 
@@ -182,41 +190,44 @@ const AppContent: React.FC = () => {
             {/* Global Modals */}
             <Suspense fallback={null}>
               {isDetailModalOpen && <OrderDetailModal />}
-              {isScannerOpen && <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />}
-              {addItemModalProps && (
-                  <AddItemModal
-                      isOpen={true}
-                      product={addItemModalProps.product}
-                      existingItem={addItemModalProps.existingItem}
-                      onClose={closeAddItemModal}
-                      onAdd={addItemModalProps.onAdd}
-                      onNextScan={addItemModalProps.onNextScan}
-                      trigger={addItemModalProps.trigger}
-                      initialSettings={addItemModalProps.initialSettings}
-                  />
-              )}
-              {editItemModalProps && (
-                  <EditItemModal
-                      isOpen={true}
-                      item={editItemModalProps.item}
-                      onClose={closeEditItemModal}
-                      onSave={editItemModalProps.onSave}
-                  />
-              )}
-              {memoModalProps && (
-                  <MemoModal
-                      isOpen={true}
-                      initialMemo={memoModalProps.initialMemo}
-                      onClose={closeMemoModal}
-                      onSave={memoModalProps.onSave}
-                  />
-              )}
+            </Suspense>
+            <Suspense fallback={null}>
+                {isScannerOpen && <ScannerModal isOpen={isScannerOpen} onClose={closeScanner} onScanSuccess={onScanSuccess} />}
             </Suspense>
             <DeliveryTypeModal
                 isOpen={isDeliveryModalOpen}
                 onClose={closeDeliveryModal}
                 onConfirm={handleExportConfirm}
             />
+
+            {/* Portaled Modals from Pages */}
+            <Suspense fallback={null}>
+                {isAddItemModalOpen && addItemModalProps && (
+                    <AddItemModal
+                        isOpen={isAddItemModalOpen}
+                        onClose={closeAddItemModal}
+                        {...addItemModalProps}
+                    />
+                )}
+            </Suspense>
+            <Suspense fallback={null}>
+                {isEditItemModalOpen && editItemModalProps && (
+                    <EditItemModal
+                        isOpen={isEditItemModalOpen}
+                        onClose={closeEditItemModal}
+                        {...editItemModalProps}
+                    />
+                )}
+            </Suspense>
+            <Suspense fallback={null}>
+                 {isMemoModalOpen && memoModalProps && (
+                    <MemoModal
+                        isOpen={isMemoModalOpen}
+                        onClose={closeMemoModal}
+                        {...memoModalProps}
+                    />
+                )}
+            </Suspense>
         </div>
     );
 };
