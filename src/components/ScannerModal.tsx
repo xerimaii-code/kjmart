@@ -44,8 +44,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const playBeep = useCallback(() => {
         const audioCtx = getAudioContext();
         if (!audioCtx || audioCtx.state !== 'running') {
-            if (audioCtx?.state !== 'suspended') {
-                console.warn(`Cannot play beep. AudioContext not ready. State: ${audioCtx?.state}`);
+            console.warn(`Cannot play beep. AudioContext not ready. State: ${audioCtx?.state}`);
+            if(audioCtx) {
+                 audioCtx.resume();
             }
             return;
         }
@@ -57,22 +58,21 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
             
-            gainNode.gain.value = 0.5; // Increased gain
-            oscillator.frequency.value = 900; // Slightly higher pitch
-            oscillator.type = 'sine';
+            gainNode.gain.value = 0.5; // Louder beep
+            oscillator.frequency.value = 1200; // Higher pitch
+            oscillator.type = 'square'; // Sharper sound
             
-            oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 0.1);
+            const now = audioCtx.currentTime;
+            oscillator.start(now);
+            oscillator.stop(now + 0.08); // Shorter duration
         } catch (error) {
             console.error("Failed to play beep sound:", error);
         }
     }, [getAudioContext]);
 
-
     useEffect(() => {
         if (isOpen) {
-            // Pre-warm the audio context when the modal opens, as it's triggered by user interaction.
-            getAudioContext();
+            getAudioContext(); // Ensure audio context is ready
 
             setIsLibraryLoading(true);
             loadScript(ZXING_CDN)
@@ -120,13 +120,15 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         await codeReader.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
                             if (result && !isHandlingResult.current) {
                                 isHandlingResult.current = true; // Set flag to prevent re-entry
-                                codeReader.reset(); // Stop scanning immediately to release the camera
+                                
+                                // Play sound immediately for faster perceived response
+                                const shouldSound = JSON.parse(localStorage.getItem('setting:soundOnScan') ?? 'true');
+                                if (shouldSound) playBeep();
+
+                                codeReader.reset(); // Stop scanning to release the camera
 
                                 const shouldVibrate = JSON.parse(localStorage.getItem('setting:vibrateOnScan') ?? 'true');
-                                const shouldSound = JSON.parse(localStorage.getItem('setting:soundOnScan') ?? 'true');
-
                                 if (shouldVibrate && navigator.vibrate) navigator.vibrate(100);
-                                if (shouldSound) playBeep();
                                 
                                 const barcode = result.getText();                             
                                 onScanSuccess(barcode);
