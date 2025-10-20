@@ -209,6 +209,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { logout, user } = useAuth();
 
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+    const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'prompt' | 'granted' | 'denied'>('prompt');
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('');
     const [vibrateOnScan, setVibrateOnScan] = useLocalStorage('setting:vibrateOnScan', true);
@@ -218,19 +219,51 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [fileImportType, setFileImportType] = useState<'customer' | 'product' | null>(null);
     const [isImporting, setIsImporting] = useState<'customer' | 'product' | null>(null);
 
+    const fetchCameras = useCallback(async () => {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            setCameras(videoDevices);
+        } catch (err) {
+            console.error("Could not enumerate devices: ", err);
+        }
+    }, []);
+
+    const requestCameraPermission = useCallback(async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            setCameraPermissionStatus('granted');
+            await fetchCameras();
+            stream.getTracks().forEach(track => track.stop());
+        } catch (err) {
+            console.error("Camera permission denied: ", err);
+            setCameraPermissionStatus('denied');
+            showAlert("카메라 접근 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
+        }
+    }, [fetchCameras, showAlert]);
 
     useEffect(() => {
-        if (isActive && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-            navigator.mediaDevices.enumerateDevices()
-                .then(devices => {
-                    const videoDevices = devices.filter(device => device.kind === 'videoinput');
-                    setCameras(videoDevices);
-                })
-                .catch(err => {
-                    console.error("Could not enumerate devices: ", err);
+        if (isActive && navigator.mediaDevices) {
+            if (navigator.permissions && navigator.permissions.query) {
+                 navigator.permissions.query({ name: 'camera' as PermissionName }).then((status) => {
+                    setCameraPermissionStatus(status.state);
+                    if (status.state === 'granted') {
+                        fetchCameras();
+                    }
+                    status.onchange = () => {
+                        setCameraPermissionStatus(status.state);
+                        if (status.state === 'granted') {
+                            fetchCameras();
+                        } else {
+                            setCameras([]);
+                        }
+                    };
+                }).catch(err => {
+                    console.warn("Permission query failed.", err)
                 });
+            }
         }
-    }, [isActive]);
+    }, [isActive, fetchCameras]);
 
     const handleCameraChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
         const cameraId = event.target.value;
@@ -385,19 +418,32 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 <CameraIcon className="w-5 h-5 text-gray-500"/>
                                 <span>기본 카메라 선택</span>
                             </label>
-                            <select
-                                id="camera-select"
-                                value={selectedCameraId || ''}
-                                onChange={handleCameraChange}
-                                className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[50%] bg-white"
-                            >
-                                <option value="">시스템 기본값</option>
-                                {cameras.map((camera, index) => (
-                                    <option key={camera.deviceId} value={camera.deviceId}>
-                                        {camera.label || `카메라 ${index + 1}`}
-                                    </option>
-                                ))}
-                            </select>
+                            {cameraPermissionStatus === 'granted' ? (
+                                <select
+                                    id="camera-select"
+                                    value={selectedCameraId || ''}
+                                    onChange={handleCameraChange}
+                                    className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[50%] bg-white"
+                                >
+                                    <option value="">시스템 기본값</option>
+                                    {cameras.length > 0 ? (
+                                        cameras.map((camera, index) => (
+                                            <option key={camera.deviceId} value={camera.deviceId}>
+                                                {camera.label || `카메라 ${index + 1}`}
+                                            </option>
+                                        ))
+                                    ) : (
+                                        <option disabled>카메라 없음</option>
+                                    )}
+                                </select>
+                            ) : (
+                                <button
+                                    onClick={requestCameraPermission}
+                                    className="text-sm font-semibold text-blue-600 bg-blue-100 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition active:scale-95"
+                                >
+                                    {cameraPermissionStatus === 'denied' ? '권한 필요' : '카메라 목록 불러오기'}
+                                </button>
+                            )}
                         </div>
                          {isInstallPromptAvailable && (
                             <button

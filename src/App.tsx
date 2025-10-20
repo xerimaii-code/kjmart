@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense, useRef, useMemo } from 'react';
+import React, { useState, lazy, Suspense, useRef, useMemo, useEffect } from 'react';
 import { AppProvider, useModals, useScanner } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
@@ -6,7 +6,7 @@ import Header from './components/Header';
 import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon, SearchIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
-import { exportToXLS } from './services/dataService';
+import { exportToXLS, loadScript } from './services/dataService';
 import { useDataActions } from './context/AppContext';
 import { useSwipeNavigation } from './hooks/useSwipeNavigation';
 
@@ -20,6 +20,8 @@ const ScannerModal = lazy(() => import('./components/ScannerModal'));
 const AddItemModal = lazy(() => import('./components/AddItemModal'));
 const EditItemModal = lazy(() => import('./components/EditItemModal'));
 const MemoModal = lazy(() => import('./components/MemoModal'));
+
+const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
 
 const pages: Page[] = ['history', 'new-order', 'product-inquiry', 'settings'];
 
@@ -256,6 +258,12 @@ const AppRouter: React.FC = () => {
 };
 
 const App: React.FC = () => {
+    useEffect(() => {
+        // Preload scanner library for faster modal opening.
+        // The script is loaded once and cached by the browser and our loadScript utility.
+        loadScript(ZXING_CDN).catch(err => console.warn("Failed to preload scanner library:", err));
+    }, []);
+
     return (
         <AuthProvider>
             <AppProvider>

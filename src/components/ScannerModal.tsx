@@ -22,6 +22,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const { setSelectedCameraId } = useDataActions();
     const { showAlert } = useAlert();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
+    const [isRendered, setIsRendered] = useState(false);
 
     // Lazy-initialize and resume AudioContext on demand
     const getAudioContext = useCallback((): AudioContext | null => {
@@ -73,6 +74,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     useEffect(() => {
         if (isOpen) {
             getAudioContext(); // Ensure audio context is ready
+            const timer = setTimeout(() => setIsRendered(true), 10);
 
             setIsLibraryLoading(true);
             loadScript(ZXING_CDN)
@@ -82,6 +84,10 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     showAlert('스캐너 라이브러리를 로드하는 데 실패했습니다.');
                     onClose();
                 });
+            
+            return () => clearTimeout(timer);
+        } else {
+            setIsRendered(false);
         }
     }, [isOpen, onClose, showAlert, getAudioContext]);
 
@@ -101,19 +107,28 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             const isHandlingResult = { current: false };
 
             const tryStartScanning = async (deviceId: string | null) => {
-                // FIX: Cast to `any` to allow non-standard/experimental properties like
-                // 'exposureMode' and 'whiteBalanceMode' which can improve camera
-                // performance on some devices but are not in the standard MediaTrackConstraints type.
                 const baseVideoConstraints: MediaTrackConstraints = {
                     deviceId: deviceId ? { exact: deviceId } : undefined,
+                };
+
+                // Advanced settings for better camera performance, cast to any to allow non-standard properties.
+                const advancedVideoSettings: MediaTrackConstraints = {
+                    facingMode: 'environment',
+                    focusMode: 'continuous',
                     exposureMode: 'continuous',
                     whiteBalanceMode: 'continuous',
                 } as any;
                 
                 const constraintsToTry: MediaStreamConstraints[] = [
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any },
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous' } as any },
+                    // --- Prioritize torch for brightness, trying higher resolutions first ---
+                    { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, torch: true, width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
+                    { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, torch: true, width: { ideal: 1280 }, height: { ideal: 720 } } as any },
+                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', torch: true } },
+
+                    // --- Fallbacks without torch ---
+                    { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
+                    { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, width: { ideal: 1280 }, height: { ideal: 720 } } as any },
+                    { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings } as any },
                     { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment' } },
                     { audio: false, video: { ...baseVideoConstraints } },
                 ];
@@ -187,7 +202,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
     if (isLibraryLoading) {
         return (
-            <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center">
+            <div className={`fixed inset-0 bg-black z-50 flex flex-col items-center justify-center transition-opacity duration-150 ease-out ${isRendered ? 'opacity-100' : 'opacity-0'}`}>
                 <SpinnerIcon className="w-10 h-10 text-white" />
                 <p className="text-white mt-4 font-semibold">스캐너 준비 중...</p>
                 <button
@@ -201,7 +216,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     }
 
     return (
-        <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center">
+        <div className={`fixed inset-0 bg-black z-50 flex flex-col items-center justify-center transition-opacity duration-150 ease-out ${isRendered ? 'opacity-100' : 'opacity-0'}`}>
             <video ref={videoRef} className="absolute top-0 left-0 w-full h-full object-cover" playsInline />
             
             <div className="absolute inset-0 bg-black/40"></div>

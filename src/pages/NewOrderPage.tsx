@@ -415,7 +415,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         <div className="h-full flex flex-col relative bg-transparent">
             <DraftLoadedToast show={showDraftLoadedToast} />
             <div className="w-full p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-20 border-b border-gray-200/80">
-                <div className="flex gap-2 w-full max-w-2xl mx-auto">
+                <div className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
                     <div className="flex flex-col gap-2 flex-grow">
                         <div className="relative">
                             <input
@@ -489,14 +489,15 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                      <button
                         onClick={handleOpenScanner}
                         disabled={!isCustomerSelected}
-                        className="h-full w-20 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1.5 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
+                        className="w-28 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6.5 2.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6.5 2.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 10h.01M15 10h.01M12 10h.01M12 10h.01M12 6.01M12 18.01" />
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+                            <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                            <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+                            <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
                         </svg>
-                        <span className="text-sm">스캔</span>
+                        <span className="text-base">스캔</span>
                     </button>
                 </div>
             </div>
@@ -533,27 +534,27 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                         <span className="text-lg text-gray-600">총 합계:</span>
                         <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-5 gap-2">
                         <button
                             onClick={handleResetOrder}
                             disabled={isSaving}
-                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95"
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
                         >
-                            <TrashIcon className="w-5 h-5" />
-                            초기화
+                            <TrashIcon className="w-5 h-5"/>
+                            <span className="hidden sm:inline">초기화</span>
                         </button>
                         <button
-                             onClick={handleOpenMemoModal}
-                             disabled={isSaving}
-                             className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95"
+                            onClick={handleOpenMemoModal}
+                            disabled={isSaving}
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
                         >
                             <DocumentTextIcon className="w-5 h-5"/>
-                            메모
+                            <span className="hidden sm:inline">메모</span>
                         </button>
                         <button
                             onClick={handleSaveOrder}
-                            disabled={isSaving || !selectedCustomer || items.length === 0}
-                            className="bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
+                            disabled={isSaving || items.length === 0 || !selectedCustomer}
+                            className="bg-blue-600 text-white py-2 px-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3"
                         >
                             {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '발주 저장'}
                         </button>

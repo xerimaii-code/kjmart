@@ -245,7 +245,6 @@ const OrderDetailModal: React.FC = () => {
         if (!originalOrder || !hasChanges) return;
         setIsSaving(true);
         try {
-            // FIX: The `updateOrder` action from the context expects a full Order object including the updated items.
             const updatedOrderData = { ...originalOrder, items, itemCount: items.length, total: totalAmount, memo };
             await updateOrder(updatedOrderData);
             await deleteDraft(originalOrder.id);
@@ -341,17 +340,24 @@ const OrderDetailModal: React.FC = () => {
     if (!originalOrder) return null;
 
     return (
-        <div className={`fixed inset-0 bg-black z-40 flex flex-col transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`}>
-            <div className={`w-full h-full flex flex-col bg-gray-100 transition-transform duration-300 ease-out ${isRendered ? 'translate-y-0' : 'translate-y-full'}`}>
-                <header className="bg-white/80 backdrop-blur-xl p-3 flex-shrink-0 border-b border-gray-200/80 z-20">
-                    <div className="flex items-center justify-between max-w-2xl mx-auto">
-                        <button onClick={handleClose} className="px-4 py-2 text-blue-600 font-semibold rounded-lg hover:bg-blue-100 transition">닫기</button>
-                        <div className="text-center">
-                            <h2 className="text-lg font-bold text-gray-800 truncate" title={originalOrder.customer.name}>{originalOrder.customer.name}</h2>
-                            <p className="text-xs text-gray-500">{new Date(originalOrder.date).toLocaleString('ko-KR')}</p>
-                        </div>
-                        <div className="w-16"></div>
+        <div 
+            className={`fixed inset-0 bg-black z-40 flex items-start justify-center pt-28 transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`}
+            onClick={handleClose}
+            role="dialog"
+            aria-modal="true"
+        >
+            <div 
+                className={`w-full max-w-3xl max-h-[calc(100vh-8rem)] flex flex-col bg-gray-100 rounded-2xl shadow-2xl transition-all duration-500 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${isRendered ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}
+                onClick={e => e.stopPropagation()}
+            >
+                <header className="relative bg-white/80 backdrop-blur-xl p-4 flex-shrink-0 border-b border-gray-200/80 z-20 rounded-t-2xl flex items-center justify-center">
+                    <div className="text-center">
+                        <h2 className="text-lg font-bold text-gray-800 truncate" title={originalOrder.customer.name}>{originalOrder.customer.name}</h2>
+                        <p className="text-sm text-gray-500">{new Date(originalOrder.date).toLocaleString('ko-KR')}</p>
                     </div>
+                    <button onClick={handleClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200/80 rounded-full transition-colors" aria-label="닫기">
+                        <RemoveIcon className="w-6 h-6"/>
+                    </button>
                 </header>
                 
                 {!isCompleted && (
@@ -409,7 +415,7 @@ const OrderDetailModal: React.FC = () => {
                     </div>
                 </main>
                 
-                <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10">
+                <footer className="p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10 rounded-b-2xl">
                     <div className="max-w-2xl mx-auto">
                         <div className="flex justify-between items-center font-bold mb-3 px-2">
                             <span className="text-lg text-gray-600">총 합계:</span>
