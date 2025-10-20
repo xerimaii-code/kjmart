@@ -6,6 +6,9 @@ import { exportToSMS } from '../services/dataService';
 import { getAllDraftKeys } from '../services/draftDbService';
 import * as db from '../services/dbService';
 
+// Constants for infinite scroll
+const PAGE_SIZE = 30; // Number of items to load per "page"
+
 interface ActionMenuItem {
     id: string;
     label: string;
@@ -120,6 +123,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
     const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
+    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE); // State for infinite scroll
     
     const getLocalDateString = (date: Date) => {
         const year = date.getFullYear();
@@ -140,6 +144,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [customEndDate, setCustomEndDate] = useState(getTodayString);
     
     const listRef = useRef<HTMLDivElement>(null);
+    const observerRef = useRef<HTMLDivElement>(null); // Ref for the infinite scroll sentinel
 
     const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setCustomStartDate(e.target.value);
@@ -169,6 +174,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
 
         setIsLoading(true);
         setOrders([]);
+        setVisibleCount(PAGE_SIZE); // Reset visible count on date change
         
         const { startDate, endDate } = calculateDates();
         
@@ -187,10 +193,41 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         return () => unsubscribe();
     }, [isActive, customStartDate, customEndDate]);
 
+    // --- Infinite Scroll Logic ---
+    const visibleOrders = useMemo(() => orders.slice(0, visibleCount), [orders, visibleCount]);
+
+    useEffect(() => {
+        if (!isActive || isLoading) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                // When the sentinel comes into view and there are more items to load
+                if (entries[0].isIntersecting && orders.length > visibleCount) {
+                    setVisibleCount(prev => prev + PAGE_SIZE);
+                }
+            },
+            { 
+                root: listRef.current, // Use the scrollable container
+                rootMargin: '200px', // Load next items when sentinel is 200px away from viewport
+            }
+        );
+
+        const currentObserverRef = observerRef.current;
+        if (currentObserverRef) {
+            observer.observe(currentObserverRef);
+        }
+
+        return () => {
+            if (currentObserverRef) {
+                observer.unobserve(currentObserverRef);
+            }
+        };
+    }, [isActive, isLoading, orders.length, visibleCount]);
+
     const groupedOrders = useMemo(() => {
         const groups: { [key: string]: { orders: Order[]; total: number } } = {};
 
-        orders.forEach(order => {
+        visibleOrders.forEach(order => {
             const dateKey = new Date(order.date).toISOString().slice(0, 10);
             if (!groups[dateKey]) {
                 groups[dateKey] = { orders: [], total: 0 };
@@ -205,7 +242,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                 date: dateKey,
                 ...groups[dateKey]
             }));
-    }, [orders]);
+    }, [visibleOrders]);
 
     useEffect(() => {
         if (lastModifiedOrderId) {
@@ -305,77 +342,85 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     }, [showAlert, deleteOrder, updateOrderStatus, openDeliveryModal]);
     
     const handleCardClick = useCallback(async (order: Order) => {
-        setIsLoading(true);
         try {
             const items = await db.getOrderItems(order.id);
             openDetailModal({ ...order, items });
         } catch (error) {
             console.error("Failed to fetch order items:", error);
             showAlert("주문 상세 정보를 불러오는 데 실패했습니다.");
-        } finally {
-            setIsLoading(false);
         }
     }, [openDetailModal, showAlert]);
 
     return (
         <div className="h-full flex flex-col bg-white">
-            <div ref={listRef} className="scrollable-content">
-                <div className="sticky top-0 z-10 p-3 bg-white border-b border-gray-200 shadow-sm">
-                    <div className="flex flex-wrap justify-between items-center gap-x-4 gap-y-2 max-w-2xl mx-auto w-full">
-                        <h2 className="text-xl font-bold text-gray-800">발주 내역</h2>
-                        <div className="flex items-center gap-2 text-sm w-full sm:w-auto justify-end">
-                            <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="시작일" />
-                            <span className="text-gray-500 font-semibold">~</span>
-                            <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="종료일" />
-                        </div>
+            <div className="sticky top-0 z-10 p-3 bg-white border-b border-gray-200 shadow-sm">
+                <div className="flex flex-wrap justify-end items-center gap-x-4 gap-y-2 max-w-2xl mx-auto w-full">
+                    <div className="flex items-center gap-2 text-sm w-full sm:w-auto justify-end">
+                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="시작일" />
+                        <span className="text-gray-500 font-semibold">~</span>
+                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="종료일" />
                     </div>
                 </div>
+            </div>
 
+            <div ref={listRef} className="scrollable-content flex-grow">
                 {isLoading ? (
                     <div className="flex items-center justify-center h-full pt-16">
                         <SpinnerIcon className="w-10 h-10 text-blue-500" />
                     </div>
-                ) : groupedOrders.length === 0 ? (
+                ) : orders.length === 0 ? (
                     <div className="p-3 flex flex-col items-center justify-center h-full text-gray-400 pt-16 text-center">
                         <ArchiveBoxIcon className="w-16 h-16 text-gray-300 mb-4" />
                         <p className="text-lg font-semibold">선택한 기간에 발주 내역이 없습니다</p>
                         <p className="text-sm mt-1">다른 기간을 선택하거나 신규 발주를 생성해보세요.</p>
                     </div>
                 ) : (
-                    <div className="p-3 space-y-4 max-w-2xl mx-auto w-full">
-                        {groupedOrders.map(group => {
-                            const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
-                            return (
-                                <div key={group.date} className={`${isGroupActive ? 'relative z-10' : ''}`}>
-                                    <div className="flex justify-between items-center p-4 bg-gray-100">
-                                        <h3 className="font-bold text-gray-800 text-base" id={`date-header-${group.date}`}>
-                                            {new Date(group.date).toLocaleDateString('ko-KR', {
-                                                year: 'numeric',
-                                                month: 'long',
-                                                day: 'numeric',
-                                                weekday: 'short',
-                                            })}
-                                        </h3>
-                                        <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
+                    <>
+                        <div className="p-3 space-y-4 max-w-2xl mx-auto w-full">
+                            {groupedOrders.map(group => {
+                                const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
+                                return (
+                                    <div key={group.date} className={`${isGroupActive ? 'relative z-10' : ''}`}>
+                                        <div className="flex justify-between items-center p-4 bg-gray-100">
+                                            <h3 className="font-bold text-gray-800 text-base" id={`date-header-${group.date}`}>
+                                                {new Date(group.date).toLocaleDateString('ko-KR', {
+                                                    year: 'numeric',
+                                                    month: 'long',
+                                                    day: 'numeric',
+                                                    weekday: 'short',
+                                                })}
+                                            </h3>
+                                            <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
+                                        </div>
+                                        <div className="divide-y divide-gray-200">
+                                            {group.orders.map(order => (
+                                                <OrderRow
+                                                    key={order.id}
+                                                    order={order}
+                                                    isHighlighted={order.id === lastModifiedOrderId}
+                                                    isMenuOpen={activeMenuOrderId === order.id}
+                                                    hasDraft={draftKeys.has(order.id)}
+                                                    onCardClick={() => handleCardClick(order)}
+                                                    onMenuToggle={(e) => handleMenuToggle(e, order.id)}
+                                                    actionMenuItems={getActionMenuItems(order)}
+                                                />
+                                            ))}
+                                        </div>
                                     </div>
-                                    <div className="divide-y divide-gray-200">
-                                        {group.orders.map(order => (
-                                            <OrderRow
-                                                key={order.id}
-                                                order={order}
-                                                isHighlighted={order.id === lastModifiedOrderId}
-                                                isMenuOpen={activeMenuOrderId === order.id}
-                                                hasDraft={draftKeys.has(order.id)}
-                                                onCardClick={() => handleCardClick(order)}
-                                                onMenuToggle={(e) => handleMenuToggle(e, order.id)}
-                                                actionMenuItems={getActionMenuItems(order)}
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            )
-                        })}
-                    </div>
+                                )
+                            })}
+                        </div>
+                        
+                        {/* Sentinel for infinite scroll */}
+                        <div ref={observerRef} style={{ height: '1px' }} />
+
+                        {/* Loading indicator at the bottom */}
+                        {isActive && !isLoading && orders.length > 0 && visibleCount < orders.length && (
+                            <div className="flex justify-center items-center p-4">
+                                <SpinnerIcon className="w-8 h-8 text-blue-500" />
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>
