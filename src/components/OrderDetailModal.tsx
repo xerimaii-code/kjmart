@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
 import { OrderItem, Product, EditedOrderDraft } from '../types';
@@ -367,28 +368,28 @@ const OrderDetailModal: React.FC = () => {
         >
             <div 
                 style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}
-                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-gray-100 shadow-2xl transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isRendered ? 'translate-y-0' : 'translate-y-full'} rounded-t-2xl`}
+                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-white shadow-2xl transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isRendered ? 'translate-y-0' : 'translate-y-full'} rounded-t-2xl`}
                 onClick={e => e.stopPropagation()}
             >
-                <header className="relative bg-white/80 backdrop-blur-xl p-4 flex-shrink-0 border-b border-gray-200/80 z-20 rounded-t-2xl flex items-center justify-center">
+                <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">
                     <div className="text-center">
                         <h2 className="text-lg font-bold text-gray-800 truncate" title={originalOrder.customer.name}>{originalOrder.customer.name}</h2>
                         <p className="text-sm text-gray-500">{new Date(originalOrder.date).toLocaleString('ko-KR')}</p>
                     </div>
-                    <button onClick={handleClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200/80 rounded-full transition-colors" aria-label="닫기">
+                    <button onClick={handleClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
                         <RemoveIcon className="w-6 h-6"/>
                     </button>
                 </header>
                 
                 {isCompleted && (
-                    <div className="p-3 bg-yellow-100 border-b border-yellow-200 flex-shrink-0 z-10 text-center text-yellow-800" role="alert">
+                    <div className="p-3 bg-yellow-100 border-b border-yellow-200 flex-shrink-0 z-10 text-center text-yellow-800 shadow-sm" role="alert">
                         <p className="font-bold">완료된 발주</p>
                         <p className="text-sm">이 발주는 완료 처리되어 수정할 수 없습니다.</p>
                     </div>
                 )}
                 
                 {!isCompleted && (
-                    <div className="p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-10 border-b border-gray-200/80">
+                    <div className="p-3 bg-white flex-shrink-0 z-10 border-b border-gray-200 shadow-sm">
                          <div className="flex gap-2 w-full max-w-2xl mx-auto">
                             <div className="relative flex-grow">
                                 <input
@@ -417,8 +418,8 @@ const OrderDetailModal: React.FC = () => {
 
                 <main ref={scrollableContainerRef} className="flex-grow overflow-y-auto">
                     <div className="p-3 pb-28 max-w-2xl mx-auto">
-                        <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
-                            <div className="divide-y divide-gray-100">
+                        <div>
+                            <div className="divide-y divide-gray-200">
                                 {items.map((item, index) => (
                                     <EditedItemRow
                                         key={item.barcode}
@@ -437,7 +438,7 @@ const OrderDetailModal: React.FC = () => {
                     </div>
                 </main>
                 
-                <footer className="p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10 flex-shrink-0">
+                <footer className="p-3 bg-white border-t border-gray-200 z-10 flex-shrink-0">
                     <div className="max-w-2xl mx-auto">
                         <div className="flex justify-between items-center font-bold mb-3 px-2">
                             <span className="text-lg text-gray-600">총 합계:</span>

@@ -9,7 +9,7 @@ interface SearchDropdownProps<T> {
 const SearchDropdown = <T,>({ items, renderItem, show }: SearchDropdownProps<T>) => {
     if (!show || items.length === 0) return null;
     return (
-        <div className="absolute z-30 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-72 overflow-y-auto shadow-lg">
+        <div className="absolute z-30 w-full bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200/80 rounded-lg mt-1 max-h-72 overflow-y-auto">
             {items.map((item, index) => (
                 <React.Fragment key={index}>{renderItem(item)}</React.Fragment>
             ))}

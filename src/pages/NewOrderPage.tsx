@@ -412,9 +412,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     }
 
     return (
-        <div className="h-full flex flex-col relative bg-transparent">
+        <div className="h-full flex flex-col relative bg-white">
             <DraftLoadedToast show={showDraftLoadedToast} />
-            <div className="w-full p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-20 border-b border-gray-200/80">
+            <div className="w-full p-3 bg-white flex-shrink-0 z-20 border-b border-gray-200 shadow-sm">
                 <div className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
                     <div className="flex flex-col gap-2 flex-grow">
                         <div className="relative">
@@ -450,7 +450,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             <SearchDropdown<Customer>
                                 items={filteredCustomers}
                                 renderItem={(c) => (
-                                    <div onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700">
+                                    <div onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
                                         {c.name} <span className="text-sm text-gray-500">({c.comcode})</span>
                                     </div>
                                 )}
@@ -511,8 +511,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             <p className="text-sm mt-1">상단에서 검색하거나 스캔 버튼을 사용하세요.</p>
                         </div>
                     ) : (
-                        <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
-                            <div className="divide-y divide-gray-100">
+                        <div>
+                            <div className="divide-y divide-gray-200">
                                 {items.map(item => (
                                     <OrderItemRow
                                         key={item.barcode}
@@ -528,7 +528,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 </div>
             </main>
 
-            <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10">
+            <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-gray-200 z-10">
                 <div className="max-w-2xl mx-auto">
                     <div className="flex justify-between items-center font-bold mb-3 px-2">
                         <span className="text-lg text-gray-600">총 합계:</span>

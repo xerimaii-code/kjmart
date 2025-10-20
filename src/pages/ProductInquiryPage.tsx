@@ -135,12 +135,10 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
         return (
             <div className="space-y-3">
-                <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
-                    <div className="divide-y divide-gray-200/80">
-                        {displayedProducts.map((product, index) => (
-                            <ProductCard key={product.barcode} product={product} index={index} />
-                        ))}
-                    </div>
+                <div className="divide-y divide-gray-200">
+                    {displayedProducts.map((product, index) => (
+                        <ProductCard key={product.barcode} product={product} index={index} />
+                    ))}
                 </div>
                 {totalFound > MAX_RESULTS_TO_DISPLAY && (
                     <div className="text-center text-sm font-semibold text-gray-600 bg-gray-100 p-3 rounded-lg">
@@ -152,8 +150,8 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
     
     return (
-        <div className="h-full flex flex-col bg-transparent">
-            <div className="fixed-filter w-full p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80 z-10">
+        <div className="h-full flex flex-col bg-white">
+            <div className="fixed-filter w-full p-3 bg-white border-b border-gray-200 z-10 shadow-sm">
                 <form onSubmit={handleSearch} className="relative w-full max-w-2xl mx-auto">
                     <div className="absolute top-1/2 left-4 -translate-y-1/2 text-gray-400 pointer-events-none">
                         <SearchIcon className="w-5 h-5" />
