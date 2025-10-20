@@ -56,29 +56,31 @@ const TabButton: React.FC<{
 }> = ({ page, label, Icon, isActive, onClick }) => (
     <button
         onClick={() => onClick(page)}
-        className={`relative flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
+        className={`flex-1 flex items-center justify-center py-2 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
             isActive 
                 ? 'text-blue-600' 
                 : 'text-gray-500 hover:text-gray-900'
         }`}
         aria-current={isActive ? 'page' : undefined}
     >
-        <div className="relative z-10 flex items-center justify-center gap-2">
-            <Icon className="w-5 h-5" />
-            <span>{label}</span>
+        <div className="relative"> {/* Wrapper for positioning the underline */}
+            <div className="flex items-center gap-1"> {/* Icon and text with new gap */}
+                <Icon className="w-5 h-5" />
+                <span>{label}</span>
+            </div>
+            {isActive && (
+                <div 
+                    className="absolute -bottom-2 left-0 right-0 h-0.5 bg-blue-600 rounded-full"
+                />
+            )}
         </div>
-        {isActive && (
-            <div 
-                className="absolute inset-0 bg-blue-100 rounded-lg"
-            />
-        )}
     </button>
 );
 
 const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
     return (
         <nav className="w-full bg-white/60 backdrop-blur-lg flex justify-around items-center flex-shrink-0 p-2 border-b border-gray-200/80">
-            <div className="flex w-full justify-around items-center h-full gap-2">
+            <div className="flex w-full justify-around items-center h-full gap-1">
                 <TabButton
                     page="history"
                     label="발주내역"

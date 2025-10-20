@@ -1,5 +1,7 @@
 {
   "name": "KJmart-app",
   "description": "",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

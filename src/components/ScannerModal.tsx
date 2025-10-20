@@ -24,7 +24,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
     const [isRendered, setIsRendered] = useState(false);
 
-    // Lazy-initialize and resume AudioContext on demand
+    // Lazy-initialize AudioContext
     const getAudioContext = useCallback((): AudioContext | null => {
         if (!audioCtxRef.current) {
             try {
@@ -34,22 +34,24 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 return null;
             }
         }
-        
-        if (audioCtxRef.current.state === 'suspended') {
-            audioCtxRef.current.resume().catch(err => console.error("Failed to resume AudioContext:", err));
-        }
-        
         return audioCtxRef.current;
     }, []);
     
-    const playBeep = useCallback(() => {
+    const playBeep = useCallback(async () => {
         const audioCtx = getAudioContext();
-        if (!audioCtx || audioCtx.state !== 'running') {
-            console.warn(`Cannot play beep. AudioContext not ready. State: ${audioCtx?.state}`);
-            if(audioCtx) {
-                 audioCtx.resume();
-            }
+        if (!audioCtx) {
+            console.warn("Cannot play beep. AudioContext not available.");
             return;
+        }
+    
+        // Resume context if suspended. This must be tied to a user gesture.
+        if (audioCtx.state === 'suspended') {
+            try {
+                await audioCtx.resume();
+            } catch (err) {
+                console.error("Failed to resume AudioContext:", err);
+                return; // Can't play sound if context fails to resume
+            }
         }
     
         try {

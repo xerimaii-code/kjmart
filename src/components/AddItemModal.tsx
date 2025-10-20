@@ -161,9 +161,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                     {isContinuousScan ? (
                         <div className="space-y-2">
                              <button onMouseDown={(e) => e.preventDefault()} onClick={handleAddAndScan} className="w-full text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95">추가 후 계속 스캔</button>
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (onNextScan) { onClose(); onNextScan(); } }} className="px-4 h-12 flex items-center justify-center rounded-lg font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95">건너뛰기</button>
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-4 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">스캔 종료</button>
+                            <div className="grid grid-cols-3 gap-2">
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95 text-center">추가 후 종료</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (onNextScan) { onClose(); onNextScan(); } }} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">건너뛰기</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">스캔 종료</button>
                             </div>
                         </div>
                     ) : (
