@@ -38,6 +38,9 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
                 <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
                     {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5 tracking-wide">NEW</span>}
                     {isModified && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5 tracking-wide">수정</span>}
+                    {saleIsActive && hasSalePrice && (
+                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
+                    )}
                     <span>{item.name}</span>
                 </p>
 

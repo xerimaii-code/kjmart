@@ -24,23 +24,56 @@ const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
     );
 };
 
-const OrderItemRow = memo(({ item, onEdit, onRemove }: { item: OrderItem; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void }) => {
+const OrderItemRow = memo(({ item, product, onEdit, onRemove }: { item: OrderItem; product: Product | undefined; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void }) => {
+    const saleIsActive = product ? isSaleActive(product.saleEndDate) : false;
+    const hasSalePrice = product ? !!product.salePrice : false;
+
     return (
         <div
             className="flex items-center p-3.5 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
             onClick={() => onEdit(item)}
         >
-            <div className="flex-grow min-w-0 pr-1">
+            <div className="flex-grow min-w-0 pr-1 space-y-1.5">
                 <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
+                    {saleIsActive && hasSalePrice && (
+                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
+                    )}
                     <span>{item.name}</span>
                 </p>
+
+                <p className="text-sm font-bold text-blue-600">발주가: {item.price.toLocaleString()}원</p>
+                
+                {product && (
+                    <div className="text-xs flex items-baseline gap-x-1.5 flex-wrap text-gray-500">
+                        <span>현재:</span>
+                        <span className="font-semibold">{product.costPrice?.toLocaleString()}원</span>
+                        <span className="text-gray-400">/</span>
+                        <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                            {product.sellingPrice?.toLocaleString()}원
+                        </span>
+                        {hasSalePrice && (
+                            <span
+                                className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
+                                style={!saleIsActive ? { fontSize: '80%' } : {}}
+                            >
+                                {product.salePrice}원
+                            </span>
+                        )}
+                    </div>
+                )}
+                 {product && product.saleEndDate && (
+                     <div className="text-xs text-gray-500">
+                        <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                            행사기간: ~{product.saleEndDate}
+                        </span>
+                     </div>
+                )}
                 {item.memo && (
-                    <p className="text-xs text-blue-600 flex items-start gap-1.5 mt-1">
+                    <p className="text-xs text-blue-600 flex items-start gap-1.5">
                         <ChatBubbleLeftIcon className="w-4 h-4 flex-shrink-0 mt-px" />
                         <span className="break-all">{item.memo}</span>
                     </p>
                 )}
-                <p className="text-sm text-gray-500 mt-1">{item.price.toLocaleString()}원</p>
             </div>
             <div className="flex items-center space-x-2 flex-shrink-0">
                 <span className="w-14 text-center text-gray-800 font-bold text-lg select-none">{item.quantity}</span>
@@ -444,89 +477,85 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 autoComplete="off"
                             />
                             <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center">
-                                <ToggleSwitch
-                                    id="new-order-box-unit"
-                                    label="박스"
-                                    checked={isBoxUnitDefault}
-                                    onChange={setIsBoxUnitDefault}
-                                    disabled={!isCustomerSelected}
-                                    color="blue"
-                                />
+                                <ToggleSwitch id="new-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
                             </div>
-                            <SearchDropdown<Product>
+                           <SearchDropdown<Product>
                                 items={filteredProducts}
-                                renderItem={(p) => (
-                                    <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />
-                                )}
+                                renderItem={(p) => <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />}
                                 show={showProductDropdown}
                             />
                         </div>
                     </div>
-                    
-                    <div className="flex-shrink-0 ml-2">
-                        <button
-                            onClick={handleOpenScanner}
-                            className="h-full w-24 bg-blue-600 text-white rounded-xl p-2 flex flex-col items-center justify-center gap-1.5 font-bold hover:bg-blue-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30"
-                            disabled={!isCustomerSelected}
-                            aria-label="바코드 스캔"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
-                            <span className="text-sm">스캔</span>
-                        </button>
-                    </div>
+                     <button
+                        onClick={handleOpenScanner}
+                        disabled={!isCustomerSelected}
+                        className="h-full w-20 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1.5 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6.5 2.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6.5 2.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 10h.01M15 10h.01M12 10h.01M12 10h.01M12 6.01M12 18.01" />
+                        </svg>
+                        <span className="text-sm">스캔</span>
+                    </button>
                 </div>
             </div>
 
-            <div ref={scrollableContainerRef} className="scrollable-content p-3 pb-40">
-                 {items.length === 0 ? (
-                    <div className="relative flex flex-col items-center justify-center h-full text-gray-400 mt-[-5rem] max-w-2xl mx-auto">
-                        <PlusCircleIcon className="w-16 h-16 text-gray-300 mb-4"/>
-                        <p className="text-center text-lg font-semibold">발주 품목이 없습니다</p>
-                        <p className="text-sm">스캐너 또는 검색을 이용해 품목을 추가하세요.</p>
-                    </div>
-                ) : (
-                    <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden max-w-2xl mx-auto">
-                        <div className="divide-y divide-gray-100">
-                            {items.map((item) => (
-                                <OrderItemRow 
-                                    key={item.barcode} 
-                                    item={item} 
-                                    onEdit={handleEditItem} 
-                                    onRemove={handleRemoveItem} 
-                                />
-                            ))}
+            <main ref={scrollableContainerRef} className="flex-grow overflow-y-auto">
+                <div className="p-3 pb-40 max-w-2xl mx-auto">
+                    {items.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 pt-20">
+                            <PlusCircleIcon className="w-16 h-16 text-gray-300 mb-4" />
+                            <p className="text-lg font-semibold">발주할 품목을 추가하세요</p>
+                            <p className="text-sm mt-1">상단에서 검색하거나 스캔 버튼을 사용하세요.</p>
                         </div>
-                    </div>
-                )}
-            </div>
+                    ) : (
+                        <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
+                            <div className="divide-y divide-gray-100">
+                                {items.map(item => (
+                                    <OrderItemRow
+                                        key={item.barcode}
+                                        item={item}
+                                        product={products.find(p => p.barcode === item.barcode)}
+                                        onEdit={handleEditItem}
+                                        onRemove={handleRemoveItem}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </main>
 
-            <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60">
+            <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10">
                 <div className="max-w-2xl mx-auto">
                     <div className="flex justify-between items-center font-bold mb-3 px-2">
                         <span className="text-lg text-gray-600">총 합계:</span>
                         <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                     </div>
-                     <div className="flex items-stretch gap-2">
-                        <button 
-                            onClick={handleResetOrder} 
-                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95"
+                    <div className="grid grid-cols-3 gap-2">
+                        <button
+                            onClick={handleResetOrder}
+                            disabled={isSaving}
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95"
                         >
                             <TrashIcon className="w-5 h-5" />
+                            초기화
                         </button>
-                        <button 
-                            onClick={handleOpenMemoModal}
-                            disabled={items.length === 0}
-                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed active:scale-95"
+                        <button
+                             onClick={handleOpenMemoModal}
+                             disabled={isSaving}
+                             className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95"
                         >
                             <DocumentTextIcon className="w-5 h-5"/>
-                            <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>
+                            메모
                         </button>
-                        <button 
-                            onClick={handleSaveOrder} 
-                            disabled={isSaving || items.length === 0 || !isCustomerSelected}
-                            className="flex-grow bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
+                        <button
+                            onClick={handleSaveOrder}
+                            disabled={isSaving || !selectedCustomer || items.length === 0}
+                            className="bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
                         >
-                            {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '신규 발주 저장'}
+                            {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '발주 저장'}
                         </button>
                     </div>
                 </div>
