@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
 import { OrderItem, Product, EditedOrderDraft } from '../types';
@@ -175,6 +176,8 @@ const OrderDetailModal: React.FC = () => {
     const productSearchInputRef = useRef<HTMLInputElement>(null);
     const productSearchBlurTimeout = useRef<number | null>(null);
     const itemsRef = useRef<OrderItem[]>([]);
+    const scrollableContainerRef = useRef<HTMLElement>(null);
+    const lastItemRef = useRef<HTMLDivElement>(null);
 
     const { items, addOrUpdateItem, updateItem, removeItem, resetItems, totalAmount } = useOrderManager({
         initialItems: originalOrder?.items || [],
@@ -227,6 +230,22 @@ const OrderDetailModal: React.FC = () => {
         const timer = setTimeout(() => setIsRendered(true), 10);
         return () => clearTimeout(timer);
     }, []);
+
+    const prevItemsLength = useRef(originalOrder?.items?.length ?? 0);
+    useEffect(() => {
+        if (isRendered && lastItemRef.current) {
+            const isAddingItem = items.length > prevItemsLength.current;
+            // A short delay can help ensure rendering is complete
+            setTimeout(() => {
+                lastItemRef.current?.scrollIntoView({
+                    behavior: isAddingItem ? 'smooth' : 'auto',
+                    block: 'end',
+                });
+            }, 150);
+        }
+        prevItemsLength.current = items.length;
+    }, [isRendered, items.length]);
+
 
     // --- Handlers ---
     const handleClose = useCallback(() => {
@@ -341,13 +360,14 @@ const OrderDetailModal: React.FC = () => {
 
     return (
         <div 
-            className={`fixed inset-0 bg-black z-40 flex items-start justify-center pt-28 transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`}
+            className={`fixed inset-0 bg-black z-40 transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`}
             onClick={handleClose}
             role="dialog"
             aria-modal="true"
         >
             <div 
-                className={`w-full max-w-3xl max-h-[calc(100vh-8rem)] flex flex-col bg-gray-100 rounded-2xl shadow-2xl transition-all duration-500 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${isRendered ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}
+                style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}
+                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-gray-100 shadow-2xl transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isRendered ? 'translate-y-0' : 'translate-y-full'} rounded-t-2xl`}
                 onClick={e => e.stopPropagation()}
             >
                 <header className="relative bg-white/80 backdrop-blur-xl p-4 flex-shrink-0 border-b border-gray-200/80 z-20 rounded-t-2xl flex items-center justify-center">
@@ -359,6 +379,13 @@ const OrderDetailModal: React.FC = () => {
                         <RemoveIcon className="w-6 h-6"/>
                     </button>
                 </header>
+                
+                {isCompleted && (
+                    <div className="p-3 bg-yellow-100 border-b border-yellow-200 flex-shrink-0 z-10 text-center text-yellow-800" role="alert">
+                        <p className="font-bold">완료된 발주</p>
+                        <p className="text-sm">이 발주는 완료 처리되어 수정할 수 없습니다.</p>
+                    </div>
+                )}
                 
                 {!isCompleted && (
                     <div className="p-3 bg-white/60 backdrop-blur-lg flex-shrink-0 z-10 border-b border-gray-200/80">
@@ -388,19 +415,14 @@ const OrderDetailModal: React.FC = () => {
                     </div>
                 )}
 
-                <main className="flex-grow overflow-y-auto">
-                    <div className="p-3 pb-40 max-w-2xl mx-auto">
-                        {isCompleted && (
-                            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded-r-lg mb-3" role="alert">
-                                <p className="font-bold">완료된 발주</p>
-                                <p className="text-sm">이 발주는 완료 처리되어 수정할 수 없습니다.</p>
-                            </div>
-                        )}
+                <main ref={scrollableContainerRef} className="flex-grow overflow-y-auto">
+                    <div className="p-3 pb-28 max-w-2xl mx-auto">
                         <div className="bg-white rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
                             <div className="divide-y divide-gray-100">
-                                {items.map(item => (
+                                {items.map((item, index) => (
                                     <EditedItemRow
                                         key={item.barcode}
+                                        ref={index === items.length - 1 ? lastItemRef : null}
                                         item={item}
                                         product={products.find(p => p.barcode === item.barcode)}
                                         isCompleted={isCompleted}
@@ -415,19 +437,21 @@ const OrderDetailModal: React.FC = () => {
                     </div>
                 </main>
                 
-                <footer className="p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10 rounded-b-2xl">
+                <footer className="p-3 bg-white/80 backdrop-blur-xl border-t border-gray-200/60 z-10 flex-shrink-0">
                     <div className="max-w-2xl mx-auto">
                         <div className="flex justify-between items-center font-bold mb-3 px-2">
                             <span className="text-lg text-gray-600">총 합계:</span>
                             <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                         </div>
                         {!isCompleted && (
-                             <div className="flex items-stretch gap-2">
-                                <button onClick={handleOpenMemoModal} className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95">
+                             <div className="grid grid-cols-6 gap-2">
+                                <button onClick={handleOpenMemoModal} className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1">
                                     <DocumentTextIcon className="w-5 h-5"/>
-                                    <span className="hidden sm:inline">{memo ? '메모 수정' : '메모 추가'}</span>
                                 </button>
-                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="flex-grow bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95">
+                                <button onClick={handleClose} className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-2">
+                                    닫기
+                                </button>
+                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
                                     {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '변경사항 저장'}
                                 </button>
                             </div>
