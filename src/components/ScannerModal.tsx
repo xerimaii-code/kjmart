@@ -120,12 +120,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 } as any;
                 
                 const constraintsToTry: MediaStreamConstraints[] = [
-                    // --- Prioritize torch for brightness, trying higher resolutions first ---
-                    { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, torch: true, width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
-                    { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, torch: true, width: { ideal: 1280 }, height: { ideal: 720 } } as any },
-                    { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', torch: true } },
-
-                    // --- Fallbacks without torch ---
                     { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, width: { ideal: 1920 }, height: { ideal: 1080 } } as any },
                     { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings, width: { ideal: 1280 }, height: { ideal: 720 } } as any },
                     { audio: false, video: { ...baseVideoConstraints, ...advancedVideoSettings } as any },
