@@ -115,8 +115,8 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
         const baseTranslate = -activeIndex * containerWidth;
         const movedBy = translateX - baseTranslate;
         
-        // Change page if swipe is more than 40% of the screen width
-        const threshold = containerWidth * 0.4;
+        // Change page if swipe is more than 30% of the screen width
+        const threshold = containerWidth * 0.3;
 
         let newIndex = activeIndex;
         if (movedBy < -threshold && activeIndex < items.length - 1) {
@@ -136,7 +136,7 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
     // Style object to be applied to the swipeable container
     const containerStyle: React.CSSProperties = {
         transform: `translateX(${translateX}px)`,
-        transition: isAnimating ? 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'none',
+        transition: isAnimating ? 'transform 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55)' : 'none',
     };
 
     return { onTouchStart, onTouchMove, onTouchEnd, containerStyle };
