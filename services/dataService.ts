@@ -1,4 +1,4 @@
-import { Customer, Order, Product, OrderItem } from "../types";
+import { Customer, Order, Product, OrderItem } from "../src/types";
 
 // Assuming these libraries are loaded from CDN
 declare const XLSX: any;

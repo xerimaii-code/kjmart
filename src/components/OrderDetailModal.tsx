@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
 import { OrderItem, Product, EditedOrderDraft } from '../types';
-import { RemoveIcon, CheckCircleIcon, SmsIcon, XlsIcon, ChatBubbleLeftIcon, SpinnerIcon, DocumentIcon, BarcodeScannerIcon, SearchIcon, PencilSquareIcon, DocumentTextIcon, TrashIcon } from './Icons';
+import { RemoveIcon, ChatBubbleLeftIcon, SpinnerIcon, BarcodeScannerIcon, DocumentTextIcon } from './Icons';
 import ToggleSwitch from './ToggleSwitch';
 import { isSaleActive, useOrderManager } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
@@ -24,37 +24,58 @@ const normalizeItemsForComparison = (items: OrderItem[]): Omit<OrderItem, 'price
 // --- Sub-components for the Modal ---
 
 const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; product: Product | undefined; isCompleted: boolean, isNew: boolean, isModified: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, product, isCompleted, isNew, isModified, onEdit, onRemove }, ref) => {
+    const saleIsActive = product ? isSaleActive(product.saleEndDate) : false;
+    const hasSalePrice = product ? !!product.salePrice : false;
+
     return (
         <div
             ref={ref}
             className={`flex items-center p-3.5 space-x-3 transition-colors duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
             onClick={() => !isCompleted && onEdit(item)}
         >
-            <div className="flex-grow min-w-0 pr-1">
+            <div className="flex-grow min-w-0 pr-1 space-y-1.5">
+                {/* Product Name */}
                 <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
                     {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5 tracking-wide">NEW</span>}
                     {isModified && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5 tracking-wide">수정</span>}
                     <span>{item.name}</span>
                 </p>
-                 {product ? (
-                    <div className="text-sm text-gray-600 mt-1.5">
-                        <span>
-                            (<b className="font-bold text-gray-800">{item.price.toLocaleString()}</b>
-                            {' / '}
-                            <span className={isSaleActive(product.saleEndDate) && !!product.salePrice ? 'text-gray-500 line-through' : ''}>{product.sellingPrice.toLocaleString()}</span>)
-                        </span>
-                        {product.salePrice && (
-                            <span className={`ml-1.5 font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-500'}`}>
-                                ({product.salePrice})
-                            </span>
-                        )}
-                    </div>
-                ) : (
-                    <p className="text-sm text-gray-500 mt-1.5 font-bold text-blue-600">발주단가: {item.price.toLocaleString()}원</p>
-                )}
 
+                {/* Price info */}
+                <>
+                  <p className="text-sm font-bold text-blue-600">발주가: {item.price.toLocaleString()}원</p>
+                  {product && (
+                      <div className="text-xs flex items-baseline gap-x-1.5 flex-wrap text-gray-500">
+                          <span>현재:</span>
+                          <span className="font-semibold">{product.costPrice?.toLocaleString()}원</span>
+                          <span className="text-gray-400">/</span>
+                          <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                              {product.sellingPrice?.toLocaleString()}원
+                          </span>
+                          {hasSalePrice && (
+                              <span
+                                  className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
+                                  style={!saleIsActive ? { fontSize: '80%' } : {}}
+                              >
+                                  {product.salePrice}원
+                              </span>
+                          )}
+                      </div>
+                  )}
+                </>
+                
+                {/* Sale Period and Supplier */}
+                {product && product.saleEndDate && (
+                     <div className="text-xs text-gray-500">
+                        <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                            행사기간: ~{product.saleEndDate}
+                        </span>
+                     </div>
+                )}
+                
+                {/* Memo */}
                 {item.memo && (
-                    <p className="text-xs text-blue-600 flex items-start gap-1.5 mt-1.5">
+                    <p className="text-xs text-blue-600 flex items-start gap-1.5">
                         <ChatBubbleLeftIcon className="w-4 h-4 flex-shrink-0 mt-px" />
                         <span className="break-all">{item.memo}</span>
                     </p>
@@ -80,45 +101,47 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
 
     return (
         <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
-            <div className="flex flex-col items-start w-full space-y-1">
-                {/* Line 1: Product Name & Sale Badge */}
-                <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-col items-start w-full gap-y-1">
+                {/* Line 1: Product Name, Sale Badge */}
+                <div className="flex items-center gap-2 flex-wrap w-full">
                     <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
                     {saleIsActive && hasSalePrice && (
                         <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
                     )}
                 </div>
-                
-                {/* Line 2: Prices */}
-                <div className="text-sm text-gray-700 font-medium">
-                    {saleIsActive && hasSalePrice ? (
-                        <>
-                            <span>{product.costPrice?.toLocaleString()}</span>
-                            <span className="text-gray-400 mx-0.5">/</span>
-                            <span className="line-through text-gray-400">{product.sellingPrice?.toLocaleString()}</span>
-                            <span className="text-red-600 font-bold ml-1.5">{product.salePrice}</span>
-                        </>
-                    ) : (
-                        <span>
-                            {product.costPrice?.toLocaleString()}
-                            <span className="text-gray-400 mx-0.5">/</span>
-                            {product.sellingPrice?.toLocaleString()}
+
+                {/* Line 2: Barcode */}
+                <p className="text-sm text-gray-500">{product.barcode}</p>
+
+                {/* Line 3: Prices */}
+                <div className="text-sm text-gray-700 font-medium flex items-baseline gap-x-2 flex-wrap">
+                    <span className={`${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'font-bold'}`}>
+                        {product.sellingPrice?.toLocaleString()}원
+                    </span>
+                    {hasSalePrice && (
+                        <span 
+                            className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
+                            style={!saleIsActive ? { fontSize: '70%' } : {}}
+                        >
+                            {product.salePrice}원
                         </span>
                     )}
+                    <span className="text-gray-500 text-xs">({product.costPrice?.toLocaleString()}원)</span>
                 </div>
 
-                {/* Line 3: Event Info */}
+                {/* Line 4: Event Info */}
                 {(product.saleEndDate || product.supplierName) && (
                     <div className="text-xs text-gray-500">
-                        {product.saleEndDate && (
-                            <span className={saleIsActive ? 'font-bold text-blue-600' : ''}>
-                                행사종료: {product.saleEndDate}
-                            </span>
-                        )}
-                        {product.saleEndDate && product.supplierName && <span className="mx-1">|</span>}
-                        {product.supplierName && (
-                            <span>거래처: {product.supplierName}</span>
-                        )}
+                        <div className="flex items-center gap-x-3">
+                            {product.saleEndDate && (
+                                <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                                    ~{product.saleEndDate}
+                                </span>
+                            )}
+                            {product.supplierName && (
+                                <span>{product.supplierName}</span>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

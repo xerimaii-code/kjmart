@@ -319,17 +319,18 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
 
     return (
         <div className="h-full flex flex-col bg-transparent">
-            <div className="fixed-filter p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
-                <div className="flex justify-between items-center gap-4 max-w-2xl mx-auto w-full">
-                    <h2 className="text-xl font-bold text-gray-800 flex-shrink-0">발주 내역</h2>
-                    <div className="flex items-center gap-2 text-sm">
-                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-36 bg-white/80" aria-label="시작일" />
-                        <span className="text-gray-500 font-semibold">~</span>
-                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-36 bg-white/80" aria-label="종료일" />
+            <div ref={listRef} className="scrollable-content">
+                <div className="sticky top-0 z-10 p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
+                    <div className="flex justify-between items-center gap-4 max-w-2xl mx-auto w-full">
+                        <h2 className="text-xl font-bold text-gray-800 flex-shrink-0">발주 내역</h2>
+                        <div className="flex items-center gap-2 text-sm">
+                            <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-36 bg-white/80" aria-label="시작일" />
+                            <span className="text-gray-500 font-semibold">~</span>
+                            <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 w-36 bg-white/80" aria-label="종료일" />
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div ref={listRef} className="scrollable-content">
+
                 {isLoading ? (
                     <div className="flex items-center justify-center h-full pt-16">
                         <SpinnerIcon className="w-10 h-10 text-blue-500" />

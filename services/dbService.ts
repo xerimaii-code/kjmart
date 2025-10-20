@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
 import { firebaseConfig } from '../firebaseConfig';
-import { Order, OrderItem } from '../types';
+import { Order, OrderItem } from '../src/types';
 
 let app;
 let db;

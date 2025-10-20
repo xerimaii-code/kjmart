@@ -1,4 +1,4 @@
-import { NewOrderDraft, EditedOrderDraft } from '../types';
+import { NewOrderDraft, EditedOrderDraft } from '../src/types';
 
 const DB_NAME = 'KJMartDraftsDB';
 const DB_VERSION = 1;

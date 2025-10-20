@@ -1,13 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-// FIX: Corrected import path for App component.
-import App from './src/App';
+import App from './App';
 
 // --- PWA Service Worker Registration ---
 if ('serviceWorker' in navigator) {
   // Register the service worker as soon as the main script loads.
   // The script is deferred, so the DOM is ready. We use a relative path to ensure it loads from the correct origin.
-  // FIX: Use absolute path for service worker to ensure correct registration regardless of current URL.
   navigator.serviceWorker.register('/service-worker.js')
     .then(registration => {
       console.log('Service Worker registered successfully with scope:', registration.scope);

@@ -51,27 +51,16 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     if (!isOpen || !product) return null;
 
     const handleAdd = () => {
-        if (quantity === '' || quantity === '-') {
-            return; // Do not close, allow user to correct invalid input.
-        }
         const finalQuantity = Number(quantity);
-        if (!Number.isFinite(finalQuantity)) {
-            return; // Extra safety for invalid numbers
-        }
+        if (isNaN(finalQuantity)) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
         onClose();
     };
 
     const handleAddAndScan = () => {
-        if (quantity === '' || quantity === '-') {
-            return;
-        }
         const finalQuantity = Number(quantity);
-        if (!Number.isFinite(finalQuantity)) {
-            return;
-        }
+        if (isNaN(finalQuantity)) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
-        
         onClose();
         if (onNextScan) {
             onNextScan();
@@ -80,6 +69,9 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     
     const isContinuousScan = trigger === 'scan' && onNextScan;
     const changeQuantity = (delta: number) => setQuantity(q => (Number(q) || 0) + delta);
+    
+    const saleIsActive = isSaleActive(product.saleEndDate);
+    const hasSalePrice = !!product.salePrice;
 
     return (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
@@ -87,21 +79,34 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                 <div className="p-5">
                     <h3 id="addItemModalTitle" className="text-2xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
                     <div className="text-center text-gray-600 mb-4 space-y-1">
-                        <p className="flex justify-center items-baseline flex-wrap gap-x-3 text-lg">
-                            <span>
-                                (<span className="font-bold text-gray-800">{product.costPrice.toLocaleString()} / {product.sellingPrice.toLocaleString()}</span>)
+                        <div className="text-lg flex items-baseline justify-center gap-x-1.5 flex-wrap">
+                            <span className="text-gray-600 font-semibold">{product.costPrice.toLocaleString()}원</span>
+                            <span className="text-gray-400">/</span>
+                            <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                {product.sellingPrice?.toLocaleString()}원
                             </span>
-                            {product.salePrice && (
-                                <span className={`font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-700'}`}>
-                                    ({product.salePrice})
+                            {hasSalePrice && (
+                                <span 
+                                    className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
+                                    style={!saleIsActive ? { fontSize: '80%' } : {}}
+                                >
+                                    {product.salePrice}원
                                 </span>
                             )}
-                        </p>
+                        </div>
                         {(product.saleEndDate || product.supplierName) && (
-                             <p className="text-gray-500 flex justify-center items-baseline gap-x-1.5 flex-wrap">
-                                {product.saleEndDate && <span className="text-base">{`행사종료: ${product.saleEndDate}`}</span>}
-                                {product.supplierName && <span className="text-xs">{`(${product.supplierName})`}</span>}
-                            </p>
+                            <div className="text-sm text-gray-500">
+                                <div className="flex items-center justify-center gap-x-3">
+                                    {product.saleEndDate && (
+                                        <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400 text-xs'}>
+                                            ~{product.saleEndDate}
+                                        </span>
+                                    )}
+                                    {product.supplierName && (
+                                        <span>({product.supplierName})</span>
+                                    )}
+                                </div>
+                            </div>
                         )}
                     </div>
                     {existingItem && (

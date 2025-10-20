@@ -71,6 +71,9 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
         setQuantity(q => (Number(q) || 0) + delta);
     };
 
+    const saleIsActive = product ? isSaleActive(product.saleEndDate) : false;
+    const hasSalePrice = product ? !!product.salePrice : false;
+
     return (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="editItemModalTitle">
             <div ref={modalContentRef} className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
@@ -78,26 +81,39 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
                     <h3 id="editItemModalTitle" className="text-2xl font-bold text-gray-800 text-center mb-1 truncate" title={item.name}>{item.name}</h3>
                     {product ? (
                         <div className="text-center text-gray-600 mb-4 space-y-1">
-                            <p className="flex justify-center items-baseline flex-wrap gap-x-3 text-lg">
-                                <span>
-                                    (<span className="font-bold text-gray-800">{product.costPrice.toLocaleString()} / {product.sellingPrice.toLocaleString()}</span>)
+                            <div className="text-lg flex items-baseline justify-center gap-x-1.5 flex-wrap">
+                                <span className="text-gray-600 font-semibold">{product.costPrice?.toLocaleString()}원</span>
+                                <span className="text-gray-400">/</span>
+                                <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                    {product.sellingPrice?.toLocaleString()}원
                                 </span>
-                                {product.salePrice && (
-                                    <span className={`font-bold ${isSaleActive(product.saleEndDate) ? 'text-red-600' : 'text-gray-700'}`}>
-                                        ({product.salePrice})
+                                {hasSalePrice && (
+                                    <span
+                                        className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
+                                        style={!saleIsActive ? { fontSize: '80%' } : {}}
+                                    >
+                                        {product.salePrice}원
                                     </span>
                                 )}
-                            </p>
+                            </div>
                             {(product.saleEndDate || product.supplierName) && (
-                                <p className="text-gray-500 flex justify-center items-baseline gap-x-1.5 flex-wrap">
-                                    {product.saleEndDate && <span className="text-base">{`행사종료: ${product.saleEndDate}`}</span>}
-                                    {product.supplierName && <span className="text-xs">{`(${product.supplierName})`}</span>}
-                                </p>
+                                <div className="text-sm text-gray-500">
+                                    <div className="flex items-center justify-center gap-x-3">
+                                        {product.saleEndDate && (
+                                            <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400 text-xs'}>
+                                                ~{product.saleEndDate}
+                                            </span>
+                                        )}
+                                        {product.supplierName && (
+                                            <span>({product.supplierName})</span>
+                                        )}
+                                    </div>
+                                </div>
                             )}
                             <p className="font-bold text-blue-600 pt-1 text-lg">발주단가: {item.price.toLocaleString()}원</p>
                         </div>
                    ) : (
-                        <p className="text-center text-lg text-gray-500 mb-4">발주단가: {item.price.toLocaleString()}원</p>
+                        <p className="text-center text-lg text-gray-500 mb-4 font-bold text-blue-600">발주단가: {item.price.toLocaleString()}원</p>
                    )}
                     
                     <div className="space-y-4">

@@ -11,56 +11,53 @@ const ProductCard: React.FC<{ product: Product, index: number }> = ({ product, i
     const hasSalePrice = !!product.salePrice;
 
     return (
-        <div 
-            className="p-4 flex justify-between items-start gap-4 animate-card-enter"
+        <div
+            className="p-4 flex flex-col items-start gap-y-1 animate-card-enter"
             style={{ animationDelay: `${Math.min(index * 50, 500)}ms` }}
         >
-            {/* Left side: Product Name, Sale Badge, and Barcode */}
-            <div className="flex-grow min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <p className="font-bold text-gray-800 text-base whitespace-pre-wrap">{product.name}</p>
-                    {saleIsActive && hasSalePrice && (
-                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
-                    )}
-                </div>
-                <p className="text-sm text-gray-500">{product.barcode}</p>
-            </div>
-
-            {/* Right side: Price and Sale Info */}
-            <div className="flex-shrink-0 text-right space-y-1">
-                {/* Price Line */}
-                <div className="text-base font-medium text-gray-800">
-                    {saleIsActive && hasSalePrice ? (
-                        <>
-                            <span>{product.costPrice?.toLocaleString()}</span>
-                            <span className="text-gray-400 mx-0.5">/</span>
-                            <span className="line-through text-gray-400">{product.sellingPrice?.toLocaleString()}</span>
-                            <span className="text-red-600 font-bold ml-1.5">{product.salePrice}</span>
-                        </>
-                    ) : (
-                        <>
-                            <span>{product.costPrice?.toLocaleString()}</span>
-                            <span className="text-gray-400 mx-0.5">/</span>
-                            <span>{product.sellingPrice?.toLocaleString()}</span>
-                        </>
-                    )}
-                </div>
-                
-                {/* Sale End Date and Supplier Line */}
-                {(product.saleEndDate || product.supplierName) && (
-                    <div className="text-xs text-gray-500">
-                        {product.saleEndDate && (
-                            <span className={saleIsActive ? 'font-bold text-blue-600' : ''}>
-                                행사종료: {product.saleEndDate}
-                            </span>
-                        )}
-                        {product.saleEndDate && product.supplierName && <span className="mx-1">|</span>}
-                        {product.supplierName && (
-                            <span>거래처: {product.supplierName}</span>
-                        )}
-                    </div>
+            {/* Line 1: Product Name, Sale Badge */}
+            <div className="flex items-center gap-2 flex-wrap w-full">
+                <p className="font-bold text-gray-800 text-base whitespace-pre-wrap">{product.name}</p>
+                {saleIsActive && hasSalePrice && (
+                    <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
                 )}
             </div>
+            
+            {/* Line 2: Barcode */}
+            <p className="text-sm text-gray-500">{product.barcode}</p>
+
+            {/* Line 3: Price Info */}
+            <div className="text-base flex items-baseline gap-x-1.5 flex-wrap">
+                <span className="text-gray-600 font-semibold">{product.costPrice?.toLocaleString()}원</span>
+                <span className="text-gray-400">/</span>
+                <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                    {product.sellingPrice?.toLocaleString()}원
+                </span>
+                {hasSalePrice && (
+                    <span 
+                        className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
+                        style={!saleIsActive ? { fontSize: '80%' } : {}}
+                    >
+                        {product.salePrice}원
+                    </span>
+                )}
+            </div>
+            
+            {/* Line 4: Sale End Date and Supplier Line */}
+            {(product.saleEndDate || product.supplierName) && (
+                <div className="text-xs text-gray-500 pt-1">
+                    <div className="flex items-center gap-x-3">
+                        {product.saleEndDate && (
+                            <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                                ~{product.saleEndDate}
+                            </span>
+                        )}
+                        {product.supplierName && (
+                            <span>{product.supplierName}</span>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

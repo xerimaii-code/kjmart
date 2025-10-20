@@ -4,8 +4,8 @@ import App from './App';
 
 // --- PWA Service Worker Registration ---
 if ('serviceWorker' in navigator) {
-  // Register the service worker as soon as the main script loads.
-  // The script is deferred, so the DOM is ready. We use a relative path to ensure it loads from the correct origin.
+  // Register the service worker from the root of the site.
+  // Vite places files from the `public` directory at the root.
   navigator.serviceWorker.register('/service-worker.js')
     .then(registration => {
       console.log('Service Worker registered successfully with scope:', registration.scope);

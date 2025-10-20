@@ -101,9 +101,14 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             const isHandlingResult = { current: false };
 
             const tryStartScanning = async (deviceId: string | null) => {
+                // FIX: Cast to `any` to allow non-standard/experimental properties like
+                // 'exposureMode' and 'whiteBalanceMode' which can improve camera
+                // performance on some devices but are not in the standard MediaTrackConstraints type.
                 const baseVideoConstraints: MediaTrackConstraints = {
                     deviceId: deviceId ? { exact: deviceId } : undefined,
-                };
+                    exposureMode: 'continuous',
+                    whiteBalanceMode: 'continuous',
+                } as any;
                 
                 const constraintsToTry: MediaStreamConstraints[] = [
                     { audio: false, video: { ...baseVideoConstraints, facingMode: 'environment', focusMode: 'continuous', width: { ideal: 1280 }, height: { ideal: 720 } } as any },

@@ -60,45 +60,48 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
 
     return (
         <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
-            <div className="flex flex-col items-start w-full space-y-1">
-                {/* Line 1: Product Name & Sale Badge */}
-                <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-col items-start w-full gap-y-1">
+                {/* Line 1: Product Name, Sale Badge */}
+                <div className="flex items-center gap-2 flex-wrap w-full">
                     <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
                     {saleIsActive && hasSalePrice && (
                         <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
                     )}
                 </div>
-                
-                {/* Line 2: Prices */}
-                <div className="text-sm text-gray-700 font-medium">
-                    {saleIsActive && hasSalePrice ? (
-                        <>
-                            <span>{product.costPrice?.toLocaleString()}</span>
-                            <span className="text-gray-400 mx-0.5">/</span>
-                            <span className="line-through text-gray-400">{product.sellingPrice?.toLocaleString()}</span>
-                            <span className="text-red-600 font-bold ml-1.5">{product.salePrice}</span>
-                        </>
-                    ) : (
-                        <span>
-                            {product.costPrice?.toLocaleString()}
-                            <span className="text-gray-400 mx-0.5">/</span>
-                            {product.sellingPrice?.toLocaleString()}
+
+                {/* Line 2: Barcode */}
+                <p className="text-sm text-gray-500">{product.barcode}</p>
+
+                {/* Line 3: Prices */}
+                <div className="text-sm flex items-baseline gap-x-1.5 flex-wrap">
+                    <span className="text-gray-600 font-semibold">{product.costPrice?.toLocaleString()}원</span>
+                    <span className="text-gray-400">/</span>
+                    <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                        {product.sellingPrice?.toLocaleString()}원
+                    </span>
+                    {hasSalePrice && (
+                        <span 
+                            className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
+                            style={!saleIsActive ? { fontSize: '80%' } : {}}
+                        >
+                            {product.salePrice}원
                         </span>
                     )}
                 </div>
 
-                {/* Line 3: Event Info */}
+                {/* Line 4: Event Info */}
                 {(product.saleEndDate || product.supplierName) && (
                     <div className="text-xs text-gray-500">
-                        {product.saleEndDate && (
-                            <span className={saleIsActive ? 'font-bold text-blue-600' : ''}>
-                                행사종료: {product.saleEndDate}
-                            </span>
-                        )}
-                        {product.saleEndDate && product.supplierName && <span className="mx-1">|</span>}
-                        {product.supplierName && (
-                            <span>거래처: {product.supplierName}</span>
-                        )}
+                        <div className="flex items-center gap-x-3">
+                            {product.saleEndDate && (
+                                <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                                    ~{product.saleEndDate}
+                                </span>
+                            )}
+                            {product.supplierName && (
+                                <span>{product.supplierName}</span>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

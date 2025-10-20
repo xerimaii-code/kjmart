@@ -1,4 +1,4 @@
-import { Customer, Product } from '../types';
+import { Customer, Product } from '../src/types';
 
 const DB_NAME = 'KJMartCacheDB';
 const DB_VERSION = 1;
