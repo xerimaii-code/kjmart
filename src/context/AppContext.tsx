@@ -305,20 +305,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 ]);
                 if (isMounted) setDataState(prev => ({ ...prev, customers: cachedCustomers, products: cachedProducts }));
             } catch (cacheError) { console.warn("Failed to load data from cache:", cacheError); }
+            
+            if (!db.isInitialized()) {
+                if (!isMounted) return;
+                showAlert("데이터베이스에 연결되지 않았습니다. 앱이 오프라인 모드로 실행됩니다.");
+                setIsSyncing(false);
+                return;
+            }
+
             setIsSyncing(true);
-            try { await db.initDB(); }
-            catch (initError) {
-                console.error("Database initialization failed:", initError);
-                if (isMounted) {
-                    showAlert("데이터베이스 연결에 실패했습니다. 오프라인 모드로 실행됩니다.");
-                    setIsSyncing(false);
-                }
-                return;
-            }
-            if (!isMounted || !db.isInitialized()) {
-                if (isMounted) setIsSyncing(false);
-                return;
-            }
+            
             let customersLoaded = false, productsLoaded = false;
             const checkSyncStatus = () => {
                 if (customersLoaded && productsLoaded && isMounted) {

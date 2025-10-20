@@ -536,20 +536,20 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                     </div>
                     <div className="grid grid-cols-5 gap-2">
                         <button
-                            onClick={handleResetOrder}
-                            disabled={isSaving}
-                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
-                        >
-                            <TrashIcon className="w-5 h-5"/>
-                            <span className="hidden sm:inline">초기화</span>
-                        </button>
-                        <button
                             onClick={handleOpenMemoModal}
                             disabled={isSaving}
                             className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
                         >
                             <DocumentTextIcon className="w-5 h-5"/>
                             <span className="hidden sm:inline">메모</span>
+                        </button>
+                        <button
+                            onClick={handleResetOrder}
+                            disabled={isSaving}
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
+                        >
+                            <TrashIcon className="w-5 h-5"/>
+                            <span className="hidden sm:inline">초기화</span>
                         </button>
                         <button
                             onClick={handleSaveOrder}

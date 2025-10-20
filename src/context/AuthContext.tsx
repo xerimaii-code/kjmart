@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
-import { initDB } from '../services/dbService';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
+import { auth, isFirebaseInitialized } from '../services/dbService';
 
 // 관리자 이메일 목록 (이곳을 수정하여 실제 관리자 이메일로 변경하세요)
 const ADMIN_EMAILS = ['xerimaii@gmail.com'];
@@ -20,38 +20,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const initialize = async () => {
-            try {
-                await initDB();
-            } catch (error) {
-                console.error("DB init failed in AuthContext:", error);
-                // The error is already handled and shown to the user by AppContext.
-                // We just need to stop the loading state here so the login page can be shown.
-                setLoading(false);
-                return () => {}; // Return a no-op unsubscribe function
-            }
-            const auth = getAuth();
-            const unsubscribe = onAuthStateChanged(auth, (user) => {
-                setUser(user);
-                setLoading(false);
-            });
-            return unsubscribe;
-        };
-        
-        const unsubscribePromise = initialize();
-
-        return () => {
-            unsubscribePromise.then(unsubscribe => unsubscribe && unsubscribe());
-        };
+        if (!isFirebaseInitialized || !auth) {
+            setLoading(false);
+            return;
+        }
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            setUser(user);
+            setLoading(false);
+        });
+        return unsubscribe;
     }, []);
 
     const login = async (email: string, pass: string) => {
-        const auth = getAuth();
+        if (!isFirebaseInitialized || !auth) {
+            throw new Error("인증 서비스를 사용할 수 없습니다. Firebase 설정을 확인하세요.");
+        }
         await signInWithEmailAndPassword(auth, email, pass);
     };
 
     const logout = async () => {
-        const auth = getAuth();
+        if (!isFirebaseInitialized || !auth) {
+            // Silently fail, as user is already effectively logged out.
+            return;
+        }
         await signOut(auth);
     };
     

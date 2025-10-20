@@ -1,38 +1,32 @@
-import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update, onChildAdded, onChildChanged, onChildRemoved, Database } from 'firebase/database';
+import { getAuth, Auth } from 'firebase/auth';
 import { firebaseConfig } from '../firebaseConfig';
 import { Order, OrderItem } from '../types';
 
-let app;
-let db;
-let dbInitialized = false;
+let app: FirebaseApp | null = null;
+let db: Database | null = null;
+let auth: Auth | null = null;
+let isFirebaseInitialized = false;
 
-export const isInitialized = () => dbInitialized;
+try {
+    // Check if the config is populated and not using placeholder values.
+    if (firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("YOUR_")) {
+        app = initializeApp(firebaseConfig);
+        db = getDatabase(app);
+        auth = getAuth(app);
+        isFirebaseInitialized = true;
+        console.log("Firebase initialized successfully.");
+    } else {
+        console.warn("Firebase config is not set. The app will not connect to a database. Please update firebaseConfig.ts");
+    }
+} catch (e) {
+    console.error("Firebase initialization failed:", e);
+    // isFirebaseInitialized remains false, db and auth remain null.
+}
 
-export const initDB = (): Promise<void> => {
-    return new Promise((resolve, reject) => {
-        if (dbInitialized) {
-            resolve();
-            return;
-        }
-        if (!firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('YOUR_')) {
-            const errorMsg = "Firebase config is not set. The app will not connect to a database. Please update firebaseConfig.ts";
-            console.warn(errorMsg);
-            reject(new Error(errorMsg));
-            return;
-        }
-        try {
-            app = initializeApp(firebaseConfig);
-            db = getDatabase(app);
-            dbInitialized = true;
-            console.log("Firebase initialized successfully.");
-            resolve();
-        } catch (e) {
-            console.error("Firebase initialization failed:", e);
-            reject(e as Error);
-        }
-    });
-};
+export { db, auth, isFirebaseInitialized };
+
 
 const arrayToObject = (arr: any[], keyField: string) => {
     if (!Array.isArray(arr)) return {};
@@ -44,15 +38,9 @@ const arrayToObject = (arr: any[], keyField: string) => {
     }, {});
 };
 
+export const isInitialized = () => isFirebaseInitialized;
+
 // --- Listener functions for realtime updates ---
-/**
- * Attaches real-time listeners to a specific data store in Firebase to handle
- * individual item changes (add, change, remove) efficiently. This is more
- * data-efficient than listening to the entire value of the store.
- * @param storeName The name of the data store (e.g., 'customers', 'products').
- * @param callbacks An object containing functions to call for each event type.
- * @returns A function to unsubscribe from all attached listeners.
- */
 export const listenToStoreChanges = <T>(
     storeName: string,
     callbacks: {
@@ -61,7 +49,7 @@ export const listenToStoreChanges = <T>(
         onRemove: (key: string) => void;
     }
 ): (() => void) => {
-    if (!dbInitialized) return () => {};
+    if (!isFirebaseInitialized || !db) return () => {};
     const storeRef = ref(db, storeName);
 
     const unsubAdded = onChildAdded(storeRef, (snapshot) => {
@@ -86,21 +74,14 @@ export const listenToStoreChanges = <T>(
     };
 };
 
-/**
- * Attaches a real-time listener to a specific data store in Firebase using `onValue`.
- * This is efficient for initial data load as it fetches all data in one go.
- * The callback is triggered once with the initial data and then again whenever the data changes.
- * @param storeName The name of the data store (e.g., 'customers', 'products').
- * @param callback A function that will be called with the entire array of items.
- * @returns A function to unsubscribe from the listener.
- */
 export const listenToStore = <T>(storeName: string, callback: (items: T[]) => void): (() => void) => {
-    if (!dbInitialized) return () => {};
+    if (!isFirebaseInitialized || !db) {
+        callback([]);
+        return () => {};
+    }
     const storeRef = ref(db, storeName);
     return onValue(storeRef, (snapshot) => {
         const data = snapshot.val();
-        // Firebase can return an object with null values for deleted children,
-        // which Object.values will include. We filter these out to prevent errors.
         const itemsArray = data ? Object.values(data).filter(item => item != null) as T[] : [];
         callback(itemsArray);
     }, (error) => {
@@ -109,37 +90,28 @@ export const listenToStore = <T>(storeName: string, callback: (items: T[]) => vo
     });
 };
 
-
-/**
- * To ensure date-range queries perform well, you must add an index to your Firebase
- * Realtime Database rules for the 'orders' path. Add the following to your rules file:
- * {
- *   "rules": {
- *     // ... your existing rules
- *     "orders": {
- *       ".indexOn": "date"
- *     }
- *   }
- * }
- */
 export const listenToOrdersByDateRange = (
     endDate: Date,
     callback: (orders: Order[]) => void,
-    startDate?: Date, // Make startDate optional
+    startDate?: Date,
 ): (() => void) => {
-    if (!dbInitialized) return () => {};
+    if (!isFirebaseInitialized || !db) {
+        callback([]);
+        return () => {};
+    }
 
-    // Create a new Date object for the end of the day to avoid mutating the original `endDate` object.
     const endOfDay = new Date(endDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const queryConstraints = [
+    const queryConstraints: any[] = [
         orderByChild('date'),
         endAt(endOfDay.toISOString())
     ];
 
     if (startDate) {
-        queryConstraints.push(startAt(startDate.toISOString()));
+        const startOfDay = new Date(startDate);
+        startOfDay.setHours(0,0,0,0);
+        queryConstraints.push(startAt(startOfDay.toISOString()));
     }
 
     const ordersQuery = query(
@@ -158,7 +130,10 @@ export const listenToOrdersByDateRange = (
 };
 
 export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[]) => void): (() => void) => {
-    if (!dbInitialized) return () => {};
+    if (!isFirebaseInitialized || !db) {
+        callback([]);
+        return () => {};
+    }
     const itemsRef = ref(db, `order-items/${orderId}`);
     return onValue(itemsRef, (snapshot) => {
         const data = snapshot.val();
@@ -170,7 +145,10 @@ export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[
 };
 
 export const listenToValue = <T>(path: string, callback: (data: T | null) => void): (() => void) => {
-     if (!dbInitialized) return () => {};
+     if (!isFirebaseInitialized || !db) {
+         callback(null);
+         return () => {};
+     }
     const dataRef = ref(db, path);
     return onValue(dataRef, (snapshot) => {
         const data = snapshot.val();
@@ -183,7 +161,7 @@ export const listenToValue = <T>(path: string, callback: (data: T | null) => voi
 
 // --- Data Fetching ---
 export const getStore = async <T>(storeName: string): Promise<T[]> => {
-    if (!dbInitialized) return [];
+    if (!isFirebaseInitialized || !db) return [];
     try {
         const snapshot = await get(ref(db, storeName));
         const data = snapshot.val();
@@ -195,20 +173,18 @@ export const getStore = async <T>(storeName: string): Promise<T[]> => {
 };
 
 export const getValue = async <T>(path: string, defaultValue: T): Promise<T> => {
-    if (!dbInitialized) return defaultValue;
+    if (!isFirebaseInitialized || !db) return defaultValue;
     const snapshot = await get(ref(db, path));
     const data = snapshot.val();
     return data ?? defaultValue;
 };
 
 export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
-    if (!dbInitialized) return [];
+    if (!isFirebaseInitialized || !db) return [];
 
-    // First, try the new path /order-items/{orderId}
     let snapshot = await get(ref(db, `order-items/${orderId}`));
     let data = snapshot.val();
 
-    // If not found, try the legacy path /orders/{orderId}/items for backward compatibility
     if (!data) {
         snapshot = await get(ref(db, `orders/${orderId}/items`));
         data = snapshot.val();
@@ -217,24 +193,19 @@ export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
     if (!data) {
         return [];
     }
-
-    // Firebase can return an object for array-like data (if keys are sparse)
-    // or an array that contains `null` values for deleted indices.
-    // This logic handles both cases and ensures we return a clean array of valid items.
-    const itemsArray = Array.isArray(data) ? data : Object.values(data);
     
-    // Filter out any null or undefined entries to prevent downstream errors.
+    const itemsArray = Array.isArray(data) ? data : Object.values(data);
     return itemsArray.filter(item => item != null);
 };
 
-
 // --- Data Modification ---
+const DB_UNINITIALIZED_ERROR = new Error("Database not initialized");
 
 export const addOrderWithItems = async (
     orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'completedAt' | 'completionDetails' | 'itemCount' | 'items'>, 
     items: OrderItem[]
 ): Promise<number> => {
-    if (!dbInitialized) throw new Error("Database not initialized");
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     const newOrderId = Date.now();
     const now = new Date().toISOString();
 
@@ -257,25 +228,22 @@ export const addOrderWithItems = async (
 };
 
 export const updateOrderAndItems = async (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
-    if (!dbInitialized) throw new Error("Database not initialized");
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     
-    const updatedOrderData = {
-        ...order,
-        itemCount: items.length,
-    };
+    const updatedOrderData = { ...order, itemCount: items.length };
     
     const updates: { [key: string]: any } = {};
     updates[`/orders/${order.id}`] = updatedOrderData;
     updates[`/order-items/${order.id}`] = items;
     
-    return update(ref(db), updates);
+    return update(ref(db!), updates);
 };
 
 export const updateOrderStatus = async (
     orderId: number, 
     completionDetails: Order['completionDetails']
 ): Promise<void> => {
-    if (!dbInitialized) throw new Error("Database not initialized");
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     const completedAt = completionDetails ? new Date().toISOString() : null;
     const updates: { [key: string]: any } = {
         [`/orders/${orderId}/completedAt`]: completedAt,
@@ -284,9 +252,8 @@ export const updateOrderStatus = async (
     return update(ref(db), updates);
 };
 
-
 export const deleteOrderAndItems = (orderId: number): Promise<void> => {
-    if (!dbInitialized) return Promise.resolve();
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     const updates: { [key: string]: null } = {};
     updates[`/orders/${orderId}`] = null;
     updates[`/order-items/${orderId}`] = null;
@@ -294,7 +261,7 @@ export const deleteOrderAndItems = (orderId: number): Promise<void> => {
 };
 
 export const replaceAll = <T>(storeName: string, items: T[]): Promise<void> => {
-    if (!dbInitialized) return Promise.resolve();
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     let keyField = '';
     if (storeName === 'customers') keyField = 'comcode';
     else if (storeName === 'products') keyField = 'barcode';
@@ -306,14 +273,13 @@ export const replaceAll = <T>(storeName: string, items: T[]): Promise<void> => {
 };
 
 export const setValue = (path: string, value: any): Promise<void> => {
-    if (!dbInitialized) return Promise.resolve();
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     return set(ref(db, path), value);
 };
 
 // --- Backup & Restore & Data Management ---
-
 export const createBackup = async (): Promise<string> => {
-    if (!dbInitialized) throw new Error("데이터베이스에 연결되지 않았습니다.");
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     const snapshot = await get(ref(db));
     const backupData = snapshot.val() || {};
     backupData.backupDate = new Date().toISOString();
@@ -321,16 +287,16 @@ export const createBackup = async (): Promise<string> => {
 };
 
 export const restoreFromBackup = (jsonString: string): Promise<void> => {
-    if (!dbInitialized) throw new Error("데이터베이스에 연결되지 않았습니다.");
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     const backupData = JSON.parse(jsonString);
     if (backupData.backupDate) {
-        delete backupData.backupDate; // Don't restore the backup date itself
+        delete backupData.backupDate;
     }
     return set(ref(db), backupData);
 };
 
 export const clearOrders = (): Promise<void> => {
-    if (!dbInitialized) return Promise.resolve();
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     const updates: { [key: string]: null } = {
         '/orders': null,
         '/order-items': null,
