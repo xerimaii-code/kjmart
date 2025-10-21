@@ -49,6 +49,7 @@ const OrderRow = memo(({
     onCardClick,
     onMenuToggle,
     actionMenuItems,
+    index,
 }: {
     order: Order;
     isHighlighted: boolean;
@@ -57,11 +58,15 @@ const OrderRow = memo(({
     onCardClick: () => void;
     onMenuToggle: (e: React.MouseEvent) => void;
     actionMenuItems: ActionMenuItem[];
+    index: number;
 }) => {
     const isCompleted = !!order.completedAt || !!order.completionDetails;
 
     return (
-        <div className={`relative ${isMenuOpen ? 'z-10' : ''}`}>
+        <div 
+            className={`relative ${isMenuOpen ? 'z-10' : ''} animate-card-enter`}
+            style={{ animationDelay: `${Math.min(index * 30, 400)}ms` }}
+        >
             <div
                 id={`order-item-${order.id}`}
                 className={`flex items-center transition-all duration-300 ease-in-out ${isHighlighted ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}
@@ -403,6 +408,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                                     onCardClick={() => handleCardClick(order)}
                                                     onMenuToggle={(e) => handleMenuToggle(e, order.id)}
                                                     actionMenuItems={getActionMenuItems(order)}
+                                                    index={visibleOrders.findIndex(o => o.id === order.id)}
                                                 />
                                             ))}
                                         </div>
