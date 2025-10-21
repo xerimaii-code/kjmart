@@ -51,6 +51,7 @@ interface DataActions {
     deleteOrder: (orderId: number) => Promise<void>;
     setSelectedCameraId: (id: string | null) => Promise<void>;
     clearOrders: () => Promise<void>;
+    forceFullSync: () => Promise<void>;
 }
 
 // Alert Context
@@ -237,7 +238,44 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         deleteOrder: (orderId) => db.deleteOrderAndItems(orderId),
         setSelectedCameraId: (id) => { const deviceId = getDeviceId(); const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`; return db.setValue(cameraSettingPath, id); },
         clearOrders: () => db.clearOrders(),
-    }), []);
+        forceFullSync: async () => {
+            if (!db.isInitialized()) {
+                showToast("데이터베이스에 연결되지 않아 동기화할 수 없습니다.", 'error');
+                return;
+            }
+            setIsSyncing(true);
+            try {
+                // Clear last sync keys to trigger a full download on next load.
+                localStorage.removeItem(`${getDeviceId()}:lastCustomerSyncKey`);
+                localStorage.removeItem(`${getDeviceId()}:lastProductSyncKey`);
+
+                const [customers, products] = await Promise.all([
+                    db.getStore<Customer>('customers'),
+                    db.getStore<Product>('products'),
+                ]);
+                setDataState(prev => ({ ...prev, customers, products }));
+                await Promise.all([
+                    cache.setCachedData('customers', customers),
+                    cache.setCachedData('products', products),
+                ]);
+
+                // Prime the incremental sync for the future.
+                const [lastCustomerKey, lastProductKey] = await Promise.all([
+                    db.getLastSyncLogKey('customers'),
+                    db.getLastSyncLogKey('products')
+                ]);
+                if(lastCustomerKey) localStorage.setItem(`${getDeviceId()}:lastCustomerSyncKey`, lastCustomerKey);
+                if(lastProductKey) localStorage.setItem(`${getDeviceId()}:lastProductSyncKey`, lastProductKey);
+
+                showToast("전체 데이터 동기화가 완료되었습니다.", 'success');
+            } catch (error) {
+                console.error("Force full sync failed:", error);
+                showToast("데이터 동기화에 실패했습니다.", 'error');
+            } finally {
+                setIsSyncing(false);
+            }
+        },
+    }), [showToast]);
 
     // Auto-sync logic
     const runAutoSyncOnStartup = useCallback(async () => {
@@ -285,28 +323,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }
         }
     }, [dataActions, user]);
-
-    useEffect(() => {
-        if (!user) return;
-        const initialSyncTimeoutId = window.setTimeout(() => { console.log('[AutoSync] Running auto-sync on startup...'); runAutoSyncOnStartup(); }, 10000);
-        return () => clearTimeout(initialSyncTimeoutId);
-    }, [user, runAutoSyncOnStartup]);
-
+    
     // --- Main Data Loading Effect ---
     useEffect(() => {
         let isMounted = true;
         const unsubscribers: (() => void)[] = [];
+        
         const initialize = async () => {
-            if (!user) { setDataState({ customers: [], products: [], selectedCameraId: null }); return; }
+            if (!user) {
+                setDataState({ customers: [], products: [], selectedCameraId: null });
+                return;
+            }
+            
+            // Trigger periodic sync log cleanup
+            const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+            const lastCleanup = await db.getValue<string>('settings/sync-logs/lastCleanupTimestamp', '');
+            if (Date.now() - new Date(lastCleanup || 0).getTime() > TWENTY_FOUR_HOURS_MS) {
+                console.log("Performing scheduled sync log cleanup...");
+                db.performSyncLogCleanup().catch(err => console.error("Sync log cleanup failed:", err));
+            }
+
             setIsSyncing(true);
+
+            // 1. Load from cache immediately
             try {
                 const [cachedCustomers, cachedProducts] = await Promise.all([
                     cache.getCachedData<Customer>('customers'),
                     cache.getCachedData<Product>('products'),
                 ]);
                 if (isMounted) setDataState(prev => ({ ...prev, customers: cachedCustomers, products: cachedProducts }));
-            } catch (cacheError) { console.warn("Failed to load data from cache:", cacheError); }
-            
+            } catch (cacheError) {
+                console.warn("Failed to load data from cache:", cacheError);
+            }
+
             if (!db.isInitialized()) {
                 if (isMounted) {
                     showAlert("데이터베이스에 연결되지 않았습니다. 앱이 오프라인 모드로 실행됩니다.");
@@ -314,112 +363,157 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
                 return;
             }
+            
+            const deviceId = getDeviceId();
 
-            // A flag to track if initial data has been loaded.
-            let initialDataLoaded = { customers: false, products: false };
-            const checkInitialLoadComplete = () => {
-                if(initialDataLoaded.customers && initialDataLoaded.products && isMounted) {
-                    setIsSyncing(false);
+            // Define listener logic before sync logic to avoid hoisting issues.
+            const attachListeners = <T extends { comcode: string } | { barcode: string }>(dataType: 'customers' | 'products', keyField: 'comcode' | 'barcode') => {
+                unsubscribers.push(db.attachStoreListener(dataType, {
+                    onAdd: (item: T) => {
+                        if (isMounted) {
+                            setDataState(prev => ({ ...prev, [dataType]: [...prev[dataType].filter((i: T) => (i as any)[keyField] !== (item as any)[keyField]), item] }));
+                            cache.addOrUpdateCachedItem(dataType, item as any);
+                        }
+                    },
+                    onChange: (item: T) => {
+                        if (isMounted) {
+                            setDataState(prev => ({
+                                ...prev,
+                                [dataType]: prev[dataType].map((i: T) => (i as any)[keyField] === (item as any)[keyField] ? item : i),
+                            }));
+                            cache.addOrUpdateCachedItem(dataType, item as any);
+                        }
+                    },
+                    onRemove: (key: string) => {
+                        if (isMounted) {
+                            setDataState(prev => ({
+                                ...prev,
+                                [dataType]: prev[dataType].filter((i: T) => (i as any)[keyField] !== key)
+                            }));
+                            cache.removeCachedItem(dataType, key);
+                        }
+                    },
+                }));
+            };
+            
+            // 2. Perform incremental/full sync for customers and products
+            const syncDataType = async <T extends Customer | Product>(dataType: 'customers' | 'products', keyField: 'comcode' | 'barcode') => {
+                const lastSyncKey = localStorage.getItem(`${deviceId}:last${dataType.charAt(0).toUpperCase() + dataType.slice(1)}SyncKey`);
+                
+                let newLastKey: string | null = null;
+                
+                if (lastSyncKey) { // Incremental sync
+                    const currentItems = (await cache.getCachedData<T>(dataType)) || [];
+                    const changes = await db.getSyncLogChanges<T>(dataType, lastSyncKey);
+                    if (changes.items.length > 0) {
+                        const itemsMap = new Map(currentItems.map(item => [(item as any)[keyField], item]));
+                        changes.items.forEach(item => {
+                            if ((item as any)._deleted) {
+                                itemsMap.delete((item as any)[keyField]);
+                            } else {
+                                itemsMap.set((item as any)[keyField], item);
+                            }
+                        });
+                        const updatedItems = Array.from(itemsMap.values());
+                        if(isMounted) {
+                            setDataState(prev => ({...prev, [dataType]: updatedItems}));
+                            await cache.setCachedData(dataType, updatedItems as any);
+                        }
+                    }
+                    newLastKey = changes.lastKey;
+                } else { // Full sync with chunking to prevent freezing
+                    const CHUNK_SIZE = 500;
+                    
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, [dataType]: [] }));
+                    }
+                    
+                    await db.getStoreByChunks<T>(
+                        dataType,
+                        CHUNK_SIZE,
+                        async (chunk, isFirstChunk) => {
+                            if (!isMounted) return;
+                            
+                            setDataState(prev => ({ ...prev, [dataType]: prev[dataType].concat(chunk) }));
+                            
+                            if (isFirstChunk) {
+                                await cache.setCachedData(dataType, chunk as any);
+                            } else {
+                                await cache.appendCachedData(dataType, chunk as any);
+                            }
+                        }
+                    );
+                    
+                    newLastKey = await db.getLastSyncLogKey(dataType);
+
+                    if (isMounted && !newLastKey) {
+                        console.log(`No sync logs found for ${dataType} after full sync. Creating a new sync marker.`);
+                        newLastKey = db.createSyncMarker(dataType);
+                    }
+                }
+                
+                if (isMounted && newLastKey) {
+                    localStorage.setItem(`${deviceId}:last${dataType.charAt(0).toUpperCase() + dataType.slice(1)}SyncKey`, newLastKey);
                 }
             };
             
-            const unsubCustomers = db.listenToStoreChanges<Customer>('customers', {
-                onInitialLoad: (initialCustomers) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, customers: initialCustomers }));
-                        cache.setCachedData('customers', initialCustomers);
-                        initialDataLoaded.customers = true;
-                        checkInitialLoadComplete();
-                    }
-                },
-                onAdd: (customer) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, customers: [...prev.customers.filter(c => c.comcode !== customer.comcode), customer] }));
-                        cache.addOrUpdateCachedItem('customers', customer);
-                    }
-                },
-                onChange: (customer) => {
-                     if (isMounted) {
-                        setDataState(prev => ({ ...prev, customers: prev.customers.map(c => c.comcode === customer.comcode ? customer : c) }));
-                        cache.addOrUpdateCachedItem('customers', customer);
-                    }
-                },
-                onRemove: (comcode) => {
-                     if (isMounted) {
-                        setDataState(prev => ({ ...prev, customers: prev.customers.filter(c => c.comcode !== comcode) }));
-                        cache.removeCachedItem('customers', comcode);
-                    }
+            await Promise.all([
+                syncDataType<Customer>('customers', 'comcode'),
+                syncDataType<Product>('products', 'barcode'),
+            ]);
+            
+            if(isMounted) setIsSyncing(false);
+            
+            // 3. Attach real-time listeners for live updates
+            attachListeners<Customer>('customers', 'comcode');
+            attachListeners<Product>('products', 'barcode');
+            
+            const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
+            const unsubscribeCamera = db.listenToValue<string>(cameraSettingPath, (id) => {
+                if (isMounted) {
+                    setDataState(prev => ({...prev, selectedCameraId: id}));
                 }
             });
-            unsubscribers.push(unsubCustomers);
-
-            const unsubProducts = db.listenToStoreChanges<Product>('products', {
-                onInitialLoad: (initialProducts) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, products: initialProducts }));
-                        cache.setCachedData('products', initialProducts);
-                        initialDataLoaded.products = true;
-                        checkInitialLoadComplete();
-                    }
-                },
-                onAdd: (product) => {
-                    if (isMounted) {
-                        setDataState(prev => ({...prev, products: [...prev.products.filter(p => p.barcode !== product.barcode), product]}));
-                        cache.addOrUpdateCachedItem('products', product);
-                    }
-                },
-                onChange: (product) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, products: prev.products.map(p => p.barcode === product.barcode ? product : p) }));
-                        cache.addOrUpdateCachedItem('products', product);
-                    }
-                },
-                onRemove: (barcode) => {
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, products: prev.products.filter(p => p.barcode !== barcode) }));
-                        cache.removeCachedItem('products', barcode);
-                    }
-                }
-            });
-            unsubscribers.push(unsubProducts);
-
-            try {
-                const deviceId = getDeviceId();
-                const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
-                unsubscribers.push(db.listenToValue<string | null>(cameraSettingPath, (id) => {
-                    if (isMounted) setDataState(prev => ({ ...prev, selectedCameraId: id }));
-                }));
-            }
-            catch (error) {
-                console.error("Failed to setup settings listener:", error);
-            }
+            unsubscribers.push(unsubscribeCamera);
+            
+            runAutoSyncOnStartup();
         };
+
         initialize();
+
         return () => {
             isMounted = false;
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert]);
-    
+    }, [user, showAlert, runAutoSyncOnStartup]);
+
     return (
-        <AlertContext.Provider value={alertContextValue}>
-        <ModalContext.Provider value={modalContextValue}>
-        <ScannerContext.Provider value={scannerContextValue}>
-        <SyncContext.Provider value={syncContextValue}>
-        <PWAInstallContext.Provider value={pwaInstallContextValue}>
-        <MiscUIContext.Provider value={miscUIContextValue}>
+        <DataStateContext.Provider value={dataState}>
             <DataActionsContext.Provider value={dataActions}>
-                <DataStateContext.Provider value={dataState}>
-                    <Toast isOpen={toast.isOpen} message={toast.message} type={toast.type} onClose={hideToast} />
-                    <AlertModal isOpen={alert.isOpen} message={alert.message} onClose={hideAlert} onConfirm={alert.onConfirm} onCancel={alert.onCancel} confirmText={alert.confirmText} confirmButtonClass={alert.confirmButtonClass} />
-                    {children}
-                </DataStateContext.Provider>
+                <AlertContext.Provider value={alertContextValue}>
+                    <ModalContext.Provider value={modalContextValue}>
+                        <ScannerContext.Provider value={scannerContextValue}>
+                            <SyncContext.Provider value={syncContextValue}>
+                                <PWAInstallContext.Provider value={pwaInstallContextValue}>
+                                    <MiscUIContext.Provider value={miscUIContextValue}>
+                                        {children}
+                                        <AlertModal
+                                            isOpen={alert.isOpen}
+                                            message={alert.message}
+                                            onClose={hideAlert}
+                                            onConfirm={alert.onConfirm}
+                                            onCancel={alert.onCancel}
+                                            confirmText={alert.confirmText}
+                                            confirmButtonClass={alert.confirmButtonClass}
+                                        />
+                                        <Toast {...toast} onClose={hideToast} />
+                                    </MiscUIContext.Provider>
+                                </PWAInstallContext.Provider>
+                            </SyncContext.Provider>
+                        </ScannerContext.Provider>
+                    </ModalContext.Provider>
+                </AlertContext.Provider>
             </DataActionsContext.Provider>
-        </MiscUIContext.Provider>
-        </PWAInstallContext.Provider>
-        </SyncContext.Provider>
-        </ScannerContext.Provider>
-        </ModalContext.Provider>
-        </AlertContext.Provider>
+        </DataStateContext.Provider>
     );
 };

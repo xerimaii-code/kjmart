@@ -208,7 +208,7 @@ const SyncSection: React.FC<{
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId } = useDataState();
-    const { smartSyncCustomers, smartSyncProducts, setSelectedCameraId, clearOrders } = useDataActions();
+    const { smartSyncCustomers, smartSyncProducts, setSelectedCameraId, clearOrders, forceFullSync } = useDataActions();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
@@ -228,19 +228,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     // --- Log Management ---
     useEffect(() => {
         if (isActive) {
-            db.getValue<number>('settings/logs/retentionDays', 30).then(days => setLogRetentionDays(days));
-            
-            // Trigger log cleanup check
-            const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-            db.getValue<string>('settings/logs/lastCleanupTimestamp', '').then(lastCleanup => {
-                const lastCleanupTime = lastCleanup ? new Date(lastCleanup).getTime() : 0;
-                if (Date.now() - lastCleanupTime > TWENTY_FOUR_HOURS_MS) {
-                    console.log("Performing scheduled log cleanup...");
-                    db.performLogCleanup().then(() => {
-                         console.log("Log cleanup finished.");
-                    }).catch(err => console.error("Log cleanup failed:", err));
-                }
-            });
+            db.getValue<number>('settings/sync-logs/retentionDays', 30).then(days => setLogRetentionDays(days));
         }
     }, [isActive]);
 
@@ -248,8 +236,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         const days = Number(e.target.value);
         setLogRetentionDays(days);
         try {
-            await db.setValue('settings/logs/retentionDays', days);
-            showToast("로그 보관 기간이 저장되었습니다.", 'success');
+            await db.setValue('settings/sync-logs/retentionDays', days);
+            showToast("동기화 로그 보관 기간이 저장되었습니다.", 'success');
         } catch (err) {
             showToast("설정 저장에 실패했습니다.", 'error');
         }
@@ -429,6 +417,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         );
     };
 
+    const handleForceSync = () => {
+        showAlert(
+            "이 작업은 서버의 최신 데이터로 로컬 데이터를 덮어씁니다. 계속하시겠습니까?",
+            async () => {
+                await forceFullSync();
+            },
+            '강제 동기화',
+            'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'
+        );
+    };
+
     return (
         <div className="h-full flex flex-col bg-transparent">
             <input
@@ -451,7 +450,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             </div>
             <div className="scrollable-content p-3">
                 <div className="space-y-3 max-w-2xl mx-auto w-full">
-                    <CollapsibleCard title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
+                    <CollapsibleCard title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen={true}>
                         <div className="flex items-center justify-between">
                             <label htmlFor="camera-select" className="text-sm font-medium text-gray-700 flex items-center gap-2">
                                 <CameraIcon className="w-5 h-5 text-gray-500"/>
@@ -495,7 +494,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         )}
                     </CollapsibleCard>
 
-                    <CollapsibleCard title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen>
+                    <CollapsibleCard title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>}>
                         <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                              <span className="text-sm font-medium text-gray-700">스캔 시 진동</span>
                              <ToggleSwitch
@@ -517,8 +516,58 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     </CollapsibleCard>
                     
                     <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
-                        <SyncSection dataType="customer" />
-                        <SyncSection dataType="product" />
+                        <div className="pt-2">
+                            <h4 className="text-sm font-bold text-gray-600 mb-2">데이터 동기화 및 로그 관리</h4>
+                            <div className="flex flex-col items-center justify-center my-4 space-y-2 text-gray-600">
+                                <div className="flex items-center gap-4">
+                                    <div className="flex flex-col items-center">
+                                        <DatabaseIcon className="w-8 h-8 text-gray-500" />
+                                        <span className="text-xs font-semibold mt-1">서버</span>
+                                    </div>
+                                    <ArrowLongRightIcon className="w-8 h-8 text-gray-400 flex-shrink-0" />
+                                    <div className="flex flex-col items-center">
+                                        <DevicePhoneMobileIcon className="w-8 h-8 text-gray-500" />
+                                        <span className="text-xs font-semibold mt-1">로컬 기기</span>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-center text-gray-500 max-w-xs pt-2">
+                                    서버의 <span className="font-bold">거래처 및 상품</span> 데이터를 로컬 기기로 가져와 덮어씁니다. 데이터가 올바르게 표시되지 않을 때 사용하세요.
+                                </p>
+                            </div>
+                            <button
+                                onClick={handleForceSync}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
+                            >
+                                <UploadIcon className="w-5 h-5" />
+                                <span>전체 데이터 강제 동기화</span>
+                            </button>
+
+                             <div className="pt-4 mt-4">
+                                <p className="text-xs text-gray-500 mb-3">
+                                    증분 동기화에 사용되는 로그 데이터의 보관 기간을 설정합니다. 기간이 짧을수록 데이터베이스 용량을 절약할 수 있습니다.
+                                </p>
+                                <div className="flex justify-between items-center">
+                                    <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">로그 보관 기간</label>
+                                    <select
+                                        id="log-retention"
+                                        value={logRetentionDays}
+                                        onChange={handleLogRetentionChange}
+                                        className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                    >
+                                        <option value="7">7일</option>
+                                        <option value="30">30일</option>
+                                        <option value="90">90일</option>
+                                        <option value="-1">영구</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                           <SyncSection dataType="customer" />
+                        </div>
+                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                           <SyncSection dataType="product" />
+                        </div>
                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
                             <h4 className="text-sm font-bold text-gray-600 mb-2">로컬 파일로 데이터 업데이트</h4>
                              <p className="text-xs text-gray-500 mb-3">
@@ -537,70 +586,50 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                     disabled={isImporting !== null}
                                     className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
                                 >
-                                    {isImporting === 'product' ? <SpinnerIcon className="w-5 h-5" /> : <span>상품 가져오기</span>}
+                                     {isImporting === 'product' ? <SpinnerIcon className="w-5 h-5" /> : <span>상품 가져오기</span>}
                                 </button>
                             </div>
                         </div>
-                    </CollapsibleCard>
-                     <CollapsibleCard title="로그 관리" icon={<DatabaseIcon className="w-5 h-5 text-gray-500"/>}>
-                         <div className="flex items-center justify-between">
-                            <label htmlFor="log-retention-select" className="text-sm font-medium text-gray-700">
-                                데이터 변경 로그 보관 기간
-                            </label>
-                            <select
-                                id="log-retention-select"
-                                value={logRetentionDays}
-                                onChange={handleLogRetentionChange}
-                                className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                            >
-                                <option value={15}>15일</option>
-                                <option value={30}>30일</option>
-                                <option value={45}>45일</option>
-                                <option value={60}>60일</option>
-                                <option value={-1}>영구 보관</option>
-                            </select>
+                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                            <h4 className="text-sm font-bold text-gray-600 mb-2">백업 및 복원</h4>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={handleBackup}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition active:scale-95"
+                                >
+                                    <DownloadIcon className="w-5 h-5" />
+                                    <span>백업</span>
+                                </button>
+                                <button
+                                    onClick={handleRestore}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600 transition active:scale-95"
+                                >
+                                    <UploadIcon className="w-5 h-5" />
+                                    <span>복원</span>
+                                </button>
+                            </div>
                         </div>
-                         <p className="text-xs text-gray-500 text-center mt-2">
-                            설정된 기간이 지난 로그는 자동으로 삭제되어 데이터베이스를 최적화합니다.
-                        </p>
-                    </CollapsibleCard>
-
-                    <CollapsibleCard title="데이터 백업 및 복원" icon={<ArrowLongRightIcon className="w-5 h-5 text-gray-500"/>}>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                            <h4 className="text-sm font-bold text-gray-600 mb-2">데이터 초기화</h4>
+                             <p className="text-xs text-gray-500 mb-3">
+                                모든 발주 내역을 삭제합니다. 이 작업은 되돌릴 수 없습니다. 거래처 및 상품 데이터는 유지됩니다.
+                            </p>
                             <button
-                                onClick={handleBackup}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
+                                onClick={handleClearOrders}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-100 text-red-800 font-semibold rounded-lg hover:bg-red-200 transition active:scale-95"
                             >
-                                <DownloadIcon className="w-5 h-5" />
-                                <span>백업</span>
-                            </button>
-                            <button
-                                onClick={handleRestore}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-100 text-orange-800 font-semibold rounded-lg hover:bg-orange-200 transition active:scale-95"
-                            >
-                                <UploadIcon className="w-5 h-5" />
-                                <span>복원</span>
+                                <TrashIcon className="w-5 h-5" />
+                                <span>발주 내역 전체 삭제</span>
                             </button>
                         </div>
-                        <button
-                            onClick={handleClearOrders}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-100 text-red-800 font-semibold rounded-lg hover:bg-red-200 transition active:scale-95"
-                        >
-                            <TrashIcon className="w-5 h-5" />
-                            <span>발주 내역 전체 삭제</span>
-                        </button>
+                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                             <h4 className="text-sm font-bold text-gray-600 mb-2">계정</h4>
+                             <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                                <span className="text-sm font-medium text-gray-700">{user?.email}</span>
+                                <button onClick={logout} className="text-sm font-semibold text-gray-600 bg-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-300 transition active:scale-95">로그아웃</button>
+                            </div>
+                        </div>
                     </CollapsibleCard>
-                    
-                     <div className="p-4">
-                        <p className="text-xs text-center text-gray-500 mb-2">로그인된 계정: {user?.email}</p>
-                        <button
-                            onClick={logout}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-800 transition active:scale-95"
-                        >
-                            <LogoutIcon className="w-5 h-5" />
-                            <span>로그아웃</span>
-                        </button>
-                     </div>
                 </div>
             </div>
         </div>

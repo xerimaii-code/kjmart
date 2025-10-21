@@ -1,8 +1,8 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update, onChildAdded, onChildChanged, onChildRemoved, Database } from 'firebase/database';
+import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update, onChildAdded, onChildChanged, onChildRemoved, Database, push, limitToLast, orderByKey, limitToFirst } from 'firebase/database';
 import { getAuth, Auth } from 'firebase/auth';
 import { firebaseConfig } from '../firebaseConfig';
-import { Order, OrderItem, Customer, Product, ChangeLog } from '../types';
+import { Order, OrderItem, Customer, Product } from '../types';
 
 let app: FirebaseApp | null = null;
 let db: Database | null = null;
@@ -41,10 +41,9 @@ const arrayToObject = (arr: any[], keyField: string) => {
 export const isInitialized = () => isFirebaseInitialized;
 
 // --- Listener functions for realtime updates ---
-export const listenToStoreChanges = <T extends { comcode: string } | { barcode: string }>(
+export const attachStoreListener = <T extends { comcode: string } | { barcode: string }>(
     storeName: 'customers' | 'products',
     callbacks: {
-        onInitialLoad: (items: T[]) => void;
         onAdd: (item: T) => void;
         onChange: (item: T) => void;
         onRemove: (key: string) => void;
@@ -53,46 +52,25 @@ export const listenToStoreChanges = <T extends { comcode: string } | { barcode: 
     if (!isFirebaseInitialized || !db) return () => {};
     const storeRef = ref(db, storeName);
     
-    // First, fetch the initial data to avoid onChildAdded firing for every existing item on load.
-    get(storeRef).then(snapshot => {
-        const data = snapshot.val();
-        const itemsArray = data ? Object.values(data).filter(item => item != null) as T[] : [];
-        callbacks.onInitialLoad(itemsArray);
+    const unsubAdded = onChildAdded(storeRef, (snapshot) => {
+        const item = snapshot.val() as T;
+        if (item) callbacks.onAdd(item);
+    });
 
-        // After initial load, attach listeners for real-time updates.
-        const unsubAdded = onChildAdded(storeRef, (snapshot) => {
-            const item = snapshot.val() as T;
-            if (item) {
-                // To avoid processing items we already have from the initial load,
-                // we could check a timestamp, but it's simpler to just call the add callback
-                // and let the state management handle duplicates.
-                 callbacks.onAdd(item);
-            }
-        });
+    const unsubChanged = onChildChanged(storeRef, (snapshot) => {
+        const item = snapshot.val() as T;
+        if (item) callbacks.onChange(item);
+    });
 
-        const unsubChanged = onChildChanged(storeRef, (snapshot) => {
-            const item = snapshot.val() as T;
-            if (item) callbacks.onChange(item);
-        });
-
-        const unsubRemoved = onChildRemoved(storeRef, (snapshot) => {
-            const key = snapshot.key;
-            if (key) callbacks.onRemove(key);
-        });
-
-        return () => {
-            unsubAdded();
-            unsubChanged();
-            unsubRemoved();
-        };
-
-    }).catch(error => console.error(`[InitialLoad: ${storeName}]`, error));
-
+    const unsubRemoved = onChildRemoved(storeRef, (snapshot) => {
+        const key = snapshot.key;
+        if (key) callbacks.onRemove(key);
+    });
 
     return () => {
-        // This is a placeholder for the actual unsubscribe function returned later.
-        // The real unsubscribe will be returned inside the .then() block.
-        // A more robust implementation might use a variable to hold the unsubscribe functions.
+        unsubAdded();
+        unsubChanged();
+        unsubRemoved();
     };
 };
 
@@ -304,43 +282,29 @@ export const smartSyncData = async (dataType: 'customers' | 'products', excelIte
 
     const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
     const nameField = 'name';
-    // FIX: Convert plural `dataType` to singular for `ChangeLog` interface.
-    const singularDataType = dataType === 'customers' ? 'customer' : 'product';
     
     const existingItems = await getStore<Customer | Product>(dataType);
     const existingItemsMap = new Map(existingItems.map(item => [(item as any)[keyField], item]));
     const excelItemsMap = new Map(excelItems.map(item => [(item as any)[keyField], item]));
 
     const updates: { [key: string]: any } = {};
-    const changeLogs: ChangeLog[] = [];
     const now = new Date().toISOString();
+
+    const syncLogRef = ref(db, `sync-logs/${dataType}`);
 
     // Check for new and updated items
     for (const [key, excelItem] of excelItemsMap.entries()) {
         const existingItem = existingItemsMap.get(key);
         const newItem = { ...excelItem, lastModified: now };
+        
+        let isDifferent = !existingItem;
+        if (existingItem) {
+             isDifferent = Object.keys(excelItem).some(field => (excelItem as any)[field] !== (existingItem as any)[field]);
+        }
 
-        if (!existingItem) { // New item
+        if (isDifferent) {
             updates[`/${dataType}/${key}`] = newItem;
-            changeLogs.push({
-                id: `${Date.now()}-${key}`, timestamp: now, userEmail, dataType: singularDataType, action: 'created',
-                targetId: key, targetName: (newItem as any)[nameField],
-            });
-        } else { // Existing item, check for changes
-            const diff: { field: string; oldValue: any; newValue: any }[] = [];
-            Object.keys(excelItem).forEach(field => {
-                if ((excelItem as any)[field] !== (existingItem as any)[field]) {
-                    diff.push({ field, oldValue: (existingItem as any)[field], newValue: (excelItem as any)[field] });
-                }
-            });
-
-            if (diff.length > 0) {
-                updates[`/${dataType}/${key}`] = newItem;
-                changeLogs.push({
-                    id: `${Date.now()}-${key}`, timestamp: now, userEmail, dataType: singularDataType, action: 'updated',
-                    targetId: key, targetName: (newItem as any)[nameField], changes: diff
-                });
-            }
+            await push(syncLogRef, { timestamp: now, data: newItem });
         }
     }
 
@@ -348,16 +312,11 @@ export const smartSyncData = async (dataType: 'customers' | 'products', excelIte
     for (const [key, existingItem] of existingItemsMap.entries()) {
         if (!excelItemsMap.has(key)) {
             updates[`/${dataType}/${key}`] = null;
-            changeLogs.push({
-                id: `${Date.now()}-${key}`, timestamp: now, userEmail, dataType: singularDataType, action: 'deleted',
-                targetId: key, targetName: (existingItem as any)[nameField],
+            await push(syncLogRef, {
+                timestamp: now,
+                data: { _deleted: true, [keyField]: key, [nameField]: (existingItem as any)[nameField] }
             });
         }
-    }
-    
-    // Add change logs to the update payload
-    for (const log of changeLogs) {
-        updates[`/change-logs/${log.id}`] = log;
     }
 
     if (Object.keys(updates).length > 0) {
@@ -365,6 +324,103 @@ export const smartSyncData = async (dataType: 'customers' | 'products', excelIte
     }
     
     return Promise.resolve();
+};
+
+// --- Incremental Sync ---
+
+export const getSyncLogChanges = async <T>(dataType: 'customers' | 'products', startAfterKey: string): Promise<{ items: T[], lastKey: string | null }> => {
+    if (!db) return { items: [], lastKey: startAfterKey };
+    
+    const logsQuery = query(ref(db, `sync-logs/${dataType}`), orderByKey(), startAt(startAfterKey));
+    const snapshot = await get(logsQuery);
+    
+    const items: T[] = [];
+    let lastKey: string | null = startAfterKey;
+    
+    if (snapshot.exists()) {
+        snapshot.forEach(childSnapshot => {
+            // startAt is inclusive, so we skip the key we started with.
+            if (childSnapshot.key === startAfterKey) return;
+
+            const logEntry = childSnapshot.val();
+            items.push(logEntry.data);
+            lastKey = childSnapshot.key;
+        });
+    }
+
+    return { items, lastKey };
+};
+
+export const getLastSyncLogKey = async (dataType: 'customers' | 'products'): Promise<string | null> => {
+    if (!db) return null;
+    const logsQuery = query(ref(db, `sync-logs/${dataType}`), orderByKey(), limitToLast(1));
+    const snapshot = await get(logsQuery);
+    if (snapshot.exists()) {
+        const [key] = Object.keys(snapshot.val());
+        return key;
+    }
+    return null;
+};
+
+export const createSyncMarker = (dataType: 'customers' | 'products'): string | null => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+    const syncLogRef = ref(db, `sync-logs/${dataType}`);
+    const newLogEntryRef = push(syncLogRef, {
+        timestamp: new Date().toISOString(),
+        data: { _marker: true, message: 'Sync baseline created' }
+    });
+    return newLogEntryRef.key;
+};
+
+export const getStoreByChunks = async <T>(
+    storeName: 'customers' | 'products',
+    chunkSize: number,
+    onChunk: (chunk: T[], isFirstChunk: boolean) => Promise<void>
+): Promise<void> => {
+    if (!db) return;
+
+    let startKey: string | null = null;
+    let hasMore = true;
+    let isFirst = true;
+
+    while (hasMore) {
+        const constraints: any[] = [orderByKey(), limitToFirst(chunkSize + 1)];
+        if (startKey) {
+            constraints.push(startAt(startKey));
+        }
+
+        const chunkQuery = query(ref(db, storeName), ...constraints);
+        const snapshot = await get(chunkQuery);
+
+        if (snapshot.exists()) {
+            const chunkData = snapshot.val();
+            const keys = Object.keys(chunkData).sort(); // Sort keys to ensure order
+            let items = keys.map(key => chunkData[key]) as T[];
+            
+            // For subsequent chunks, the first item is an overlap from the previous query, so we remove it.
+            if (!isFirst) {
+                items.shift();
+            }
+
+            if (items.length === 0) {
+                hasMore = false;
+                continue;
+            }
+
+            if (keys.length > chunkSize) {
+                // We have more data. The last key is the start for the next iteration.
+                startKey = keys[keys.length - 1]; 
+                await onChunk(items.slice(0, chunkSize), isFirst);
+            } else {
+                // This is the last chunk.
+                hasMore = false;
+                await onChunk(items, isFirst);
+            }
+            isFirst = false;
+        } else {
+            hasMore = false;
+        }
+    }
 };
 
 // --- Backup & Restore & Data Management ---
@@ -394,12 +450,12 @@ export const clearOrders = (): Promise<void> => {
     return update(ref(db), updates);
 };
 
-export const performLogCleanup = async (): Promise<void> => {
+export const performSyncLogCleanup = async (): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
 
-    const retentionDays = await getValue<number>('settings/logs/retentionDays', 30);
+    const retentionDays = await getValue<number>('settings/sync-logs/retentionDays', 30);
     if (retentionDays === -1) {
-        console.log("Log retention is set to permanent. Skipping cleanup.");
+        console.log("Sync log retention is set to permanent. Skipping cleanup.");
         return;
     }
 
@@ -407,17 +463,21 @@ export const performLogCleanup = async (): Promise<void> => {
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
     const cutoffTimestamp = cutoffDate.toISOString();
 
-    const logsRef = ref(db, 'change-logs');
-    const logsQuery = query(logsRef, orderByChild('timestamp'), endAt(cutoffTimestamp));
-    
-    const snapshot = await get(logsQuery);
-    if (snapshot.exists()) {
-        const updates: { [key: string]: null } = {};
-        snapshot.forEach((childSnapshot) => {
-            updates[`/change-logs/${childSnapshot.key}`] = null;
-        });
-        await update(ref(db), updates);
-    }
-    
-    await setValue('settings/logs/lastCleanupTimestamp', new Date().toISOString());
+    const cleanupPromises = ['customers', 'products'].map(async (dataType) => {
+        const logsRef = ref(db, `sync-logs/${dataType}`);
+        const logsQuery = query(logsRef, orderByChild('timestamp'), endAt(cutoffTimestamp));
+        
+        const snapshot = await get(logsQuery);
+        if (snapshot.exists()) {
+            const updates: { [key: string]: null } = {};
+            snapshot.forEach((childSnapshot) => {
+                updates[`/sync-logs/${dataType}/${childSnapshot.key}`] = null;
+            });
+            await update(ref(db), updates);
+            console.log(`Cleaned up sync logs for ${dataType}.`);
+        }
+    });
+
+    await Promise.all(cleanupPromises);
+    await setValue('settings/sync-logs/lastCleanupTimestamp', new Date().toISOString());
 };

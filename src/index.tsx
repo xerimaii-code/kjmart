@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 
 // --- PWA Service Worker Registration ---
+/*
 if ('serviceWorker' in navigator) {
   // Register the service worker from the root of the site.
   // Vite places files from the `public` directory at the root.
@@ -14,6 +15,7 @@ if ('serviceWorker' in navigator) {
       console.error('Service Worker registration failed:', error);
     });
 }
+*/
 // --- End of Service Worker Registration ---
 
 const rootElement = document.getElementById('root');

@@ -91,6 +91,32 @@ export async function setCachedData(storeName: StoreName, data: Customer[] | Pro
     });
 }
 
+export async function appendCachedData(storeName: StoreName, data: (Customer | Product)[]): Promise<void> {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        if (data.length === 0) {
+            return resolve();
+        }
+
+        const transaction = db.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+
+        // Chain put requests
+        data.forEach(item => {
+            store.put(item);
+        });
+
+        transaction.oncomplete = () => {
+            resolve();
+        };
+
+        transaction.onerror = () => {
+            console.error(`Error appending cached data to ${storeName}:`, transaction.error);
+            reject(transaction.error);
+        };
+    });
+}
+
 export async function addOrUpdateCachedItem(storeName: StoreName, item: Customer | Product): Promise<void> {
     const db = await openDB();
     return new Promise((resolve, reject) => {

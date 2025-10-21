@@ -58,14 +58,3 @@ export interface EditedOrderDraft {
     items: OrderItem[];
     memo: string;
 }
-
-export interface ChangeLog {
-    id: string;
-    timestamp: string;
-    userEmail: string;
-    dataType: 'customer' | 'product';
-    action: 'created' | 'updated' | 'deleted';
-    targetId: string; // barcode or comcode
-    targetName: string; // product name or customer name for context
-    changes?: { field: string; oldValue: any; newValue: any }[];
-}
