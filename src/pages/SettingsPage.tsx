@@ -207,8 +207,8 @@ const SyncSection: React.FC<{
 
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
-    const { selectedCameraId } = useDataState();
-    const { smartSyncCustomers, smartSyncProducts, setSelectedCameraId, clearOrders, forceFullSync } = useDataActions();
+    const { selectedCameraId, scanSettings } = useDataState();
+    const { smartSyncCustomers, smartSyncProducts, setSelectedCameraId, setScanSettings, clearOrders, forceFullSync } = useDataActions();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
@@ -217,8 +217,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'prompt' | 'granted' | 'denied'>('prompt');
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('');
-    const [vibrateOnScan, setVibrateOnScan] = useLocalStorage('setting:vibrateOnScan', true);
-    const [soundOnScan, setSoundOnScan] = useLocalStorage('setting:soundOnScan', true);
     const [logRetentionDays, setLogRetentionDays] = useState<number>(30);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -290,7 +288,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     }, [isActive, fetchCameras]);
 
     const handleCameraChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const cameraId = event.target.value;
+        const cameraId = event.target.value || null; // Ensure null for "System Default"
         try {
             await setSelectedCameraId(cameraId);
             showToast("카메라 설정이 저장되었습니다.", 'success');
@@ -499,8 +497,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                              <span className="text-sm font-medium text-gray-700">스캔 시 진동</span>
                              <ToggleSwitch
                                 id="vibrate-scan"
-                                checked={vibrateOnScan ?? false}
-                                onChange={setVibrateOnScan}
+                                checked={scanSettings.vibrateOnScan}
+                                onChange={(checked) => setScanSettings({ vibrateOnScan: checked })}
                                 label=""
                              />
                         </div>
@@ -508,8 +506,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                              <span className="text-sm font-medium text-gray-700">스캔 시 효과음</span>
                              <ToggleSwitch
                                 id="sound-scan"
-                                checked={soundOnScan ?? false}
-                                onChange={setSoundOnScan}
+                                checked={scanSettings.soundOnScan}
+                                onChange={(checked) => setScanSettings({ soundOnScan: checked })}
                                 label=""
                              />
                         </div>

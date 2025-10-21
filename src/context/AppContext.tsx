@@ -8,6 +8,7 @@ import * as googleDrive from '../services/googleDriveService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
 import { getDeviceId } from '../services/deviceService';
 import Toast from '../components/Toast';
+import { ref, onValue, set, update } from 'firebase/database';
 
 // --- TYPE DEFINITIONS ---
 
@@ -41,6 +42,7 @@ interface DataState {
     customers: Customer[];
     products: Product[];
     selectedCameraId: string | null;
+    scanSettings: { vibrateOnScan: boolean; soundOnScan: boolean; };
 }
 interface DataActions {
     smartSyncCustomers: (customers: Customer[], userEmail: string) => Promise<void>;
@@ -50,6 +52,7 @@ interface DataActions {
     updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
     deleteOrder: (orderId: number) => Promise<void>;
     setSelectedCameraId: (id: string | null) => Promise<void>;
+    setScanSettings: (settings: Partial<{ vibrateOnScan: boolean; soundOnScan: boolean; }>) => Promise<void>;
     clearOrders: () => Promise<void>;
     forceFullSync: () => Promise<void>;
 }
@@ -227,265 +230,133 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const miscUIContextValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
     
     // --- DATA STATE & ACTIONS ---
-    const [dataState, setDataState] = useState<DataState>({ customers: [], products: [], selectedCameraId: null });
+    const [dataState, setDataState] = useState<DataState>({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
+
+    useEffect(() => {
+        // This effect handles device-specific settings from Firebase
+        if (!user || !db.isInitialized()) return;
+        
+        const deviceId = getDeviceId();
+        const settingsRef = ref(db.db!, `device-settings/${deviceId}`);
+        
+        const unsubscribe = onValue(settingsRef, (snapshot) => {
+            const settings = snapshot.val();
+            setDataState(prevState => ({
+                ...prevState,
+                selectedCameraId: settings?.selectedCameraId ?? null,
+                scanSettings: {
+                    vibrateOnScan: settings?.scanSettings?.vibrateOnScan ?? true,
+                    soundOnScan: settings?.scanSettings?.soundOnScan ?? true,
+                }
+            }));
+        });
+        
+        return () => unsubscribe();
+    }, [user]);
 
     const dataActions: DataActions = useMemo(() => ({
         smartSyncCustomers: (customers, userEmail) => db.smartSyncData('customers', customers, userEmail),
         smartSyncProducts: (products, userEmail) => db.smartSyncData('products', products, userEmail),
-        addOrder: (orderData) => { const { items, ...orderShellData } = orderData; return db.addOrderWithItems(orderShellData, items); },
-        updateOrder: (updatedOrder) => { const { items, ...orderShell } = updatedOrder; return db.updateOrderAndItems(orderShell, items || []); },
+        addOrder: ({ customer, items, total, memo }) => db.addOrderWithItems({ customer, total, memo }, items),
+        updateOrder: async (updatedOrder) => {
+            const { items, ...orderData } = updatedOrder;
+            await db.updateOrderAndItems(orderData, items || []);
+        },
         updateOrderStatus: (orderId, completionDetails) => db.updateOrderStatus(orderId, completionDetails),
         deleteOrder: (orderId) => db.deleteOrderAndItems(orderId),
-        setSelectedCameraId: (id) => { const deviceId = getDeviceId(); const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`; return db.setValue(cameraSettingPath, id); },
+        setSelectedCameraId: async (id) => {
+            if (!user || !db.isInitialized()) return;
+            const deviceId = getDeviceId();
+            await set(ref(db.db!, `device-settings/${deviceId}/selectedCameraId`), id);
+        },
+        setScanSettings: async (settings) => {
+            if (!user || !db.isInitialized()) return;
+            const deviceId = getDeviceId();
+            const updates: { [key: string]: any } = {};
+            if (settings.vibrateOnScan !== undefined) updates[`device-settings/${deviceId}/scanSettings/vibrateOnScan`] = settings.vibrateOnScan;
+            if (settings.soundOnScan !== undefined) updates[`device-settings/${deviceId}/scanSettings/soundOnScan`] = settings.soundOnScan;
+            if (Object.keys(updates).length > 0) await update(ref(db.db!), updates);
+        },
         clearOrders: () => db.clearOrders(),
         forceFullSync: async () => {
-            if (!db.isInitialized()) {
-                showToast("데이터베이스에 연결되지 않아 동기화할 수 없습니다.", 'error');
-                return;
-            }
             setIsSyncing(true);
             try {
-                // Clear last sync keys to trigger a full download on next load.
-                localStorage.removeItem(`${getDeviceId()}:lastCustomerSyncKey`);
-                localStorage.removeItem(`${getDeviceId()}:lastProductSyncKey`);
+                // Clear local cache
+                await cache.setCachedData('customers', []);
+                await cache.setCachedData('products', []);
 
-                const [customers, products] = await Promise.all([
-                    db.getStore<Customer>('customers'),
-                    db.getStore<Product>('products'),
-                ]);
-                setDataState(prev => ({ ...prev, customers, products }));
-                await Promise.all([
-                    cache.setCachedData('customers', customers),
-                    cache.setCachedData('products', products),
-                ]);
+                // Get fresh data and populate cache
+                await db.getStoreByChunks<Customer>('customers', 500, async (chunk, isFirstChunk) => {
+                    if (isFirstChunk) await cache.setCachedData('customers', chunk);
+                    else await cache.appendCachedData('customers', chunk);
+                });
+                await db.getStoreByChunks<Product>('products', 500, async (chunk, isFirstChunk) => {
+                    if (isFirstChunk) await cache.setCachedData('products', chunk);
+                    else await cache.appendCachedData('products', chunk);
+                });
+                
+                // Update state
+                const customers = await cache.getCachedData<Customer>('customers');
+                const products = await cache.getCachedData<Product>('products');
+                setDataState(prev => ({...prev, customers, products }));
 
-                // Prime the incremental sync for the future.
-                const [lastCustomerKey, lastProductKey] = await Promise.all([
-                    db.getLastSyncLogKey('customers'),
-                    db.getLastSyncLogKey('products')
-                ]);
-                if(lastCustomerKey) localStorage.setItem(`${getDeviceId()}:lastCustomerSyncKey`, lastCustomerKey);
-                if(lastProductKey) localStorage.setItem(`${getDeviceId()}:lastProductSyncKey`, lastProductKey);
-
-                showToast("전체 데이터 동기화가 완료되었습니다.", 'success');
+                showToast("데이터 강제 동기화가 완료되었습니다.", "success");
             } catch (error) {
                 console.error("Force full sync failed:", error);
-                showToast("데이터 동기화에 실패했습니다.", 'error');
+                showAlert("데이터 강제 동기화에 실패했습니다.");
             } finally {
                 setIsSyncing(false);
             }
         },
-    }), [showToast]);
+    }), [user, showToast, showAlert]);
 
-    // Auto-sync logic
-    const runAutoSyncOnStartup = useCallback(async () => {
-        const deviceId = getDeviceId();
-        const syncConfigs = [ { type: 'customer', key: `google-drive-sync-settings-customer` }, { type: 'product', key: `google-drive-sync-settings-product` } ];
-        const isAutoSyncEnabled = syncConfigs.some(config => {
-            const deviceSpecificKey = `${deviceId}:${config.key}`;
-            const settingsJSON = localStorage.getItem(deviceSpecificKey);
-            if (!settingsJSON) return false;
-            try { const settings: SyncSettings = JSON.parse(settingsJSON); return settings.autoSync && !!settings.fileId; } catch { return false; }
-        });
-        if (!isAutoSyncEnabled || !user?.email) { console.log("[AutoSync] No auto-sync configurations found or user not logged in. Skipping."); return; }
-        try { await googleDrive.initGoogleApi(); } catch (apiInitError) { console.warn("[AutoSync] Could not initialize Google API.", apiInitError); return; }
-        for (const config of syncConfigs) {
-            const deviceSpecificKey = `${deviceId}:${config.key}`;
-            const settingsJSON = localStorage.getItem(deviceSpecificKey);
-            if (!settingsJSON) continue;
-            const settings: SyncSettings = JSON.parse(settingsJSON);
-            if (!settings.autoSync || !settings.fileId) continue;
-            try {
-                console.log(`[AutoSync] Checking for ${config.type} updates...`);
-                const metadata = await googleDrive.getFileMetadata(settings.fileId);
-                const isModified = !settings.lastSyncTime || new Date(metadata.modifiedTime) > new Date(settings.lastSyncTime);
-                if (isModified) {
-                    console.log(`[AutoSync] New version of ${config.type} file found. Syncing...`);
-                    const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
-                    const rows = await parseExcelFile(fileBlob);
-                    if (config.type === 'customer') {
-                        const { valid } = processCustomerData(rows);
-                        if (valid.length > 0) await dataActions.smartSyncCustomers(valid, user.email);
-                    } else {
-                        const { valid } = processProductData(rows);
-                        if (valid.length > 0) await dataActions.smartSyncProducts(valid, user.email);
-                    }
-                    settings.lastSyncTime = metadata.modifiedTime;
-                    localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
-                    console.log(`[AutoSync] ${config.type} synced successfully.`);
-                } else { console.log(`[AutoSync] ${config.type} data is up to date.`); }
-            } catch (syncError) {
-                console.error(`[AutoSync] Failed to sync ${config.type} data:`, syncError);
-                if (syncError instanceof Error && syncError.message.includes("File not found")) {
-                    settings.autoSync = false;
-                    localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
-                }
-            }
+     useEffect(() => {
+        if (!user) {
+            setDataState({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
+            return;
         }
-    }, [dataActions, user]);
-    
-    // --- Main Data Loading Effect ---
-    useEffect(() => {
-        let isMounted = true;
-        const unsubscribers: (() => void)[] = [];
-        
-        const initialize = async () => {
-            if (!user) {
-                setDataState({ customers: [], products: [], selectedCameraId: null });
-                return;
-            }
-            
-            // Trigger periodic sync log cleanup
-            const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-            const lastCleanup = await db.getValue<string>('settings/sync-logs/lastCleanupTimestamp', '');
-            if (Date.now() - new Date(lastCleanup || 0).getTime() > TWENTY_FOUR_HOURS_MS) {
-                console.log("Performing scheduled sync log cleanup...");
-                db.performSyncLogCleanup().catch(err => console.error("Sync log cleanup failed:", err));
+        setIsSyncing(true);
+
+        const initCache = async () => {
+            const cachedCustomers = await cache.getCachedData<Customer>('customers');
+            const cachedProducts = await cache.getCachedData<Product>('products');
+
+            if (cachedCustomers.length > 0 || cachedProducts.length > 0) {
+                 setDataState(prev => ({...prev, customers: cachedCustomers, products: cachedProducts }));
+                 setIsSyncing(false); // Show cached data immediately
             }
 
-            setIsSyncing(true);
-
-            // 1. Load from cache immediately
-            try {
-                const [cachedCustomers, cachedProducts] = await Promise.all([
-                    cache.getCachedData<Customer>('customers'),
-                    cache.getCachedData<Product>('products'),
-                ]);
-                if (isMounted) setDataState(prev => ({ ...prev, customers: cachedCustomers, products: cachedProducts }));
-            } catch (cacheError) {
-                console.warn("Failed to load data from cache:", cacheError);
-            }
-
-            if (!db.isInitialized()) {
-                if (isMounted) {
-                    showAlert("데이터베이스에 연결되지 않았습니다. 앱이 오프라인 모드로 실행됩니다.");
-                    setIsSyncing(false);
-                }
-                return;
-            }
-            
-            const deviceId = getDeviceId();
-
-            // Define listener logic before sync logic to avoid hoisting issues.
-            const attachListeners = <T extends { comcode: string } | { barcode: string }>(dataType: 'customers' | 'products', keyField: 'comcode' | 'barcode') => {
-                unsubscribers.push(db.attachStoreListener(dataType, {
-                    onAdd: (item: T) => {
-                        if (isMounted) {
-                            setDataState(prev => ({ ...prev, [dataType]: [...prev[dataType].filter((i: T) => (i as any)[keyField] !== (item as any)[keyField]), item] }));
-                            cache.addOrUpdateCachedItem(dataType, item as any);
-                        }
-                    },
-                    onChange: (item: T) => {
-                        if (isMounted) {
-                            setDataState(prev => ({
-                                ...prev,
-                                [dataType]: prev[dataType].map((i: T) => (i as any)[keyField] === (item as any)[keyField] ? item : i),
-                            }));
-                            cache.addOrUpdateCachedItem(dataType, item as any);
-                        }
-                    },
-                    onRemove: (key: string) => {
-                        if (isMounted) {
-                            setDataState(prev => ({
-                                ...prev,
-                                [dataType]: prev[dataType].filter((i: T) => (i as any)[keyField] !== key)
-                            }));
-                            cache.removeCachedItem(dataType, key);
-                        }
-                    },
-                }));
-            };
-            
-            // 2. Perform incremental/full sync for customers and products
-            const syncDataType = async <T extends Customer | Product>(dataType: 'customers' | 'products', keyField: 'comcode' | 'barcode') => {
-                const lastSyncKey = localStorage.getItem(`${deviceId}:last${dataType.charAt(0).toUpperCase() + dataType.slice(1)}SyncKey`);
-                
-                let newLastKey: string | null = null;
-                
-                if (lastSyncKey) { // Incremental sync
-                    const currentItems = (await cache.getCachedData<T>(dataType)) || [];
-                    const changes = await db.getSyncLogChanges<T>(dataType, lastSyncKey);
-                    if (changes.items.length > 0) {
-                        const itemsMap = new Map(currentItems.map(item => [(item as any)[keyField], item]));
-                        changes.items.forEach(item => {
-                            if ((item as any)._deleted) {
-                                itemsMap.delete((item as any)[keyField]);
-                            } else {
-                                itemsMap.set((item as any)[keyField], item);
-                            }
-                        });
-                        const updatedItems = Array.from(itemsMap.values());
-                        if(isMounted) {
-                            setDataState(prev => ({...prev, [dataType]: updatedItems}));
-                            await cache.setCachedData(dataType, updatedItems as any);
-                        }
-                    }
-                    newLastKey = changes.lastKey;
-                } else { // Full sync with chunking to prevent freezing
-                    const CHUNK_SIZE = 500;
-                    
-                    if (isMounted) {
-                        setDataState(prev => ({ ...prev, [dataType]: [] }));
-                    }
-                    
-                    await db.getStoreByChunks<T>(
-                        dataType,
-                        CHUNK_SIZE,
-                        async (chunk, isFirstChunk) => {
-                            if (!isMounted) return;
-                            
-                            setDataState(prev => ({ ...prev, [dataType]: prev[dataType].concat(chunk) }));
-                            
-                            if (isFirstChunk) {
-                                await cache.setCachedData(dataType, chunk as any);
-                            } else {
-                                await cache.appendCachedData(dataType, chunk as any);
-                            }
-                        }
-                    );
-                    
-                    newLastKey = await db.getLastSyncLogKey(dataType);
-
-                    if (isMounted && !newLastKey) {
-                        console.log(`No sync logs found for ${dataType} after full sync. Creating a new sync marker.`);
-                        newLastKey = db.createSyncMarker(dataType);
-                    }
-                }
-                
-                if (isMounted && newLastKey) {
-                    localStorage.setItem(`${deviceId}:last${dataType.charAt(0).toUpperCase() + dataType.slice(1)}SyncKey`, newLastKey);
-                }
-            };
-            
-            await Promise.all([
-                syncDataType<Customer>('customers', 'comcode'),
-                syncDataType<Product>('products', 'barcode'),
-            ]);
-            
-            if(isMounted) setIsSyncing(false);
-            
-            // 3. Attach real-time listeners for live updates
-            attachListeners<Customer>('customers', 'comcode');
-            attachListeners<Product>('products', 'barcode');
-            
-            const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;
-            const unsubscribeCamera = db.listenToValue<string>(cameraSettingPath, (id) => {
-                if (isMounted) {
-                    setDataState(prev => ({...prev, selectedCameraId: id}));
-                }
+            // Setup listeners for realtime updates
+            const unsubCustomers = db.attachStoreListener<Customer>('customers', {
+                onAdd: (item) => cache.addOrUpdateCachedItem('customers', item).then(() => setDataState(p => ({...p, customers: [...p.customers.filter(c => c.comcode !== item.comcode), item]}))),
+                onChange: (item) => cache.addOrUpdateCachedItem('customers', item).then(() => setDataState(p => ({...p, customers: p.customers.map(c => c.comcode === item.comcode ? item : c)}))),
+                onRemove: (key) => cache.removeCachedItem('customers', key).then(() => setDataState(p => ({...p, customers: p.customers.filter(c => c.comcode !== key)}))),
             });
-            unsubscribers.push(unsubscribeCamera);
+            const unsubProducts = db.attachStoreListener<Product>('products', {
+                onAdd: (item) => cache.addOrUpdateCachedItem('products', item).then(() => setDataState(p => ({...p, products: [...p.products.filter(pr => pr.barcode !== item.barcode), item]}))),
+                onChange: (item) => cache.addOrUpdateCachedItem('products', item).then(() => setDataState(p => ({...p, products: p.products.map(pr => pr.barcode === item.barcode ? item : pr)}))),
+                onRemove: (key) => cache.removeCachedItem('products', key).then(() => setDataState(p => ({...p, products: p.products.filter(pr => pr.barcode !== key)}))),
+            });
             
-            runAutoSyncOnStartup();
+             // Fetch all data if cache is empty
+            if (cachedCustomers.length === 0 && cachedProducts.length === 0) {
+                const customers = await db.getStore<Customer>('customers');
+                const products = await db.getStore<Product>('products');
+                await cache.setCachedData('customers', customers);
+                await cache.setCachedData('products', products);
+                setDataState(prev => ({...prev, customers, products }));
+                setIsSyncing(false);
+            }
+            
+            return () => {
+                unsubCustomers();
+                unsubProducts();
+            };
         };
 
-        initialize();
+        initCache();
+    }, [user, showAlert]);
 
-        return () => {
-            isMounted = false;
-            unsubscribers.forEach(unsub => unsub());
-        };
-    }, [user, showAlert, runAutoSyncOnStartup]);
 
     return (
         <DataStateContext.Provider value={dataState}>
@@ -506,7 +377,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                                             confirmText={alert.confirmText}
                                             confirmButtonClass={alert.confirmButtonClass}
                                         />
-                                        <Toast {...toast} onClose={hideToast} />
+                                        <Toast 
+                                            isOpen={toast.isOpen}
+                                            message={toast.message}
+                                            type={toast.type}
+                                            onClose={hideToast}
+                                        />
                                     </MiscUIContext.Provider>
                                 </PWAInstallContext.Provider>
                             </SyncContext.Provider>

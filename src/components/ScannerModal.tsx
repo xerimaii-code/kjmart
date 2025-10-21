@@ -18,7 +18,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const videoRef = useRef<HTMLVideoElement>(null);
     const codeReaderRef = useRef<any>(null);
     const audioCtxRef = useRef<AudioContext | null>(null); // Use a ref for the context
-    const { selectedCameraId } = useDataState();
+    const { selectedCameraId, scanSettings } = useDataState();
     const { setSelectedCameraId } = useDataActions();
     const { showAlert } = useAlert();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
@@ -138,13 +138,11 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                                 isHandlingResult.current = true; // Set flag to prevent re-entry
                                 
                                 // Play sound immediately for faster perceived response
-                                const shouldSound = JSON.parse(localStorage.getItem('setting:soundOnScan') ?? 'true');
-                                if (shouldSound) playBeep();
+                                if (scanSettings.soundOnScan) playBeep();
 
                                 codeReader.reset(); // Stop scanning to release the camera
 
-                                const shouldVibrate = JSON.parse(localStorage.getItem('setting:vibrateOnScan') ?? 'true');
-                                if (shouldVibrate && navigator.vibrate) navigator.vibrate(100);
+                                if (scanSettings.vibrateOnScan && navigator.vibrate) navigator.vibrate(100);
                                 
                                 const barcode = result.getText();                             
                                 onScanSuccess(barcode);
@@ -192,7 +190,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 codeReaderRef.current.reset();
             }
         };
-    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert, playBeep, setSelectedCameraId]);
+    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert, playBeep, setSelectedCameraId, scanSettings]);
 
     if (!isOpen) return null;
 
