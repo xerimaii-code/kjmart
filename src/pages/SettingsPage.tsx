@@ -3,7 +3,7 @@ import { useDataState, useDataActions, useAlert, usePWAInstall } from '../contex
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
@@ -25,7 +25,8 @@ interface SettingsPageProps {
 const SyncSection: React.FC<{
     dataType: 'customer' | 'product';
 }> = ({ dataType }) => {
-    const { setCustomers, setProducts } = useDataActions();
+    const { smartSyncCustomers, smartSyncProducts } = useDataActions();
+    const { user } = useAuth();
     const { showToast, showAlert } = useAlert();
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
@@ -76,6 +77,10 @@ const SyncSection: React.FC<{
             showToast("먼저 동기화할 파일을 선택해주세요.", 'error');
             return;
         }
+         if (!user?.email) {
+            showToast("로그인 정보가 없어 동기화를 진행할 수 없습니다.", 'error');
+            return;
+        }
 
         setIsSyncing(true);
         try {
@@ -87,10 +92,10 @@ const SyncSection: React.FC<{
             let result;
             if (dataType === 'customer') {
                 result = processCustomerData(rows);
-                if (result.valid.length > 0) await setCustomers(result.valid);
+                if (result.valid.length > 0) await smartSyncCustomers(result.valid, user.email);
             } else {
                 result = processProductData(rows);
-                if (result.valid.length > 0) await setProducts(result.valid);
+                if (result.valid.length > 0) await smartSyncProducts(result.valid, user.email);
             }
 
             showToast(`${dataTypeKorean} 데이터 동기화가 완료되었습니다.`, 'success');
@@ -203,7 +208,7 @@ const SyncSection: React.FC<{
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId } = useDataState();
-    const { setCustomers, setProducts, setSelectedCameraId, clearOrders } = useDataActions();
+    const { smartSyncCustomers, smartSyncProducts, setSelectedCameraId, clearOrders } = useDataActions();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
@@ -214,10 +219,41 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [vibrateOnScan, setVibrateOnScan] = useLocalStorage('setting:vibrateOnScan', true);
     const [soundOnScan, setSoundOnScan] = useLocalStorage('setting:soundOnScan', true);
+    const [logRetentionDays, setLogRetentionDays] = useState<number>(30);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [fileImportType, setFileImportType] = useState<'customer' | 'product' | null>(null);
     const [isImporting, setIsImporting] = useState<'customer' | 'product' | null>(null);
+
+    // --- Log Management ---
+    useEffect(() => {
+        if (isActive) {
+            db.getValue<number>('settings/logs/retentionDays', 30).then(days => setLogRetentionDays(days));
+            
+            // Trigger log cleanup check
+            const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+            db.getValue<string>('settings/logs/lastCleanupTimestamp', '').then(lastCleanup => {
+                const lastCleanupTime = lastCleanup ? new Date(lastCleanup).getTime() : 0;
+                if (Date.now() - lastCleanupTime > TWENTY_FOUR_HOURS_MS) {
+                    console.log("Performing scheduled log cleanup...");
+                    db.performLogCleanup().then(() => {
+                         console.log("Log cleanup finished.");
+                    }).catch(err => console.error("Log cleanup failed:", err));
+                }
+            });
+        }
+    }, [isActive]);
+
+    const handleLogRetentionChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const days = Number(e.target.value);
+        setLogRetentionDays(days);
+        try {
+            await db.setValue('settings/logs/retentionDays', days);
+            showToast("로그 보관 기간이 저장되었습니다.", 'success');
+        } catch (err) {
+            showToast("설정 저장에 실패했습니다.", 'error');
+        }
+    };
 
     const fetchCameras = useCallback(async () => {
         try {
@@ -284,7 +320,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
         if (event.target.files && event.target.files.length > 0 && fileImportType) {
             const file = event.target.files[0];
-            const dataTypeKorean = fileImportType === 'customer' ? '거래처' : '상품';
+            if (!user?.email) {
+                showAlert("로그인 정보가 없어 데이터를 가져올 수 없습니다.");
+                return;
+            }
 
             setIsImporting(fileImportType);
             
@@ -294,13 +333,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 let result;
                 if (fileImportType === 'customer') {
                     result = processCustomerData(rows);
-                    await setCustomers(result.valid);
+                    await smartSyncCustomers(result.valid, user.email);
                 } else {
                     result = processProductData(rows);
-                    await setProducts(result.valid);
+                    await smartSyncProducts(result.valid, user.email);
                 }
                 
-                showToast(`총 ${result.valid.length}개의 데이터를 성공적으로 가져왔습니다.`, 'success');
+                showToast(`데이터 동기화가 완료되었습니다.`, 'success');
                 if (result.errors.length > 0) {
                      showAlert(`${result.invalidCount}개의 행에서 오류가 발견되어 가져오지 못했습니다.\n\n오류 미리보기:\n${result.errors.slice(0, 5).join('\n')}`);
                 }
@@ -482,6 +521,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         <SyncSection dataType="product" />
                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
                             <h4 className="text-sm font-bold text-gray-600 mb-2">로컬 파일로 데이터 업데이트</h4>
+                             <p className="text-xs text-gray-500 mb-3">
+                                로컬 엑셀 파일을 사용하여 데이터를 동기화합니다. 이 방식은 데이터 변경 로그를 기록합니다.
+                            </p>
                             <div className="grid grid-cols-2 gap-3">
                                  <button
                                     onClick={() => handleFileImportClick('customer')}
@@ -500,7 +542,29 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             </div>
                         </div>
                     </CollapsibleCard>
-                    
+                     <CollapsibleCard title="로그 관리" icon={<DatabaseIcon className="w-5 h-5 text-gray-500"/>}>
+                         <div className="flex items-center justify-between">
+                            <label htmlFor="log-retention-select" className="text-sm font-medium text-gray-700">
+                                데이터 변경 로그 보관 기간
+                            </label>
+                            <select
+                                id="log-retention-select"
+                                value={logRetentionDays}
+                                onChange={handleLogRetentionChange}
+                                className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                            >
+                                <option value={15}>15일</option>
+                                <option value={30}>30일</option>
+                                <option value={45}>45일</option>
+                                <option value={60}>60일</option>
+                                <option value={-1}>영구 보관</option>
+                            </select>
+                        </div>
+                         <p className="text-xs text-gray-500 text-center mt-2">
+                            설정된 기간이 지난 로그는 자동으로 삭제되어 데이터베이스를 최적화합니다.
+                        </p>
+                    </CollapsibleCard>
+
                     <CollapsibleCard title="데이터 백업 및 복원" icon={<ArrowLongRightIcon className="w-5 h-5 text-gray-500"/>}>
                         <div className="grid grid-cols-2 gap-3">
                             <button

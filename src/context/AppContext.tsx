@@ -43,8 +43,8 @@ interface DataState {
     selectedCameraId: string | null;
 }
 interface DataActions {
-    setCustomers: (customers: Customer[]) => Promise<void>;
-    setProducts: (products: Product[]) => Promise<void>;
+    smartSyncCustomers: (customers: Customer[], userEmail: string) => Promise<void>;
+    smartSyncProducts: (products: Product[], userEmail: string) => Promise<void>;
     addOrder: (orderData: { customer: Customer; items: OrderItem[]; total: number; memo?: string; }) => Promise<number>;
     updateOrder: (updatedOrder: Order) => Promise<void>;
     updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
@@ -229,8 +229,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [dataState, setDataState] = useState<DataState>({ customers: [], products: [], selectedCameraId: null });
 
     const dataActions: DataActions = useMemo(() => ({
-        setCustomers: async (customers) => { await cache.setCachedData('customers', customers).catch(e => console.error("Failed to cache new customers", e)); return db.replaceAll('customers', customers); },
-        setProducts: async (products) => { await cache.setCachedData('products', products).catch(e => console.error("Failed to cache new products", e)); return db.replaceAll('products', products); },
+        smartSyncCustomers: (customers, userEmail) => db.smartSyncData('customers', customers, userEmail),
+        smartSyncProducts: (products, userEmail) => db.smartSyncData('products', products, userEmail),
         addOrder: (orderData) => { const { items, ...orderShellData } = orderData; return db.addOrderWithItems(orderShellData, items); },
         updateOrder: (updatedOrder) => { const { items, ...orderShell } = updatedOrder; return db.updateOrderAndItems(orderShell, items || []); },
         updateOrderStatus: (orderId, completionDetails) => db.updateOrderStatus(orderId, completionDetails),
@@ -249,7 +249,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (!settingsJSON) return false;
             try { const settings: SyncSettings = JSON.parse(settingsJSON); return settings.autoSync && !!settings.fileId; } catch { return false; }
         });
-        if (!isAutoSyncEnabled) { console.log("[AutoSync] No auto-sync configurations found. Skipping."); return; }
+        if (!isAutoSyncEnabled || !user?.email) { console.log("[AutoSync] No auto-sync configurations found or user not logged in. Skipping."); return; }
         try { await googleDrive.initGoogleApi(); } catch (apiInitError) { console.warn("[AutoSync] Could not initialize Google API.", apiInitError); return; }
         for (const config of syncConfigs) {
             const deviceSpecificKey = `${deviceId}:${config.key}`;
@@ -267,10 +267,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     const rows = await parseExcelFile(fileBlob);
                     if (config.type === 'customer') {
                         const { valid } = processCustomerData(rows);
-                        if (valid.length > 0) await dataActions.setCustomers(valid);
+                        if (valid.length > 0) await dataActions.smartSyncCustomers(valid, user.email);
                     } else {
                         const { valid } = processProductData(rows);
-                        if (valid.length > 0) await dataActions.setProducts(valid);
+                        if (valid.length > 0) await dataActions.smartSyncProducts(valid, user.email);
                     }
                     settings.lastSyncTime = metadata.modifiedTime;
                     localStorage.setItem(deviceSpecificKey, JSON.stringify(settings));
@@ -284,7 +284,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
             }
         }
-    }, [dataActions]);
+    }, [dataActions, user]);
 
     useEffect(() => {
         if (!user) return;
@@ -298,6 +298,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const unsubscribers: (() => void)[] = [];
         const initialize = async () => {
             if (!user) { setDataState({ customers: [], products: [], selectedCameraId: null }); return; }
+            setIsSyncing(true);
             try {
                 const [cachedCustomers, cachedProducts] = await Promise.all([
                     cache.getCachedData<Customer>('customers'),
@@ -307,35 +308,81 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             } catch (cacheError) { console.warn("Failed to load data from cache:", cacheError); }
             
             if (!db.isInitialized()) {
-                if (!isMounted) return;
-                showAlert("데이터베이스에 연결되지 않았습니다. 앱이 오프라인 모드로 실행됩니다.");
-                setIsSyncing(false);
+                if (isMounted) {
+                    showAlert("데이터베이스에 연결되지 않았습니다. 앱이 오프라인 모드로 실행됩니다.");
+                    setIsSyncing(false);
+                }
                 return;
             }
 
-            setIsSyncing(true);
-            
-            let customersLoaded = false, productsLoaded = false;
-            const checkSyncStatus = () => {
-                if (customersLoaded && productsLoaded && isMounted) {
+            // A flag to track if initial data has been loaded.
+            let initialDataLoaded = { customers: false, products: false };
+            const checkInitialLoadComplete = () => {
+                if(initialDataLoaded.customers && initialDataLoaded.products && isMounted) {
                     setIsSyncing(false);
                 }
             };
-            const unsubCustomers = db.listenToStore<Customer>('customers', (customersFromDB) => {
-                if (isMounted) {
-                    setDataState(prev => ({ ...prev, customers: customersFromDB }));
-                    cache.setCachedData('customers', customersFromDB).catch(e => console.error("Cache update failed for customers:", e));
-                    if (!customersLoaded) { customersLoaded = true; checkSyncStatus(); }
+            
+            const unsubCustomers = db.listenToStoreChanges<Customer>('customers', {
+                onInitialLoad: (initialCustomers) => {
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, customers: initialCustomers }));
+                        cache.setCachedData('customers', initialCustomers);
+                        initialDataLoaded.customers = true;
+                        checkInitialLoadComplete();
+                    }
+                },
+                onAdd: (customer) => {
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, customers: [...prev.customers.filter(c => c.comcode !== customer.comcode), customer] }));
+                        cache.addOrUpdateCachedItem('customers', customer);
+                    }
+                },
+                onChange: (customer) => {
+                     if (isMounted) {
+                        setDataState(prev => ({ ...prev, customers: prev.customers.map(c => c.comcode === customer.comcode ? customer : c) }));
+                        cache.addOrUpdateCachedItem('customers', customer);
+                    }
+                },
+                onRemove: (comcode) => {
+                     if (isMounted) {
+                        setDataState(prev => ({ ...prev, customers: prev.customers.filter(c => c.comcode !== comcode) }));
+                        cache.removeCachedItem('customers', comcode);
+                    }
                 }
             });
-            const unsubProducts = db.listenToStore<Product>('products', (productsFromDB) => {
-                if (isMounted) {
-                    setDataState(prev => ({ ...prev, products: productsFromDB }));
-                    cache.setCachedData('products', productsFromDB).catch(e => console.error("Cache update failed for products:", e));
-                    if (!productsLoaded) { productsLoaded = true; checkSyncStatus(); }
+            unsubscribers.push(unsubCustomers);
+
+            const unsubProducts = db.listenToStoreChanges<Product>('products', {
+                onInitialLoad: (initialProducts) => {
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, products: initialProducts }));
+                        cache.setCachedData('products', initialProducts);
+                        initialDataLoaded.products = true;
+                        checkInitialLoadComplete();
+                    }
+                },
+                onAdd: (product) => {
+                    if (isMounted) {
+                        setDataState(prev => ({...prev, products: [...prev.products.filter(p => p.barcode !== product.barcode), product]}));
+                        cache.addOrUpdateCachedItem('products', product);
+                    }
+                },
+                onChange: (product) => {
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, products: prev.products.map(p => p.barcode === product.barcode ? product : p) }));
+                        cache.addOrUpdateCachedItem('products', product);
+                    }
+                },
+                onRemove: (barcode) => {
+                    if (isMounted) {
+                        setDataState(prev => ({ ...prev, products: prev.products.filter(p => p.barcode !== barcode) }));
+                        cache.removeCachedItem('products', barcode);
+                    }
                 }
             });
-            unsubscribers.push(unsubCustomers, unsubProducts);
+            unsubscribers.push(unsubProducts);
+
             try {
                 const deviceId = getDeviceId();
                 const cameraSettingPath = `settings/cameraSettingsByDevice/${deviceId}`;

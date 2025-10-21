@@ -90,3 +90,33 @@ export async function setCachedData(storeName: StoreName, data: Customer[] | Pro
         };
     });
 }
+
+export async function addOrUpdateCachedItem(storeName: StoreName, item: Customer | Product): Promise<void> {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.put(item);
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => {
+            console.error(`Error putting item in ${storeName}:`, request.error);
+            reject(request.error);
+        };
+    });
+}
+
+export async function removeCachedItem(storeName: StoreName, key: string): Promise<void> {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.delete(key);
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => {
+            console.error(`Error deleting item from ${storeName}:`, request.error);
+            reject(request.error);
+        };
+    });
+}

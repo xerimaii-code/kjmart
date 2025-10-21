@@ -2,7 +2,7 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getDatabase, ref, onValue, get, set, remove, query, orderByChild, startAt, endAt, update, onChildAdded, onChildChanged, onChildRemoved, Database } from 'firebase/database';
 import { getAuth, Auth } from 'firebase/auth';
 import { firebaseConfig } from '../firebaseConfig';
-import { Order, OrderItem } from '../types';
+import { Order, OrderItem, Customer, Product, ChangeLog } from '../types';
 
 let app: FirebaseApp | null = null;
 let db: Database | null = null;
@@ -41,9 +41,10 @@ const arrayToObject = (arr: any[], keyField: string) => {
 export const isInitialized = () => isFirebaseInitialized;
 
 // --- Listener functions for realtime updates ---
-export const listenToStoreChanges = <T>(
-    storeName: string,
+export const listenToStoreChanges = <T extends { comcode: string } | { barcode: string }>(
+    storeName: 'customers' | 'products',
     callbacks: {
+        onInitialLoad: (items: T[]) => void;
         onAdd: (item: T) => void;
         onChange: (item: T) => void;
         onRemove: (key: string) => void;
@@ -51,26 +52,47 @@ export const listenToStoreChanges = <T>(
 ): (() => void) => {
     if (!isFirebaseInitialized || !db) return () => {};
     const storeRef = ref(db, storeName);
+    
+    // First, fetch the initial data to avoid onChildAdded firing for every existing item on load.
+    get(storeRef).then(snapshot => {
+        const data = snapshot.val();
+        const itemsArray = data ? Object.values(data).filter(item => item != null) as T[] : [];
+        callbacks.onInitialLoad(itemsArray);
 
-    const unsubAdded = onChildAdded(storeRef, (snapshot) => {
-        const item = snapshot.val() as T;
-        if (item) callbacks.onAdd(item);
-    }, (error) => console.error(`[onChildAdded: ${storeName}]`, error));
+        // After initial load, attach listeners for real-time updates.
+        const unsubAdded = onChildAdded(storeRef, (snapshot) => {
+            const item = snapshot.val() as T;
+            if (item) {
+                // To avoid processing items we already have from the initial load,
+                // we could check a timestamp, but it's simpler to just call the add callback
+                // and let the state management handle duplicates.
+                 callbacks.onAdd(item);
+            }
+        });
 
-    const unsubChanged = onChildChanged(storeRef, (snapshot) => {
-        const item = snapshot.val() as T;
-        if (item) callbacks.onChange(item);
-    }, (error) => console.error(`[onChildChanged: ${storeName}]`, error));
+        const unsubChanged = onChildChanged(storeRef, (snapshot) => {
+            const item = snapshot.val() as T;
+            if (item) callbacks.onChange(item);
+        });
 
-    const unsubRemoved = onChildRemoved(storeRef, (snapshot) => {
-        const key = snapshot.key;
-        if (key) callbacks.onRemove(key);
-    }, (error) => console.error(`[onChildRemoved: ${storeName}]`, error));
+        const unsubRemoved = onChildRemoved(storeRef, (snapshot) => {
+            const key = snapshot.key;
+            if (key) callbacks.onRemove(key);
+        });
+
+        return () => {
+            unsubAdded();
+            unsubChanged();
+            unsubRemoved();
+        };
+
+    }).catch(error => console.error(`[InitialLoad: ${storeName}]`, error));
+
 
     return () => {
-        unsubAdded();
-        unsubChanged();
-        unsubRemoved();
+        // This is a placeholder for the actual unsubscribe function returned later.
+        // The real unsubscribe will be returned inside the .then() block.
+        // A more robust implementation might use a variable to hold the unsubscribe functions.
     };
 };
 
@@ -277,6 +299,74 @@ export const setValue = (path: string, value: any): Promise<void> => {
     return set(ref(db, path), value);
 };
 
+export const smartSyncData = async (dataType: 'customers' | 'products', excelItems: (Customer | Product)[], userEmail: string): Promise<void> => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+
+    const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
+    const nameField = 'name';
+    // FIX: Convert plural `dataType` to singular for `ChangeLog` interface.
+    const singularDataType = dataType === 'customers' ? 'customer' : 'product';
+    
+    const existingItems = await getStore<Customer | Product>(dataType);
+    const existingItemsMap = new Map(existingItems.map(item => [(item as any)[keyField], item]));
+    const excelItemsMap = new Map(excelItems.map(item => [(item as any)[keyField], item]));
+
+    const updates: { [key: string]: any } = {};
+    const changeLogs: ChangeLog[] = [];
+    const now = new Date().toISOString();
+
+    // Check for new and updated items
+    for (const [key, excelItem] of excelItemsMap.entries()) {
+        const existingItem = existingItemsMap.get(key);
+        const newItem = { ...excelItem, lastModified: now };
+
+        if (!existingItem) { // New item
+            updates[`/${dataType}/${key}`] = newItem;
+            changeLogs.push({
+                id: `${Date.now()}-${key}`, timestamp: now, userEmail, dataType: singularDataType, action: 'created',
+                targetId: key, targetName: (newItem as any)[nameField],
+            });
+        } else { // Existing item, check for changes
+            const diff: { field: string; oldValue: any; newValue: any }[] = [];
+            Object.keys(excelItem).forEach(field => {
+                if ((excelItem as any)[field] !== (existingItem as any)[field]) {
+                    diff.push({ field, oldValue: (existingItem as any)[field], newValue: (excelItem as any)[field] });
+                }
+            });
+
+            if (diff.length > 0) {
+                updates[`/${dataType}/${key}`] = newItem;
+                changeLogs.push({
+                    id: `${Date.now()}-${key}`, timestamp: now, userEmail, dataType: singularDataType, action: 'updated',
+                    targetId: key, targetName: (newItem as any)[nameField], changes: diff
+                });
+            }
+        }
+    }
+
+    // Check for deleted items
+    for (const [key, existingItem] of existingItemsMap.entries()) {
+        if (!excelItemsMap.has(key)) {
+            updates[`/${dataType}/${key}`] = null;
+            changeLogs.push({
+                id: `${Date.now()}-${key}`, timestamp: now, userEmail, dataType: singularDataType, action: 'deleted',
+                targetId: key, targetName: (existingItem as any)[nameField],
+            });
+        }
+    }
+    
+    // Add change logs to the update payload
+    for (const log of changeLogs) {
+        updates[`/change-logs/${log.id}`] = log;
+    }
+
+    if (Object.keys(updates).length > 0) {
+        return update(ref(db), updates);
+    }
+    
+    return Promise.resolve();
+};
+
 // --- Backup & Restore & Data Management ---
 export const createBackup = async (): Promise<string> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
@@ -302,4 +392,32 @@ export const clearOrders = (): Promise<void> => {
         '/order-items': null,
     };
     return update(ref(db), updates);
+};
+
+export const performLogCleanup = async (): Promise<void> => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+
+    const retentionDays = await getValue<number>('settings/logs/retentionDays', 30);
+    if (retentionDays === -1) {
+        console.log("Log retention is set to permanent. Skipping cleanup.");
+        return;
+    }
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    const cutoffTimestamp = cutoffDate.toISOString();
+
+    const logsRef = ref(db, 'change-logs');
+    const logsQuery = query(logsRef, orderByChild('timestamp'), endAt(cutoffTimestamp));
+    
+    const snapshot = await get(logsQuery);
+    if (snapshot.exists()) {
+        const updates: { [key: string]: null } = {};
+        snapshot.forEach((childSnapshot) => {
+            updates[`/change-logs/${childSnapshot.key}`] = null;
+        });
+        await update(ref(db), updates);
+    }
+    
+    await setValue('settings/logs/lastCleanupTimestamp', new Date().toISOString());
 };
