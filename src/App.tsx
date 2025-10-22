@@ -3,7 +3,7 @@ import { AppProvider, useModals, useScanner } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import Header from './components/Header';
-import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon, SearchIcon } from './components/Icons';
+import { SpinnerIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS, loadScript } from './services/dataService';
@@ -50,13 +50,12 @@ interface TopTabBarProps {
 const TabButton: React.FC<{
     page: Page;
     label: string;
-    Icon: React.FC<{className?: string}>;
     isActive: boolean;
     onClick: (page: Page) => void;
-}> = ({ page, label, Icon, isActive, onClick }) => (
+}> = ({ page, label, isActive, onClick }) => (
     <button
         onClick={() => onClick(page)}
-        className={`flex-1 flex items-center justify-center py-2 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
+        className={`flex-1 flex items-center justify-center py-1.5 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
             isActive 
                 ? 'text-blue-600' 
                 : 'text-gray-500 hover:text-gray-900'
@@ -64,13 +63,12 @@ const TabButton: React.FC<{
         aria-current={isActive ? 'page' : undefined}
     >
         <div className="relative"> {/* Wrapper for positioning the underline */}
-            <div className="flex items-center gap-1"> {/* Icon and text with new gap */}
-                <Icon className="w-5 h-5" />
+            <div className="flex items-center">
                 <span>{label}</span>
             </div>
             {isActive && (
                 <div 
-                    className="absolute -bottom-2 left-0 right-0 h-0.5 bg-blue-600 rounded-full"
+                    className="absolute -bottom-1.5 left-0 right-0 h-0.5 bg-blue-600 rounded-full"
                 />
             )}
         </div>
@@ -79,33 +77,29 @@ const TabButton: React.FC<{
 
 const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
     return (
-        <nav className="w-full bg-white/60 backdrop-blur-lg flex justify-around items-center flex-shrink-0 p-2 border-b border-gray-200/80">
+        <nav className="w-full bg-white/60 backdrop-blur-lg flex justify-around items-center flex-shrink-0 p-1 border-b border-gray-200/80">
             <div className="flex w-full justify-around items-center h-full gap-1">
                 <TabButton
                     page="history"
                     label="발주내역"
-                    Icon={HistoryIcon}
                     isActive={activePage === 'history'}
                     onClick={setActivePage}
                 />
                 <TabButton
                     page="new-order"
                     label="신규발주"
-                    Icon={NewOrderIcon}
                     isActive={activePage === 'new-order'}
                     onClick={setActivePage}
                 />
                  <TabButton
                     page="product-inquiry"
                     label="상품조회"
-                    Icon={SearchIcon}
                     isActive={activePage === 'product-inquiry'}
                     onClick={setActivePage}
                 />
                 <TabButton
                     page="settings"
                     label="설정"
-                    Icon={SettingsIcon}
                     isActive={activePage === 'settings'}
                     onClick={setActivePage}
                 />
