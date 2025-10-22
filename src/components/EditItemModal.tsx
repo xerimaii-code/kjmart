@@ -27,6 +27,9 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
     }, [item, products]);
 
     useAdjustForKeyboard(modalContentRef, isOpen);
+    
+    const finalQuantity = Number(quantity);
+    const isQuantityValid = !isNaN(finalQuantity);
 
     useEffect(() => {
         if (isOpen) {
@@ -49,13 +52,7 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
     if (!isOpen || !item) return null;
 
     const handleSave = () => {
-        if (quantity === '' || quantity === '-') {
-            return; // Do not close, allow user to correct invalid input.
-        }
-        const finalQuantity = Number(quantity);
-        if (!Number.isFinite(finalQuantity)) {
-            return; // Extra safety for invalid numbers
-        }
+        if (!isQuantityValid) return;
         onSave({ quantity: finalQuantity, unit, memo: memo.trim() });
         onClose();
     };
@@ -68,7 +65,11 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
     };
     
     const changeQuantity = (delta: number) => {
-        setQuantity(q => (Number(q) || 0) + delta);
+        setQuantity(q => {
+            const currentQuantity = Number(q) || 0;
+            const newQuantity = currentQuantity + delta;
+            return newQuantity;
+        });
     };
 
     const saleIsActive = product ? isSaleActive(product.saleEndDate) : false;
@@ -126,7 +127,6 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
                                     id="edit-quantity"
                                     type="text"
                                     inputMode="numeric"
-                                    pattern="-?[0-9]*"
                                     value={quantity}
                                     onChange={(e) => {
                                         const value = e.target.value;
@@ -172,7 +172,8 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
                     </button>
                     <button
                         onMouseDown={(e) => e.preventDefault()} onClick={handleSave}
-                        className="text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95"
+                        disabled={!isQuantityValid}
+                        className="text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
                         저장
                     </button>

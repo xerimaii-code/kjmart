@@ -34,7 +34,7 @@ export function useAdjustForKeyboard(modalContentRef: React.RefObject<HTMLElemen
             
             // If the keyboard is open and the bottom of the modal is below the visible part of the viewport...
             if (isKeyboardOpen && modalRect.bottom > viewportHeight) {
-                const padding = 8; // 8px padding between modal and keyboard
+                const padding = 16; // 16px padding between modal and keyboard
                 const requiredUpwardShift = modalRect.bottom - viewportHeight + padding;
                 // Apply a transform to move the modal up.
                 modalElement.style.transform = `translateY(-${requiredUpwardShift}px)`;

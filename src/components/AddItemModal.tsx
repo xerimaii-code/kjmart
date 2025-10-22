@@ -25,6 +25,9 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
 
     useAdjustForKeyboard(modalContentRef, isOpen);
 
+    const finalQuantity = Number(quantity);
+    const isQuantityValid = !isNaN(finalQuantity) && finalQuantity !== 0;
+
     useEffect(() => {
         if (isOpen) {
             const timer = setTimeout(() => setIsRendered(true), 10);
@@ -51,15 +54,13 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     if (!isOpen || !product) return null;
 
     const handleAdd = () => {
-        const finalQuantity = Number(quantity);
-        if (isNaN(finalQuantity)) return;
+        if (!isQuantityValid) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
         onClose();
     };
 
     const handleAddAndScan = () => {
-        const finalQuantity = Number(quantity);
-        if (isNaN(finalQuantity)) return;
+        if (!isQuantityValid) return;
         onAdd({ quantity: finalQuantity, unit, memo: memo.trim() });
         onClose();
         if (onNextScan) {
@@ -68,7 +69,14 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     };
     
     const isContinuousScan = trigger === 'scan' && onNextScan;
-    const changeQuantity = (delta: number) => setQuantity(q => (Number(q) || 0) + delta);
+    
+    const changeQuantity = (delta: number) => {
+        setQuantity(q => {
+            const currentQuantity = Number(q) || 0;
+            const newQuantity = currentQuantity + delta;
+            return newQuantity;
+        });
+    };
     
     const saleIsActive = isSaleActive(product.saleEndDate);
     const hasSalePrice = !!product.salePrice;
@@ -122,7 +130,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
                                 <input
                                     ref={inputRef}
-                                    type="text" inputMode="numeric" pattern="-?[0-9]*"
+                                    type="text" inputMode="numeric"
                                     value={quantity}
                                     onChange={(e) => {
                                         const value = e.target.value;
@@ -160,17 +168,17 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                 <div className="bg-gray-50 px-3 py-3 rounded-b-2xl">
                     {isContinuousScan ? (
                         <div className="space-y-2">
-                             <button onMouseDown={(e) => e.preventDefault()} onClick={handleAddAndScan} className="w-full text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95">추가 후 계속 스캔</button>
+                             <button onMouseDown={(e) => e.preventDefault()} onClick={handleAddAndScan} disabled={!isQuantityValid} className="w-full text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed">추가 후 계속 스캔</button>
                             <div className="grid grid-cols-3 gap-2">
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">스캔 종료</button>
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95 text-center">추가 후 종료</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95 text-center disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed">추가 후 종료</button>
                                 <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (onNextScan) { onClose(); onNextScan(); } }} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">건너뛰기</button>
                             </div>
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">
                             <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-4 h-16 flex items-center justify-center rounded-xl font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-lg active:scale-95">취소</button>
-                            <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} className="text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95">{existingItem ? '수량 추가' : '품목 추가'}</button>
+                            <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed">{existingItem ? '수량 추가' : '품목 추가'}</button>
                         </div>
                     )}
                 </div>
