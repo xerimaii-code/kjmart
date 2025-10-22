@@ -90,13 +90,16 @@ export const listenToStore = <T>(storeName: string, callback: (items: T[]) => vo
     });
 };
 
-export const listenToOrdersByDateRange = (
+export const listenToOrderChangesByDateRange = (
     endDate: Date,
-    callback: (orders: Order[]) => void,
+    callbacks: {
+        onAdd: (order: Order) => void;
+        onChange: (order: Order) => void;
+        onRemove: (order: Order) => void;
+    },
     startDate?: Date,
 ): (() => void) => {
     if (!isFirebaseInitialized || !db) {
-        callback([]);
         return () => {};
     }
 
@@ -119,14 +122,24 @@ export const listenToOrdersByDateRange = (
         ...queryConstraints
     );
 
-    return onValue(ordersQuery, (snapshot) => {
-        const data = snapshot.val();
-        const ordersArray = data ? Object.values(data) as Order[] : [];
-        callback(ordersArray);
-    }, (error) => {
-        console.error('Error listening to orders by date range:', error);
-        callback([]);
+    const unsubAdded = onChildAdded(ordersQuery, (snapshot) => {
+        const order = snapshot.val() as Order;
+        if (order) callbacks.onAdd(order);
     });
+    const unsubChanged = onChildChanged(ordersQuery, (snapshot) => {
+        const order = snapshot.val() as Order;
+        if (order) callbacks.onChange(order);
+    });
+    const unsubRemoved = onChildRemoved(ordersQuery, (snapshot) => {
+        const order = snapshot.val() as Order;
+        if (order) callbacks.onRemove(order);
+    });
+    
+    return () => {
+        unsubAdded();
+        unsubChanged();
+        unsubRemoved();
+    };
 };
 
 export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[]) => void): (() => void) => {

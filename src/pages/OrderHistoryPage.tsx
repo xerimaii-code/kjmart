@@ -164,38 +164,53 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             setActiveMenuOrderId(null);
             return;
         }
-
+    
         const calculateDates = () => {
             const start = customStartDate ? new Date(customStartDate) : undefined;
-            if(start && !isNaN(start.getTime())) {
-                start.setHours(0,0,0,0);
+            if (start && !isNaN(start.getTime())) {
+                start.setHours(0, 0, 0, 0);
             }
-            
             const end = customEndDate ? new Date(customEndDate) : new Date();
             end.setHours(23, 59, 59, 999);
-
             return { startDate: start, endDate: end };
         };
-
+    
         setIsLoading(true);
         setOrders([]);
-        setVisibleCount(PAGE_SIZE); // Reset visible count on date change
-        
+        setVisibleCount(PAGE_SIZE);
+    
         const { startDate, endDate } = calculateDates();
-        
-        const unsubscribe = db.listenToOrdersByDateRange(
+    
+        const unsubscribe = db.listenToOrderChangesByDateRange(
             endDate,
-            (fetchedOrders) => {
-                const sortedOrders = fetchedOrders.sort((a, b) => b.id - a.id);
-                setOrders(sortedOrders);
-                setIsLoading(false);
+            {
+                onAdd: (newOrder) => {
+                    setOrders(prevOrders => {
+                        if (prevOrders.some(o => o.id === newOrder.id)) return prevOrders;
+                        const newArr = [...prevOrders, newOrder];
+                        newArr.sort((a, b) => b.id - a.id);
+                        return newArr;
+                    });
+                    setIsLoading(false);
+                },
+                onChange: (changedOrder) => {
+                    setOrders(prevOrders => prevOrders.map(o => o.id === changedOrder.id ? changedOrder : o));
+                },
+                onRemove: (removedOrder) => {
+                    setOrders(prevOrders => prevOrders.filter(o => o.id !== removedOrder.id));
+                }
             },
             startDate
         );
-
+    
+        const timer = setTimeout(() => setIsLoading(false), 2000); // Failsafe to hide spinner if no data arrives
+    
         getAllDraftKeys().then(keys => setDraftKeys(new Set(keys)));
-        
-        return () => unsubscribe();
+    
+        return () => {
+            unsubscribe();
+            clearTimeout(timer);
+        };
     }, [isActive, customStartDate, customEndDate]);
 
     // --- Infinite Scroll Logic ---

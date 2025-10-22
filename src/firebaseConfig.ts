@@ -25,11 +25,15 @@ export const firebaseConfig = {
  * 1. Firebase 콘솔의 Authentication 메뉴에서 'xerimaii@gmail.com' 사용자를 미리 생성해야 합니다.
  * 2. 다른 관리자 이메일을 사용하려면 규칙 내의 이메일 주소를 변경해야 합니다.
  * 3. sync-logs 규칙은 동기화 로그 삭제 시 'timestamp' 필드를 기준으로 데이터를 정렬하기 위해 필수적입니다.
+ * 4. orders 규칙은 발주 내역을 'date' 필드로 효율적으로 조회하기 위해 필수적입니다.
  * 
 {
   "rules": {
     ".read": "auth != null && auth.token.email === 'xerimaii@gmail.com'",
     ".write": "auth != null && auth.token.email === 'xerimaii@gmail.com'",
+    "orders": {
+      ".indexOn": "date"
+    },
     "sync-logs": {
       "customers": {
         ".indexOn": "timestamp"

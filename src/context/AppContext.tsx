@@ -340,12 +340,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             
              // Fetch all data if cache is empty
             if (cachedCustomers.length === 0 && cachedProducts.length === 0) {
-                const customers = await db.getStore<Customer>('customers');
-                const products = await db.getStore<Product>('products');
-                await cache.setCachedData('customers', customers);
-                await cache.setCachedData('products', products);
-                setDataState(prev => ({...prev, customers, products }));
-                setIsSyncing(false);
+                Promise.all([
+                    (async () => {
+                        await db.getStoreByChunks<Customer>('customers', 500, async (chunk, isFirstChunk) => {
+                            if (isFirstChunk) await cache.setCachedData('customers', chunk);
+                            else await cache.appendCachedData('customers', chunk);
+                        });
+                        return cache.getCachedData<Customer>('customers');
+                    })(),
+                    (async () => {
+                        await db.getStoreByChunks<Product>('products', 500, async (chunk, isFirstChunk) => {
+                            if (isFirstChunk) await cache.setCachedData('products', chunk);
+                            else await cache.appendCachedData('products', chunk);
+                        });
+                        return cache.getCachedData<Product>('products');
+                    })()
+                ]).then(([customers, products]) => {
+                    setDataState(prev => ({...prev, customers, products }));
+                    setIsSyncing(false);
+                }).catch(err => {
+                    console.error("Initial chunked data fetch failed:", err);
+                    showAlert("초기 데이터 로딩에 실패했습니다.");
+                    setIsSyncing(false);
+                });
+            } else {
+                if(isSyncing) setIsSyncing(false);
             }
             
             return () => {
