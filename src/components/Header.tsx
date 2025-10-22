@@ -1,33 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
 import { ExitFullscreenIcon, SpinnerIcon } from './Icons';
 import { useSyncState } from '../context/AppContext';
 
-const formatDate = (date: Date) => {
-    return date.toLocaleDateString('ko-KR', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        weekday: 'short',
-    });
-};
-
-const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('ko-KR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-    });
-};
-
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
+    const [currentDateTime, setCurrentDateTime] = useState(new Date());
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const { isSyncing } = useSyncState();
-    const timeRef = useRef<HTMLDivElement>(null);
-    const dateRef = useRef<HTMLDivElement>(null);
-    const initialDate = new Date();
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -36,23 +16,39 @@ const Header: React.FC = () => {
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
 
-        const timerId = setInterval(() => {
-            const now = new Date();
-            if (timeRef.current) {
-                timeRef.current.textContent = formatTime(now);
-            }
-            // Update date only when the day changes to avoid unnecessary DOM manipulation
-            if (dateRef.current && dateRef.current.textContent !== formatDate(now)) {
-                dateRef.current.textContent = formatDate(now);
-            }
-        }, 1000);
-
         return () => {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
+    useEffect(() => {
+        const timerId = setInterval(() => {
+            setCurrentDateTime(new Date());
+        }, 1000);
+
+        return () => {
             clearInterval(timerId);
         };
     }, []);
+
+    const formatDate = (date: Date) => {
+        return date.toLocaleDateString('ko-KR', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            weekday: 'short',
+        });
+    };
+    
+    const formatTime = (date: Date) => {
+        return date.toLocaleTimeString('ko-KR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+        });
+    };
 
     const handleExitFullscreen = async () => {
         const exitFullscreen =
@@ -95,8 +91,8 @@ const Header: React.FC = () => {
             
             <div className="flex items-center space-x-3">
                 <div className="text-right">
-                    <div ref={dateRef} className="text-xs font-semibold text-gray-600">{formatDate(initialDate)}</div>
-                    <div ref={timeRef} className="text-base font-bold text-gray-800 tabular-nums">{formatTime(initialDate)}</div>
+                    <div className="text-xs font-semibold text-gray-600">{formatDate(currentDateTime)}</div>
+                    <div className="text-base font-bold text-gray-800 tabular-nums">{formatTime(currentDateTime)}</div>
                 </div>
                 {isFullscreen && (
                     <button 

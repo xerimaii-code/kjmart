@@ -3,11 +3,12 @@ import { ChevronDownIcon } from './Icons';
 
 interface CollapsibleCardProps {
     title: string;
+    icon: React.ReactNode;
     children: React.ReactNode;
     initiallyOpen?: boolean;
 }
 
-const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, children, initiallyOpen = false }) => {
+const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, icon, children, initiallyOpen = false }) => {
     const [isOpen, setIsOpen] = useState(initiallyOpen);
 
     return (
@@ -17,7 +18,8 @@ const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, children, init
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
             >
-                <h3 className="font-bold text-gray-800 text-base flex items-center">
+                <h3 className="font-bold text-gray-800 text-base flex items-center gap-3">
+                    {icon}
                     <span>{title}</span>
                 </h3>
                 <ChevronDownIcon className={`w-6 h-6 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />

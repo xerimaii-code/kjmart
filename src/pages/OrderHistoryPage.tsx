@@ -413,7 +413,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                             <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
                                         </div>
                                         <div className="divide-y divide-gray-200">
-                                            {group.orders.map((order, index) => (
+                                            {group.orders.map(order => (
                                                 <OrderRow
                                                     key={order.id}
                                                     order={order}
@@ -423,7 +423,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                                     onCardClick={() => handleCardClick(order)}
                                                     onMenuToggle={(e) => handleMenuToggle(e, order.id)}
                                                     actionMenuItems={getActionMenuItems(order)}
-                                                    index={index}
+                                                    index={visibleOrders.findIndex(o => o.id === order.id)}
                                                 />
                                             ))}
                                         </div>

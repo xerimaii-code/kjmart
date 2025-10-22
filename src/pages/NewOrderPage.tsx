@@ -132,7 +132,7 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
                                 </span>
                             )}
                             {product.supplierName && (
-                                <span>({product.supplierName})</span>
+                                <span>{product.supplierName}</span>
                             )}
                         </div>
                     </div>
@@ -414,9 +414,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col relative bg-white">
             <DraftLoadedToast show={showDraftLoadedToast} />
-            <div className="w-full p-1.5 bg-white flex-shrink-0 z-20 border-b border-gray-200 shadow-sm">
-                <div className="flex items-stretch gap-1.5 w-full max-w-2xl mx-auto">
-                    <div className="flex flex-col gap-1 flex-grow">
+            <div className="w-full p-3 bg-white flex-shrink-0 z-20 border-b border-gray-200 shadow-sm">
+                <div className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
+                    <div className="flex flex-col gap-2 flex-grow">
                         <div className="relative">
                             <input
                                 ref={customerSearchInputRef}
@@ -432,13 +432,13 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 }}
                                 placeholder="거래처 검색"
                                 readOnly={isCustomerSelected}
-                                className={`w-full p-2 h-10 border-2 ${isCustomerSelected ? 'border-blue-500 bg-blue-50 pr-28 font-semibold text-blue-800' : 'border-gray-300 bg-white'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors duration-200 text-base`}
+                                className={`w-full p-3 h-12 border-2 ${isCustomerSelected ? 'border-blue-500 bg-blue-50 pr-28 font-semibold text-blue-800' : 'border-gray-300 bg-white'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors duration-200 text-base`}
                                 autoComplete="off"
                             />
                              {isCustomerSelected && (
                                 <button
                                     onClick={handleClearCustomer}
-                                    className="absolute top-1/2 right-2.5 -translate-y-1/2 h-8 px-4 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-95"
+                                    className="absolute top-1/2 right-2.5 -translate-y-1/2 h-9 px-4 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-95"
                                     aria-label="거래처 변경"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -472,7 +472,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                     productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
                                 }}
                                 placeholder={isCustomerSelected ? "품목명 또는 바코드 검색" : "거래처를 먼저 선택하세요"}
-                                className="w-full p-2 h-10 border-2 border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors duration-200 text-base pr-28"
+                                className="w-full p-3 h-12 border-2 border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors duration-200 text-base pr-28"
                                 disabled={!isCustomerSelected}
                                 autoComplete="off"
                             />
@@ -489,9 +489,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                      <button
                         onClick={handleOpenScanner}
                         disabled={!isCustomerSelected}
-                        className="w-20 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
+                        className="w-28 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
                             <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
                             <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
                             <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
@@ -502,10 +502,16 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 </div>
             </div>
 
-            <main className="flex-grow relative overflow-hidden">
-                <div ref={scrollableContainerRef} className="h-full overflow-y-auto">
-                    {items.length > 0 && (
-                        <div className="p-3 pb-40 max-w-2xl mx-auto">
+            <main ref={scrollableContainerRef} className="flex-grow overflow-y-auto">
+                <div className="p-3 pb-40 max-w-2xl mx-auto">
+                    {items.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 pt-20">
+                            <PlusCircleIcon className="w-16 h-16 text-gray-300 mb-4" />
+                            <p className="text-lg font-semibold">발주할 품목을 추가하세요</p>
+                            <p className="text-sm mt-1">상단에서 검색하거나 스캔 버튼을 사용하세요.</p>
+                        </div>
+                    ) : (
+                        <div>
                             <div className="divide-y divide-gray-200">
                                 {items.map(item => (
                                     <OrderItemRow
@@ -522,17 +528,17 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 </div>
             </main>
 
-            <footer className="absolute bottom-0 left-0 right-0 p-1.5 bg-white border-t border-gray-200 z-10">
+            <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-gray-200 z-10">
                 <div className="max-w-2xl mx-auto">
-                    <div className="flex justify-between items-center font-bold mb-1.5 px-2">
+                    <div className="flex justify-between items-center font-bold mb-3 px-2">
                         <span className="text-lg text-gray-600">총 합계:</span>
                         <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                     </div>
-                    <div className="grid grid-cols-5 gap-1.5">
+                    <div className="grid grid-cols-5 gap-2">
                         <button
                             onClick={handleOpenMemoModal}
                             disabled={isSaving}
-                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
                         >
                             <DocumentTextIcon className="w-5 h-5"/>
                             <span className="hidden sm:inline">메모</span>
@@ -540,7 +546,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                         <button
                             onClick={handleResetOrder}
                             disabled={isSaving}
-                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
+                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
                         >
                             <TrashIcon className="w-5 h-5"/>
                             <span className="hidden sm:inline">초기화</span>
