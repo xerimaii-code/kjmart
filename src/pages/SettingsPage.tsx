@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+// FIX: Changed usePwaInstall to usePWAInstall to match exported member from AppContext.
 import { useDataState, useDataActions, useAlert, usePWAInstall } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon, ArchiveBoxIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
@@ -209,6 +210,7 @@ const SyncSection: React.FC<{
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId, scanSettings } = useDataState();
     const { smartSyncCustomers, smartSyncProducts, setSelectedCameraId, setScanSettings, clearOrders, forceFullSync } = useDataActions();
+    // FIX: Changed usePwaInstall to usePWAInstall to match the updated import.
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
@@ -513,9 +515,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         </div>
                     </CollapsibleCard>
                     
-                    <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
+                    <CollapsibleCard title="데이터 동기화" icon={<DatabaseIcon className="w-5 h-5 text-gray-500"/>}>
                         <div className="pt-2">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">데이터 동기화 및 로그 관리</h4>
+                            <h4 className="text-sm font-bold text-gray-600 mb-2">서버 데이터 강제 동기화</h4>
                             <div className="flex flex-col items-center justify-center my-4 space-y-2 text-gray-600">
                                 <div className="flex items-center gap-4">
                                     <div className="flex flex-col items-center">
@@ -539,26 +541,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 <UploadIcon className="w-5 h-5" />
                                 <span>전체 데이터 강제 동기화</span>
                             </button>
-
-                             <div className="pt-4 mt-4">
-                                <p className="text-xs text-gray-500 mb-3">
-                                    증분 동기화에 사용되는 로그 데이터의 보관 기간을 설정합니다. 기간이 짧을수록 데이터베이스 용량을 절약할 수 있습니다.
-                                </p>
-                                <div className="flex justify-between items-center">
-                                    <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">로그 보관 기간</label>
-                                    <select
-                                        id="log-retention"
-                                        value={logRetentionDays}
-                                        onChange={handleLogRetentionChange}
-                                        className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                                    >
-                                        <option value="7">7일</option>
-                                        <option value="30">30일</option>
-                                        <option value="90">90일</option>
-                                        <option value="-1">영구</option>
-                                    </select>
-                                </div>
-                            </div>
                         </div>
                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
                            <SyncSection dataType="customer" />
@@ -586,6 +568,29 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 >
                                      {isImporting === 'product' ? <SpinnerIcon className="w-5 h-5" /> : <span>상품 가져오기</span>}
                                 </button>
+                            </div>
+                        </div>
+                    </CollapsibleCard>
+
+                    <CollapsibleCard title="데이터 보관 및 초기화" icon={<ArchiveBoxIcon className="w-5 h-5 text-gray-500"/>}>
+                        <div className="pt-2">
+                            <h4 className="text-sm font-bold text-gray-600 mb-2">로그 데이터 관리</h4>
+                            <p className="text-xs text-gray-500 mb-3">
+                                증분 동기화에 사용되는 로그 데이터의 보관 기간을 설정합니다. 기간이 짧을수록 데이터베이스 용량을 절약할 수 있습니다.
+                            </p>
+                            <div className="flex justify-between items-center">
+                                <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">로그 보관 기간</label>
+                                <select
+                                    id="log-retention"
+                                    value={logRetentionDays}
+                                    onChange={handleLogRetentionChange}
+                                    className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                >
+                                    <option value="7">7일</option>
+                                    <option value="30">30일</option>
+                                    <option value="90">90일</option>
+                                    <option value="-1">영구</option>
+                                </select>
                             </div>
                         </div>
                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
@@ -620,12 +625,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 <span>발주 내역 전체 삭제</span>
                             </button>
                         </div>
-                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                             <h4 className="text-sm font-bold text-gray-600 mb-2">계정</h4>
-                             <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
-                                <span className="text-sm font-medium text-gray-700">{user?.email}</span>
-                                <button onClick={logout} className="text-sm font-semibold text-gray-600 bg-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-300 transition active:scale-95">로그아웃</button>
-                            </div>
+                    </CollapsibleCard>
+
+                    <CollapsibleCard title="계정" icon={<LogoutIcon className="w-5 h-5 text-gray-500"/>}>
+                         <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                            <span className="text-sm font-medium text-gray-700">{user?.email}</span>
+                            <button onClick={logout} className="text-sm font-semibold text-gray-600 bg-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-300 transition active:scale-95">로그아웃</button>
                         </div>
                     </CollapsibleCard>
                 </div>
