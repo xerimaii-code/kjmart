@@ -503,14 +503,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             </div>
 
             <main className="flex-grow relative overflow-hidden">
-                {items.length === 0 ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-gray-400">
-                        <PlusCircleIcon className="w-16 h-16 text-gray-300 mb-4" />
-                        <p className="text-lg font-semibold">발주할 품목을 추가하세요</p>
-                        <p className="text-sm mt-1">상단에서 검색하거나 스캔 버튼을 사용하세요.</p>
-                    </div>
-                ) : (
-                    <div ref={scrollableContainerRef} className="h-full overflow-y-auto">
+                <div ref={scrollableContainerRef} className="h-full overflow-y-auto">
+                    {items.length > 0 && (
                         <div className="p-3 pb-40 max-w-2xl mx-auto">
                             <div className="divide-y divide-gray-200">
                                 {items.map(item => (
@@ -524,8 +518,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 ))}
                             </div>
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
             </main>
 
             <footer className="absolute bottom-0 left-0 right-0 p-1.5 bg-white border-t border-gray-200 z-10">

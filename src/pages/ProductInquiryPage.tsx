@@ -112,14 +112,7 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
 
         if (!activeSearchTerm) {
-            return (
-                <div className="flex items-center justify-center h-full text-center text-gray-500">
-                    <div>
-                        <SearchIcon className="w-12 h-12 mx-auto" />
-                        <p className="mt-2 font-semibold">상품명 또는 바코드로 검색하세요.</p>
-                    </div>
-                </div>
-            );
+            return null; // Guide text removed as per request
         }
 
         if (displayedProducts.length === 0) {
