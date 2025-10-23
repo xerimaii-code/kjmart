@@ -512,57 +512,54 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                              />
                         </div>
                     </CollapsibleCard>
+
+                    <CollapsibleCard title="강제 동기화 및 로그" icon={<DatabaseIcon className="w-5 h-5 text-gray-500"/>}>
+                        <div className="flex flex-col items-center justify-center my-4 space-y-2 text-gray-600">
+                            <div className="flex items-center gap-4">
+                                <div className="flex flex-col items-center">
+                                    <DatabaseIcon className="w-8 h-8 text-gray-500" />
+                                    <span className="text-xs font-semibold mt-1">서버</span>
+                                </div>
+                                <ArrowLongRightIcon className="w-8 h-8 text-gray-400 flex-shrink-0" />
+                                <div className="flex flex-col items-center">
+                                    <DevicePhoneMobileIcon className="w-8 h-8 text-gray-500" />
+                                    <span className="text-xs font-semibold mt-1">로컬 기기</span>
+                                </div>
+                            </div>
+                        </div>
+                        <p className="text-xs text-center text-gray-500 max-w-xs mx-auto mb-4">
+                            서버의 <span className="font-bold">거래처 및 상품</span> 데이터를 로컬 기기로 가져와 덮어씁니다. 데이터가 올바르게 표시되지 않을 때 사용하세요.
+                        </p>
+                        <button
+                            onClick={handleForceSync}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
+                        >
+                            <UploadIcon className="w-5 h-5" />
+                            <span>전체 데이터 강제 동기화</span>
+                        </button>
+                        <div className="pt-4 mt-4 border-t border-gray-200">
+                            <p className="text-xs text-gray-500 mb-3">
+                                증분 동기화에 사용되는 로그 데이터의 보관 기간을 설정합니다. 기간이 짧을수록 데이터베이스 용량을 절약할 수 있습니다.
+                            </p>
+                            <div className="flex justify-between items-center">
+                                <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">로그 보관 기간</label>
+                                <select
+                                    id="log-retention"
+                                    value={logRetentionDays}
+                                    onChange={handleLogRetentionChange}
+                                    className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                >
+                                    <option value="7">7일</option>
+                                    <option value="30">30일</option>
+                                    <option value="90">90일</option>
+                                    <option value="-1">영구</option>
+                                </select>
+                            </div>
+                        </div>
+                    </CollapsibleCard>
                     
                     <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
-                        <div className="pt-2">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">데이터 동기화 및 로그 관리</h4>
-                            <div className="flex flex-col items-center justify-center my-4 space-y-2 text-gray-600">
-                                <div className="flex items-center gap-4">
-                                    <div className="flex flex-col items-center">
-                                        <DatabaseIcon className="w-8 h-8 text-gray-500" />
-                                        <span className="text-xs font-semibold mt-1">서버</span>
-                                    </div>
-                                    <ArrowLongRightIcon className="w-8 h-8 text-gray-400 flex-shrink-0" />
-                                    <div className="flex flex-col items-center">
-                                        <DevicePhoneMobileIcon className="w-8 h-8 text-gray-500" />
-                                        <span className="text-xs font-semibold mt-1">로컬 기기</span>
-                                    </div>
-                                </div>
-                                <p className="text-xs text-center text-gray-500 max-w-xs pt-2">
-                                    서버의 <span className="font-bold">거래처 및 상품</span> 데이터를 로컬 기기로 가져와 덮어씁니다. 데이터가 올바르게 표시되지 않을 때 사용하세요.
-                                </p>
-                            </div>
-                            <button
-                                onClick={handleForceSync}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
-                            >
-                                <UploadIcon className="w-5 h-5" />
-                                <span>전체 데이터 강제 동기화</span>
-                            </button>
-
-                             <div className="pt-4 mt-4">
-                                <p className="text-xs text-gray-500 mb-3">
-                                    증분 동기화에 사용되는 로그 데이터의 보관 기간을 설정합니다. 기간이 짧을수록 데이터베이스 용량을 절약할 수 있습니다.
-                                </p>
-                                <div className="flex justify-between items-center">
-                                    <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">로그 보관 기간</label>
-                                    <select
-                                        id="log-retention"
-                                        value={logRetentionDays}
-                                        onChange={handleLogRetentionChange}
-                                        className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                                    >
-                                        <option value="7">7일</option>
-                                        <option value="30">30일</option>
-                                        <option value="90">90일</option>
-                                        <option value="-1">영구</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                           <SyncSection dataType="customer" />
-                        </div>
+                        <SyncSection dataType="customer" />
                          <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
                            <SyncSection dataType="product" />
                         </div>

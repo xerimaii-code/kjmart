@@ -414,9 +414,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col relative bg-white">
             <DraftLoadedToast show={showDraftLoadedToast} />
-            <div className="w-full p-3 bg-white flex-shrink-0 z-20 border-b border-gray-200 shadow-sm">
-                <div className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
-                    <div className="flex flex-col gap-2 flex-grow">
+            <div className="w-full py-1.5 px-2 bg-white flex-shrink-0 z-20 border-b border-gray-200 shadow-sm">
+                <div className="grid grid-cols-[1fr_auto] items-stretch gap-2 w-full max-w-2xl mx-auto">
+                    <div className="flex flex-col gap-1.5">
                         <div className="relative">
                             <input
                                 ref={customerSearchInputRef}
@@ -432,13 +432,13 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 }}
                                 placeholder="거래처 검색"
                                 readOnly={isCustomerSelected}
-                                className={`w-full p-3 h-12 border-2 ${isCustomerSelected ? 'border-blue-500 bg-blue-50 pr-28 font-semibold text-blue-800' : 'border-gray-300 bg-white'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors duration-200 text-base`}
+                                className={`w-full p-3 h-10 border-2 ${isCustomerSelected ? 'border-blue-500 bg-blue-50 pr-28 font-semibold text-blue-800' : 'border-gray-300 bg-white'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors duration-200 text-base`}
                                 autoComplete="off"
                             />
                              {isCustomerSelected && (
                                 <button
                                     onClick={handleClearCustomer}
-                                    className="absolute top-1/2 right-2.5 -translate-y-1/2 h-9 px-4 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-95"
+                                    className="absolute top-1/2 right-2 -translate-y-1/2 h-8 px-4 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-95"
                                     aria-label="거래처 변경"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -450,14 +450,14 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             <SearchDropdown<Customer>
                                 items={filteredCustomers}
                                 renderItem={(c) => (
-                                    <div onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
-                                        {c.name} <span className="text-sm text-gray-500">({c.comcode})</span>
+                                    <div onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer">
+                                        <p className="font-semibold text-gray-800">{c.name}</p>
+                                        <p className="text-sm text-gray-500">{c.comcode}</p>
                                     </div>
                                 )}
                                 show={showCustomerDropdown}
                             />
                         </div>
-                        
                         <div className="relative">
                             <input
                                 ref={productSearchInputRef}
@@ -471,91 +471,59 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 onBlur={() => {
                                     productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
                                 }}
-                                placeholder={isCustomerSelected ? "품목명 또는 바코드 검색" : "거래처를 먼저 선택하세요"}
-                                className="w-full p-3 h-12 border-2 border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors duration-200 text-base pr-28"
+                                placeholder="품목명 또는 바코드 검색"
                                 disabled={!isCustomerSelected}
+                                className={`w-full p-3 h-10 border-2 ${isCustomerSelected ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-100'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 transition-colors duration-200 text-base pr-28`}
                                 autoComplete="off"
                             />
-                            <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center">
+                            <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
                                 <ToggleSwitch id="new-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
                             </div>
-                           <SearchDropdown<Product>
+                            <SearchDropdown<Product>
                                 items={filteredProducts}
                                 renderItem={(p) => <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />}
                                 show={showProductDropdown}
                             />
                         </div>
                     </div>
-                     <button
-                        onClick={handleOpenScanner}
-                        disabled={!isCustomerSelected}
-                        className="w-28 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
-                            <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
-                            <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
-                            <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
-                        </svg>
-                        <span className="text-base">스캔</span>
+                    <button onClick={handleOpenScanner} disabled={!isCustomerSelected} className="w-24 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+                        <span className="text-xs">스캔</span>
                     </button>
                 </div>
             </div>
 
-            <main ref={scrollableContainerRef} className="flex-grow overflow-y-auto">
-                <div className="p-3 pb-40 max-w-2xl mx-auto">
-                    {items.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 pt-20">
-                            <PlusCircleIcon className="w-16 h-16 text-gray-300 mb-4" />
-                            <p className="text-lg font-semibold">발주할 품목을 추가하세요</p>
-                            <p className="text-sm mt-1">상단에서 검색하거나 스캔 버튼을 사용하세요.</p>
-                        </div>
-                    ) : (
-                        <div>
-                            <div className="divide-y divide-gray-200">
-                                {items.map(item => (
-                                    <OrderItemRow
-                                        key={item.barcode}
-                                        item={item}
-                                        product={products.find(p => p.barcode === item.barcode)}
-                                        onEdit={handleEditItem}
-                                        onRemove={handleRemoveItem}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
+            <main ref={scrollableContainerRef} className="scrollable-content flex-grow">
+                {items.length > 0 && (
+                    <div className="max-w-2xl mx-auto divide-y divide-gray-200">
+                        {items.map(item => (
+                            <OrderItemRow 
+                                key={item.barcode} 
+                                item={item}
+                                product={products.find(p => p.barcode === item.barcode)}
+                                onEdit={handleEditItem} 
+                                onRemove={handleRemoveItem}
+                            />
+                        ))}
+                    </div>
+                )}
             </main>
 
-            <footer className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-gray-200 z-10">
+            <footer className="p-1.5 bg-white border-t border-gray-200 z-10 flex-shrink-0">
                 <div className="max-w-2xl mx-auto">
-                    <div className="flex justify-between items-center font-bold mb-3 px-2">
+                    <div className="flex justify-between items-center font-bold mb-1.5 px-2">
                         <span className="text-lg text-gray-600">총 합계:</span>
                         <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                     </div>
-                    <div className="grid grid-cols-5 gap-2">
-                        <button
-                            onClick={handleOpenMemoModal}
-                            disabled={isSaving}
-                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
-                        >
+                    <div className="grid grid-cols-5 gap-1.5">
+                         <button onClick={handleOpenMemoModal} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1">
                             <DocumentTextIcon className="w-5 h-5"/>
-                            <span className="hidden sm:inline">메모</span>
                         </button>
-                        <button
-                            onClick={handleResetOrder}
-                            disabled={isSaving}
-                            className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1"
-                        >
-                            <TrashIcon className="w-5 h-5"/>
-                            <span className="hidden sm:inline">초기화</span>
+                        <button onClick={handleResetOrder} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 active:scale-95 col-span-1">
+                            <TrashIcon className="w-5 h-5" />
+                            <span>초기화</span>
                         </button>
-                        <button
-                            onClick={handleSaveOrder}
-                            disabled={isSaving || items.length === 0 || !selectedCustomer}
-                            className="bg-blue-600 text-white py-2 px-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3"
-                        >
+                        <button onClick={handleSaveOrder} disabled={isSaving || items.length === 0 || !selectedCustomer} className="h-10 bg-blue-600 text-white rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
                             {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '발주 저장'}
                         </button>
                     </div>

@@ -8,7 +8,8 @@ import * as googleDrive from '../services/googleDriveService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
 import { getDeviceId } from '../services/deviceService';
 import Toast from '../components/Toast';
-import { ref, onValue, set, update } from 'firebase/database';
+// FIX: The following import from 'firebase/database' causes errors with older Firebase SDK versions.
+// It is removed as the database operations are now using the v8 compat syntax provided by dbService.
 
 // --- TYPE DEFINITIONS ---
 
@@ -234,12 +235,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     useEffect(() => {
         // This effect handles device-specific settings from Firebase
-        if (!user || !db.isInitialized()) return;
+        if (!user || !db.isInitialized() || !db.db) return;
         
         const deviceId = getDeviceId();
-        const settingsRef = ref(db.db!, `device-settings/${deviceId}`);
+        // FIX: Use v8 compat API
+        const settingsRef = db.db.ref(`device-settings/${deviceId}`);
         
-        const unsubscribe = onValue(settingsRef, (snapshot) => {
+        // FIX: Use v8 compat API
+        const listener = settingsRef.on('value', (snapshot) => {
             const settings = snapshot.val();
             setDataState(prevState => ({
                 ...prevState,
@@ -251,7 +254,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }));
         });
         
-        return () => unsubscribe();
+        // FIX: Use v8 compat API
+        return () => settingsRef.off('value', listener);
     }, [user]);
 
     const dataActions: DataActions = useMemo(() => ({
@@ -265,17 +269,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateOrderStatus: (orderId, completionDetails) => db.updateOrderStatus(orderId, completionDetails),
         deleteOrder: (orderId) => db.deleteOrderAndItems(orderId),
         setSelectedCameraId: async (id) => {
-            if (!user || !db.isInitialized()) return;
+            // FIX: Use v8 compat API
+            if (!user || !db.isInitialized() || !db.db) return;
             const deviceId = getDeviceId();
-            await set(ref(db.db!, `device-settings/${deviceId}/selectedCameraId`), id);
+            await db.db.ref(`device-settings/${deviceId}/selectedCameraId`).set(id);
         },
         setScanSettings: async (settings) => {
-            if (!user || !db.isInitialized()) return;
+            // FIX: Use v8 compat API
+            if (!user || !db.isInitialized() || !db.db) return;
             const deviceId = getDeviceId();
             const updates: { [key: string]: any } = {};
             if (settings.vibrateOnScan !== undefined) updates[`device-settings/${deviceId}/scanSettings/vibrateOnScan`] = settings.vibrateOnScan;
             if (settings.soundOnScan !== undefined) updates[`device-settings/${deviceId}/scanSettings/soundOnScan`] = settings.soundOnScan;
-            if (Object.keys(updates).length > 0) await update(ref(db.db!), updates);
+            if (Object.keys(updates).length > 0) await db.db.ref().update(updates);
         },
         clearOrders: () => db.clearOrders(),
         forceFullSync: async () => {
@@ -315,57 +321,45 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setDataState({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
             return;
         }
-        setIsSyncing(true);
 
-        const initCache = async () => {
+        const initData = async () => {
+            setIsSyncing(true);
+
+            // 1. Immediately load from cache to provide an instant UI
             const cachedCustomers = await cache.getCachedData<Customer>('customers');
             const cachedProducts = await cache.getCachedData<Product>('products');
 
             if (cachedCustomers.length > 0 || cachedProducts.length > 0) {
                  setDataState(prev => ({...prev, customers: cachedCustomers, products: cachedProducts }));
-                 setIsSyncing(false); // Show cached data immediately
             }
-
-            // Setup listeners for realtime updates
-            const unsubCustomers = db.attachStoreListener<Customer>('customers', {
-                onAdd: (item) => cache.addOrUpdateCachedItem('customers', item).then(() => setDataState(p => ({...p, customers: [...p.customers.filter(c => c.comcode !== item.comcode), item]}))),
-                onChange: (item) => cache.addOrUpdateCachedItem('customers', item).then(() => setDataState(p => ({...p, customers: p.customers.map(c => c.comcode === item.comcode ? item : c)}))),
-                onRemove: (key) => cache.removeCachedItem('customers', key).then(() => setDataState(p => ({...p, customers: p.customers.filter(c => c.comcode !== key)}))),
-            });
-            const unsubProducts = db.attachStoreListener<Product>('products', {
-                onAdd: (item) => cache.addOrUpdateCachedItem('products', item).then(() => setDataState(p => ({...p, products: [...p.products.filter(pr => pr.barcode !== item.barcode), item]}))),
-                onChange: (item) => cache.addOrUpdateCachedItem('products', item).then(() => setDataState(p => ({...p, products: p.products.map(pr => pr.barcode === item.barcode ? item : pr)}))),
-                onRemove: (key) => cache.removeCachedItem('products', key).then(() => setDataState(p => ({...p, products: p.products.filter(pr => pr.barcode !== key)}))),
-            });
             
-             // Fetch all data if cache is empty
-            if (cachedCustomers.length === 0 && cachedProducts.length === 0) {
-                Promise.all([
-                    (async () => {
-                        await db.getStoreByChunks<Customer>('customers', 500, async (chunk, isFirstChunk) => {
-                            if (isFirstChunk) await cache.setCachedData('customers', chunk);
-                            else await cache.appendCachedData('customers', chunk);
-                        });
-                        return cache.getCachedData<Customer>('customers');
-                    })(),
-                    (async () => {
-                        await db.getStoreByChunks<Product>('products', 500, async (chunk, isFirstChunk) => {
-                            if (isFirstChunk) await cache.setCachedData('products', chunk);
-                            else await cache.appendCachedData('products', chunk);
-                        });
-                        return cache.getCachedData<Product>('products');
-                    })()
-                ]).then(([customers, products]) => {
-                    setDataState(prev => ({...prev, customers, products }));
+            // 2. Flags to track when initial data from Firebase has been loaded.
+            let customersLoaded = false;
+            let productsLoaded = false;
+            const checkSyncDone = () => {
+                if (customersLoaded && productsLoaded) {
                     setIsSyncing(false);
-                }).catch(err => {
-                    console.error("Initial chunked data fetch failed:", err);
-                    showAlert("초기 데이터 로딩에 실패했습니다.");
-                    setIsSyncing(false);
-                });
-            } else {
-                if(isSyncing) setIsSyncing(false);
-            }
+                }
+            };
+            
+            // 3. Setup listeners that fetch initial data and then listen for changes.
+            const unsubCustomers = db.listenToStore<Customer>('customers', (customers) => {
+                setDataState(prev => ({...prev, customers }));
+                cache.setCachedData('customers', customers); // Overwrite cache with fresh data
+                if (!customersLoaded) {
+                    customersLoaded = true;
+                    checkSyncDone();
+                }
+            });
+
+            const unsubProducts = db.listenToStore<Product>('products', (products) => {
+                setDataState(prev => ({...prev, products }));
+                cache.setCachedData('products', products); // Overwrite cache with fresh data
+                if (!productsLoaded) {
+                    productsLoaded = true;
+                    checkSyncDone();
+                }
+            });
             
             return () => {
                 unsubCustomers();
@@ -373,7 +367,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             };
         };
 
-        initCache();
+        initData();
+        
     }, [user, showAlert]);
 
 

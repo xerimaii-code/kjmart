@@ -1,13 +1,12 @@
 import React, { useState, lazy, Suspense, useRef, useMemo, useEffect } from 'react';
-import { AppProvider, useModals, useScanner } from './context/AppContext';
+import { AppProvider, useModals, useScanner, useSyncState, useDataState, useDataActions } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import Header from './components/Header';
-import { SpinnerIcon, HistoryIcon, NewOrderIcon, SettingsIcon, SearchIcon } from './components/Icons';
+import { SpinnerIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS, loadScript } from './services/dataService';
-import { useDataActions } from './context/AppContext';
 import { useSwipeNavigation } from './hooks/useSwipeNavigation';
 
 // Lazy load pages and heavy modals
@@ -23,13 +22,13 @@ const MemoModal = lazy(() => import('./components/MemoModal'));
 
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
 
-const pages: Page[] = ['history', 'new-order', 'product-inquiry', 'settings'];
+const pages: Page[] = [ 'history', 'new-order', 'product-inquiry', 'settings'];
 
 // Page component mapping for dynamic rendering
 const pageComponents: { [key in Page]: React.LazyExoticComponent<React.FC<{ isActive: boolean }>> } = {
-    'history': OrderHistoryPage,
     'new-order': NewOrderPage,
     'product-inquiry': ProductInquiryPage,
+    'history': OrderHistoryPage,
     'settings': SettingsPage,
 };
 
@@ -50,13 +49,12 @@ interface TopTabBarProps {
 const TabButton: React.FC<{
     page: Page;
     label: string;
-    Icon: React.FC<{className?: string}>;
     isActive: boolean;
     onClick: (page: Page) => void;
-}> = ({ page, label, Icon, isActive, onClick }) => (
+}> = ({ page, label, isActive, onClick }) => (
     <button
         onClick={() => onClick(page)}
-        className={`flex-1 flex items-center justify-center py-2 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
+        className={`flex-1 py-2 text-sm font-bold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
             isActive 
                 ? 'text-blue-600' 
                 : 'text-gray-500 hover:text-gray-900'
@@ -64,13 +62,10 @@ const TabButton: React.FC<{
         aria-current={isActive ? 'page' : undefined}
     >
         <div className="relative"> {/* Wrapper for positioning the underline */}
-            <div className="flex items-center gap-1"> {/* Icon and text with new gap */}
-                <Icon className="w-5 h-5" />
-                <span>{label}</span>
-            </div>
+            <span>{label}</span>
             {isActive && (
                 <div 
-                    className="absolute -bottom-2 left-0 right-0 h-0.5 bg-blue-600 rounded-full"
+                    className="absolute -bottom-2 left-0 right-0 h-1 bg-blue-600 rounded-full"
                 />
             )}
         </div>
@@ -84,28 +79,24 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
                 <TabButton
                     page="history"
                     label="발주내역"
-                    Icon={HistoryIcon}
                     isActive={activePage === 'history'}
                     onClick={setActivePage}
                 />
                 <TabButton
                     page="new-order"
                     label="신규발주"
-                    Icon={NewOrderIcon}
                     isActive={activePage === 'new-order'}
                     onClick={setActivePage}
                 />
                  <TabButton
                     page="product-inquiry"
                     label="상품조회"
-                    Icon={SearchIcon}
                     isActive={activePage === 'product-inquiry'}
                     onClick={setActivePage}
                 />
                 <TabButton
                     page="settings"
                     label="설정"
-                    Icon={SettingsIcon}
                     isActive={activePage === 'settings'}
                     onClick={setActivePage}
                 />

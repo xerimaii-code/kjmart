@@ -5,7 +5,6 @@ import { useSyncState } from '../context/AppContext';
 
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
-    const [currentDateTime, setCurrentDateTime] = useState(new Date());
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const { isSyncing } = useSyncState();
 
@@ -21,34 +20,6 @@ const Header: React.FC = () => {
             window.removeEventListener('offline', handleOffline);
         };
     }, []);
-
-    useEffect(() => {
-        const timerId = setInterval(() => {
-            setCurrentDateTime(new Date());
-        }, 1000);
-
-        return () => {
-            clearInterval(timerId);
-        };
-    }, []);
-
-    const formatDate = (date: Date) => {
-        return date.toLocaleDateString('ko-KR', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            weekday: 'short',
-        });
-    };
-    
-    const formatTime = (date: Date) => {
-        return date.toLocaleTimeString('ko-KR', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-        });
-    };
 
     const handleExitFullscreen = async () => {
         const exitFullscreen =
@@ -90,10 +61,6 @@ const Header: React.FC = () => {
             </div>
             
             <div className="flex items-center space-x-3">
-                <div className="text-right">
-                    <div className="text-xs font-semibold text-gray-600">{formatDate(currentDateTime)}</div>
-                    <div className="text-base font-bold text-gray-800 tabular-nums">{formatTime(currentDateTime)}</div>
-                </div>
                 {isFullscreen && (
                     <button 
                         onClick={handleExitFullscreen}

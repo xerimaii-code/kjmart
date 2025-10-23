@@ -1,12 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
+// FIX: Use compat imports for v8 compatibility. onAuthStateChanged, etc. are methods on the auth object.
+// The User type is available on the firebase namespace.
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
 import { auth, isFirebaseInitialized } from '../services/dbService';
 
 // 관리자 이메일 목록 (이곳을 수정하여 실제 관리자 이메일로 변경하세요)
 const ADMIN_EMAILS = ['xerimaii@gmail.com'];
 
 interface AuthContextType {
-    user: User | null;
+    // FIX: Update User type to firebase.User for v8 compat.
+    user: firebase.User | null;
     loading: boolean;
     isAdmin: boolean;
     login: (email: string, pass: string) => Promise<void>;
@@ -16,7 +20,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [user, setUser] = useState<User | null>(null);
+    // FIX: Update User type to firebase.User for v8 compat.
+    const [user, setUser] = useState<firebase.User | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -24,7 +29,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setLoading(false);
             return;
         }
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
+        // FIX: Use v8 namespaced API for onAuthStateChanged
+        const unsubscribe = auth.onAuthStateChanged((user) => {
             setUser(user);
             setLoading(false);
         });
@@ -35,7 +41,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (!isFirebaseInitialized || !auth) {
             throw new Error("인증 서비스를 사용할 수 없습니다. Firebase 설정을 확인하세요.");
         }
-        await signInWithEmailAndPassword(auth, email, pass);
+        // FIX: Use v8 namespaced API for signInWithEmailAndPassword
+        await auth.signInWithEmailAndPassword(email, pass);
     };
 
     const logout = async () => {
@@ -43,7 +50,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // Silently fail, as user is already effectively logged out.
             return;
         }
-        await signOut(auth);
+        // FIX: Use v8 namespaced API for signOut
+        await auth.signOut();
     };
     
     // Check if the user's email is in the admin list (case-insensitive).

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useDeferredValue } from 'react';
 import { useDataState, useScanner } from '../context/AppContext';
 import { Product } from '../types';
 import { SearchIcon, SpinnerIcon, BarcodeScannerIcon } from '../components/Icons';
@@ -67,6 +67,8 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { openScanner } = useScanner();
     const [searchTerm, setSearchTerm] = useState('');
     const [activeSearchTerm, setActiveSearchTerm] = useState('');
+    const deferredActiveSearchTerm = useDeferredValue(activeSearchTerm);
+    const isStale = activeSearchTerm !== deferredActiveSearchTerm;
 
     const handleSearch = (e?: React.FormEvent) => {
         e?.preventDefault();
@@ -85,10 +87,11 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, [openScanner]);
 
     const { displayedProducts, totalFound } = useMemo(() => {
-        if (!activeSearchTerm) {
+        const lowercasedFilter = deferredActiveSearchTerm.toLowerCase();
+        if (!lowercasedFilter) {
             return { displayedProducts: [], totalFound: 0 };
         }
-        const lowercasedFilter = activeSearchTerm.toLowerCase();
+        
         const filtered = products.filter(product =>
             product.name.toLowerCase().includes(lowercasedFilter) ||
             product.barcode.includes(lowercasedFilter)
@@ -97,12 +100,13 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             displayedProducts: filtered.slice(0, MAX_RESULTS_TO_DISPLAY),
             totalFound: filtered.length
         };
-    }, [activeSearchTerm, products]);
+    }, [deferredActiveSearchTerm, products]);
     
     const renderContent = () => {
+        // State 1: Data is loading for the first time
         if (products.length === 0) {
             return (
-                <div className="flex items-center justify-center h-full text-center text-gray-500">
+                <div className="flex items-center justify-center h-full text-center text-gray-500 pt-16">
                     <div>
                         <SpinnerIcon className="w-10 h-10 mx-auto text-blue-500" />
                         <p className="mt-2 font-semibold">상품 데이터 로딩 중...</p>
@@ -111,30 +115,25 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             );
         }
 
+        // State 2: Data loaded, but user hasn't searched yet
         if (!activeSearchTerm) {
+             return null;
+        }
+
+        // State 3: User has searched, but no results were found
+        if (displayedProducts.length === 0 && !isStale) {
             return (
-                <div className="flex items-center justify-center h-full text-center text-gray-500">
-                    <div>
-                        <SearchIcon className="w-12 h-12 mx-auto" />
-                        <p className="mt-2 font-semibold">상품명 또는 바코드로 검색하세요.</p>
-                    </div>
+                <div className="p-3 flex flex-col items-center justify-center h-full text-gray-400 pt-16 text-center">
+                    <SearchIcon className="w-16 h-16 text-gray-300 mb-4" />
+                    <p className="text-lg font-semibold">검색 결과가 없습니다</p>
+                    <p className="text-sm mt-1">다른 검색어를 입력해보세요.</p>
                 </div>
             );
         }
 
-        if (displayedProducts.length === 0) {
-            return (
-                 <div className="flex items-center justify-center h-full text-center text-gray-500">
-                     <div>
-                        <SearchIcon className="w-12 h-12 mx-auto" />
-                        <p className="mt-2 font-semibold">검색 결과가 없습니다.</p>
-                     </div>
-                 </div>
-            );
-        }
-
+        // State 4: Results are found and displayed
         return (
-            <div className="space-y-3">
+            <div className={`space-y-3 transition-opacity duration-200 ${isStale ? 'opacity-50' : 'opacity-100'}`}>
                 <div className="divide-y divide-gray-200">
                     {displayedProducts.map((product, index) => (
                         <ProductCard key={product.barcode} product={product} index={index} />
