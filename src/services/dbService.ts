@@ -3,7 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/database';
 import { firebaseConfig } from '../firebaseConfig';
-import { Order, OrderItem, Customer, Product } from '../types';
+import { Order, OrderItem, Customer, Product, SyncLog } from '../types';
 
 let app: firebase.app.App | null = null;
 let db: firebase.database.Database | null = null;
@@ -302,8 +302,17 @@ export const replaceAll = <T>(storeName: string, items: T[]): Promise<void> => {
     if (!keyField) return db.ref(storeName).set(items);
 
     const itemsObject = arrayToObject(items, keyField);
-    // FIX: Use v8 compat API for set()
+    // FIX: Use v8 compat API for set
     return db.ref(storeName).set(itemsObject);
+};
+
+export const clearOrders = (): Promise<void> => {
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+    const updates: { [key: string]: null } = {};
+    updates['/orders'] = null;
+    updates['/order-items'] = null;
+    // FIX: Use v8 compat API for update()
+    return db.ref().update(updates);
 };
 
 export const setValue = (path: string, value: any): Promise<void> => {
@@ -312,217 +321,173 @@ export const setValue = (path: string, value: any): Promise<void> => {
     return db.ref(path).set(value);
 };
 
-export const smartSyncData = async (dataType: 'customers' | 'products', excelItems: (Customer | Product)[], userEmail: string): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-
-    const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
-    const nameField = 'name';
-    
-    const existingItems = await getStore<Customer | Product>(dataType);
-    const existingItemsMap = new Map(existingItems.map(item => [(item as any)[keyField], item]));
-    const excelItemsMap = new Map(excelItems.map(item => [(item as any)[keyField], item]));
-
-    const updates: { [key: string]: any } = {};
-    const now = new Date().toISOString();
-
-    // FIX: Use v8 compat API for ref() and push()
-    const syncLogRef = db.ref(`sync-logs/${dataType}`);
-
-    // Check for new and updated items
-    for (const [key, excelItem] of excelItemsMap.entries()) {
-        const existingItem = existingItemsMap.get(key);
-        const newItem = { ...excelItem, lastModified: now };
-        
-        let isDifferent = !existingItem;
-        if (existingItem) {
-             isDifferent = Object.keys(excelItem).some(field => (excelItem as any)[field] !== (existingItem as any)[field]);
-        }
-
-        if (isDifferent) {
-            updates[`/${dataType}/${key}`] = newItem;
-            await syncLogRef.push({ timestamp: now, data: newItem });
-        }
-    }
-
-    // Check for deleted items
-    for (const [key, existingItem] of existingItemsMap.entries()) {
-        if (!excelItemsMap.has(key)) {
-            updates[`/${dataType}/${key}`] = null;
-            await syncLogRef.push({
-                timestamp: now,
-                data: { _deleted: true, [keyField]: key, [nameField]: (existingItem as any)[nameField] }
-            });
-        }
-    }
-
-    if (Object.keys(updates).length > 0) {
-        // FIX: Use v8 compat API for update()
-        return db.ref().update(updates);
-    }
-    
-    return Promise.resolve();
-};
-
-// --- Incremental Sync ---
-
-export const getSyncLogChanges = async <T>(dataType: 'customers' | 'products', startAfterKey: string): Promise<{ items: T[], lastKey: string | null }> => {
-    if (!db) return { items: [], lastKey: startAfterKey };
-    
-    // FIX: Use v8 compat API for queries
-    const logsQuery = db.ref(`sync-logs/${dataType}`).orderByKey().startAt(startAfterKey);
-    const snapshot = await logsQuery.get();
-    
-    const items: T[] = [];
-    let lastKey: string | null = startAfterKey;
-    
-    if (snapshot.exists()) {
-        snapshot.forEach(childSnapshot => {
-            // startAt is inclusive, so we skip the key we started with.
-            if (childSnapshot.key === startAfterKey) return;
-
-            const logEntry = childSnapshot.val();
-            items.push(logEntry.data);
-            lastKey = childSnapshot.key;
-        });
-    }
-
-    return { items, lastKey };
-};
-
-export const getLastSyncLogKey = async (dataType: 'customers' | 'products'): Promise<string | null> => {
-    if (!db) return null;
-    // FIX: Use v8 compat API for queries
-    const logsQuery = db.ref(`sync-logs/${dataType}`).orderByKey().limitToLast(1);
-    const snapshot = await logsQuery.get();
-    if (snapshot.exists()) {
-        const [key] = Object.keys(snapshot.val());
-        return key;
-    }
-    return null;
-};
-
-export const createSyncMarker = (dataType: 'customers' | 'products'): string | null => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    // FIX: Use v8 compat API for ref() and push()
-    const syncLogRef = db.ref(`sync-logs/${dataType}`);
-    const newLogEntryRef = syncLogRef.push({
-        timestamp: new Date().toISOString(),
-        data: { _marker: true, message: 'Sync baseline created' }
-    });
-    return newLogEntryRef.key;
-};
-
-export const getStoreByChunks = async <T>(
-    storeName: 'customers' | 'products',
-    chunkSize: number,
-    onChunk: (chunk: T[], isFirstChunk: boolean) => Promise<void>
-): Promise<void> => {
-    if (!db) return;
-
-    let startKey: string | null = null;
-    let hasMore = true;
-    let isFirst = true;
-
-    while (hasMore) {
-        // FIX: Use v8 compat API for queries
-        let chunkQuery = db.ref(storeName).orderByKey().limitToFirst(chunkSize + 1);
-        if (startKey) {
-            chunkQuery = chunkQuery.startAt(startKey);
-        }
-
-        const snapshot = await chunkQuery.get();
-
-        if (snapshot.exists()) {
-            const chunkData = snapshot.val();
-            const keys = Object.keys(chunkData).sort(); // Sort keys to ensure order
-            let items = keys.map(key => chunkData[key]) as T[];
-            
-            // For subsequent chunks, the first item is an overlap from the previous query, so we remove it.
-            if (!isFirst) {
-                items.shift();
-            }
-
-            if (items.length === 0) {
-                hasMore = false;
-                continue;
-            }
-
-            if (items.length > chunkSize) {
-                // We have more data. The last key is the start for the next iteration.
-                startKey = keys[keys.length - 1]; 
-                await onChunk(items.slice(0, chunkSize), isFirst);
-            } else {
-                // This is the last chunk.
-                hasMore = false;
-                await onChunk(items, isFirst);
-            }
-            isFirst = false;
-        } else {
-            hasMore = false;
-        }
-    }
-};
-
-// --- Backup & Restore & Data Management ---
+// --- Backup & Restore ---
 export const createBackup = async (): Promise<string> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     // FIX: Use v8 compat API for get()
     const snapshot = await db.ref().get();
-    const backupData = snapshot.val() || {};
-    backupData.backupDate = new Date().toISOString();
-    return JSON.stringify(backupData, null, 2);
+    return JSON.stringify(snapshot.val(), null, 2);
 };
 
-export const restoreFromBackup = (jsonString: string): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    const backupData = JSON.parse(jsonString);
-    if (backupData.backupDate) {
-        delete backupData.backupDate;
-    }
-    // FIX: Use v8 compat API for set()
-    return db.ref().set(backupData);
-};
-
-export const clearOrders = (): Promise<void> => {
+export const restoreFromBackup = (json: string): Promise<void> => {
     if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
-    const updates: { [key: string]: null } = {
-        '/orders': null,
-        '/order-items': null,
-    };
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+    const data = JSON.parse(json);
+    // FIX: Use v8 compat API for set()
+    return db.ref().set(data);
 };
 
-export const performSyncLogCleanup = async (): Promise<void> => {
+// --- Sync Log Management ---
+
+export const smartSyncData = async (
+    storeName: 'customers' | 'products',
+    newData: (Customer | Product)[],
+    userEmail: string
+): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
 
-    const retentionDays = await getValue<number>('settings/sync-logs/retentionDays', 30);
-    if (retentionDays === -1) {
-        console.log("Sync log retention is set to permanent. Skipping cleanup.");
-        return;
+    const keyField = storeName === 'customers' ? 'comcode' : 'barcode';
+    
+    const existingDataArray = await getStore<Customer | Product>(storeName);
+    const existingDataMap = new Map(existingDataArray.map(item => [(item as any)[keyField], item]));
+    const newDataMap = new Map(newData.map(item => [(item as any)[keyField], item]));
+    
+    const updates: { [key: string]: any } = {};
+    const timestamp = firebase.database.ServerValue.TIMESTAMP;
+    const nowISO = new Date().toISOString();
+    const logUser = userEmail.split('@')[0];
+
+    // Find updates and additions
+    for (const [key, newItem] of newDataMap.entries()) {
+        const existingItem = existingDataMap.get(key);
+        
+        const { lastModified: _e, ...restExisting } = existingItem || {};
+        const { lastModified: _n, ...restNew } = newItem as any;
+        
+        if (!existingItem || JSON.stringify(restExisting) !== JSON.stringify(restNew)) {
+            const itemWithMeta = { ...newItem, lastModified: nowISO };
+            const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
+
+            if (logRefKey) {
+                updates[`/${storeName}/${key}`] = itemWithMeta;
+                updates[`/sync-logs/${storeName}/${logRefKey}`] = { ...itemWithMeta, timestamp, user: logUser };
+            }
+        }
     }
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
-    const cutoffTimestamp = cutoffDate.toISOString();
+    // Find deletions
+    for (const [key, existingItem] of existingDataMap.entries()) {
+        if (!newDataMap.has(key)) {
+            const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
+            if (logRefKey) {
+                updates[`/${storeName}/${key}`] = null;
+                updates[`/sync-logs/${storeName}/${logRefKey}`] = { 
+                    [keyField]: key, 
+                    name: (existingItem as any)?.name,
+                    _deleted: true, 
+                    timestamp, 
+                    user: logUser 
+                };
+            }
+        }
+    }
 
-    const cleanupPromises = ['customers', 'products'].map(async (dataType) => {
-        // FIX: Use v8 compat API for queries
-        const logsRef = db!.ref(`sync-logs/${dataType}`);
-        const logsQuery = logsRef.orderByChild('timestamp').endAt(cutoffTimestamp);
-        
-        const snapshot = await logsQuery.get();
-        if (snapshot.exists()) {
-            const updates: { [key: string]: null } = {};
-            snapshot.forEach((childSnapshot) => {
-                updates[`/sync-logs/${dataType}/${childSnapshot.key}`] = null;
-            });
-            // FIX: Use v8 compat API for update()
-            await db!.ref().update(updates);
-            console.log(`Cleaned up sync logs for ${dataType}.`);
+    if (Object.keys(updates).length > 0) {
+        await db.ref().update(updates);
+    }
+};
+
+export const getSyncLogChanges = async (
+    dataType: 'customers' | 'products',
+    lastKey: string | null
+): Promise<{ items: any[], newLastKey: string | null }> => {
+    if (!isFirebaseInitialized || !db) return { items: [], newLastKey: lastKey };
+
+    let query = db.ref(`sync-logs/${dataType}`).orderByKey();
+    if (lastKey) {
+        query = query.startAt(lastKey);
+    }
+    
+    const snapshot = await query.get();
+    if (!snapshot.exists()) {
+        return { items: [], newLastKey: lastKey };
+    }
+
+    const items: any[] = [];
+    let processedLastKey: string | null = lastKey;
+
+    snapshot.forEach(childSnapshot => {
+        if (childSnapshot.key !== lastKey) {
+            items.push(childSnapshot.val());
+            processedLastKey = childSnapshot.key;
         }
     });
 
-    await Promise.all(cleanupPromises);
-    await setValue('settings/sync-logs/lastCleanupTimestamp', new Date().toISOString());
+    return { items, newLastKey: processedLastKey };
+};
+
+export const getLastSyncLogKey = async (dataType: 'customers' | 'products'): Promise<string | null> => {
+     if (!isFirebaseInitialized || !db) return null;
+     const snapshot = await db.ref(`sync-logs/${dataType}`).orderByKey().limitToLast(1).get();
+     if (snapshot.exists()) {
+        const val = snapshot.val();
+        const [key] = Object.keys(val);
+        return key || null;
+     }
+     return null;
+}
+
+export const getSyncLogs = async (dataType: 'customers' | 'products', limit: number = 100): Promise<SyncLog[]> => {
+    if (!isFirebaseInitialized || !db) return [];
+    const snapshot = await db.ref(`sync-logs/${dataType}`).orderByKey().limitToLast(limit).get();
+    if (!snapshot.exists()) return [];
+    
+    const logs: SyncLog[] = [];
+    snapshot.forEach(child => {
+        logs.push({ ...child.val(), _key: child.key });
+    });
+    
+    return logs.reverse(); // Newest first
+};
+
+export const listenForNewLogs = (
+    dataType: 'customers' | 'products',
+    startKey: string | null,
+    callback: (newItem: any, itemKey: string) => void
+): (() => void) => {
+    if (!isFirebaseInitialized || !db) return () => {};
+
+    let query = db.ref(`sync-logs/${dataType}`).orderByKey();
+    if (startKey) {
+        query = query.startAt(startKey);
+    }
+
+    const listener = query.on('child_added', (snapshot) => {
+        if (snapshot.key && snapshot.key !== startKey) {
+            callback(snapshot.val(), snapshot.key);
+        }
+    });
+
+    return () => query.off('child_added', listener);
+};
+
+export const cleanupSyncLogs = async (dataType: 'customers' | 'products', retentionDays: number): Promise<void> => {
+    if (!isFirebaseInitialized || !db || retentionDays < 0) return; // -1 means keep forever
+
+    const cutoff = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
+    const logRef = db.ref(`sync-logs/${dataType}`);
+    
+    const snapshot = await logRef.orderByChild('timestamp').endAt(cutoff).get();
+
+    if (snapshot.exists()) {
+        const updates: { [key: string]: null } = {};
+        snapshot.forEach(child => {
+            if (child.key) {
+                updates[child.key] = null;
+            }
+        });
+        if (Object.keys(updates).length > 0) {
+            await logRef.update(updates);
+            console.log(`Cleaned up ${Object.keys(updates).length} old logs for ${dataType}.`);
+        }
+    }
 };

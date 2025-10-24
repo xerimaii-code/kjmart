@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, Dispatch, SetStateAction } from 'react';
 import { getDeviceId } from '../services/deviceService';
 
 /**
@@ -8,7 +8,7 @@ import { getDeviceId } from '../services/deviceService';
  * @param options An optional object. Set `deviceSpecific: true` to prefix the key with a unique device ID.
  * @returns A stateful value, and a function to update it.
  */
-export function useLocalStorage<T>(key: string, initialValue: T | null, options?: { deviceSpecific?: boolean }): [T | null, (value: T | null) => void] {
+export function useLocalStorage<T>(key: string, initialValue: T | null, options?: { deviceSpecific?: boolean }): [T | null, Dispatch<SetStateAction<T | null>>] {
     
     const getFinalKey = useCallback(() => {
         return options?.deviceSpecific ? `${getDeviceId()}:${key}` : key;
@@ -28,24 +28,33 @@ export function useLocalStorage<T>(key: string, initialValue: T | null, options?
         }
     });
 
-    const setValue = useCallback((value: T | null) => {
+    const setValue: Dispatch<SetStateAction<T | null>> = useCallback((value) => {
         if (typeof window === 'undefined') {
             console.warn(`Tried to set localStorage key “${key}” even though no window was found`);
             return;
         }
 
         try {
-            const finalKey = getFinalKey();
-            if (value === null) {
-                window.localStorage.removeItem(finalKey);
-            } else {
-                window.localStorage.setItem(finalKey, JSON.stringify(value));
-            }
-            setStoredValue(value);
+            // Use the functional update form of useState's setter to ensure atomicity
+            setStoredValue(prevValue => {
+                // Determine the new value: either the value itself or the result of the update function
+                const valueToStore = value instanceof Function ? value(prevValue) : value;
+                const finalKey = getFinalKey();
+
+                // Update localStorage
+                if (valueToStore === null) {
+                    window.localStorage.removeItem(finalKey);
+                } else {
+                    window.localStorage.setItem(finalKey, JSON.stringify(valueToStore));
+                }
+
+                // Return the new value for the state update
+                return valueToStore;
+            });
         } catch (error) {
             console.error(`Error setting localStorage key “${key}”:`, error);
         }
-    }, [key, getFinalKey]);
+    }, [getFinalKey]);
 
     return [storedValue, setValue];
 }

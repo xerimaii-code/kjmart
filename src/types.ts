@@ -58,3 +58,17 @@ export interface EditedOrderDraft {
     items: OrderItem[];
     memo: string;
 }
+
+export interface SyncLog {
+    _key: string;
+    timestamp: number;
+    user?: string;
+    _deleted?: boolean;
+    // Customer properties
+    comcode?: string;
+    // Product properties
+    barcode?: string;
+    // Common property
+    name?: string;
+    [key: string]: any;
+}

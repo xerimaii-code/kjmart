@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useDataState, useDataActions, useAlert, usePWAInstall } from '../context/AppContext';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { useDataState, useDataActions, useAlert, usePWAInstall, useModals } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon, HistoryIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
 import CollapsibleCard from '../components/CollapsibleCard';
+
+const SyncHistoryModal = lazy(() => import('../components/SyncHistoryModal'));
 
 // --- Types ---
 interface SyncSettings {
@@ -211,6 +213,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { smartSyncCustomers, smartSyncProducts, setSelectedCameraId, setScanSettings, clearOrders, forceFullSync } = useDataActions();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const { showAlert, showToast } = useAlert();
+    const { openHistoryModal } = useModals();
     const { logout, user } = useAuth();
 
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -513,36 +516,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         </div>
                     </CollapsibleCard>
 
-                    <CollapsibleCard title="강제 동기화 및 로그" icon={<DatabaseIcon className="w-5 h-5 text-gray-500"/>}>
-                        <div className="flex flex-col items-center justify-center my-4 space-y-2 text-gray-600">
-                            <div className="flex items-center gap-4">
-                                <div className="flex flex-col items-center">
-                                    <DatabaseIcon className="w-8 h-8 text-gray-500" />
-                                    <span className="text-xs font-semibold mt-1">서버</span>
-                                </div>
-                                <ArrowLongRightIcon className="w-8 h-8 text-gray-400 flex-shrink-0" />
-                                <div className="flex flex-col items-center">
-                                    <DevicePhoneMobileIcon className="w-8 h-8 text-gray-500" />
-                                    <span className="text-xs font-semibold mt-1">로컬 기기</span>
-                                </div>
-                            </div>
-                        </div>
-                        <p className="text-xs text-center text-gray-500 max-w-xs mx-auto mb-4">
-                            서버의 <span className="font-bold">거래처 및 상품</span> 데이터를 로컬 기기로 가져와 덮어씁니다. 데이터가 올바르게 표시되지 않을 때 사용하세요.
-                        </p>
-                        <button
-                            onClick={handleForceSync}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
-                        >
-                            <UploadIcon className="w-5 h-5" />
-                            <span>전체 데이터 강제 동기화</span>
-                        </button>
+                    <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
                         <div className="pt-4 mt-4 border-t border-gray-200">
-                            <p className="text-xs text-gray-500 mb-3">
-                                증분 동기화에 사용되는 로그 데이터의 보관 기간을 설정합니다. 기간이 짧을수록 데이터베이스 용량을 절약할 수 있습니다.
-                            </p>
-                            <div className="flex justify-between items-center">
-                                <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">로그 보관 기간</label>
+                             <div className="flex items-center justify-between">
+                                <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">동기화 로그 보관 기간</label>
                                 <select
                                     id="log-retention"
                                     value={logRetentionDays}
@@ -555,11 +532,30 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                     <option value="-1">영구</option>
                                 </select>
                             </div>
+                             <button
+                                onClick={openHistoryModal}
+                                className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-800 font-semibold rounded-lg hover:bg-gray-200 transition active:scale-95"
+                            >
+                                <HistoryIcon className="w-5 h-5" />
+                                <span>동기화 이력 보기</span>
+                            </button>
                         </div>
-                    </CollapsibleCard>
-                    
-                    <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
-                        <SyncSection dataType="customer" />
+                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                            <h4 className="text-sm font-bold text-gray-600 mb-2">강제 동기화</h4>
+                            <p className="text-xs text-gray-500 mb-3">
+                                서버의 <span className="font-bold">거래처 및 상품</span> 데이터를 로컬 기기로 가져와 덮어씁니다. 데이터가 올바르게 표시되지 않을 때 사용하세요.
+                            </p>
+                            <button
+                                onClick={handleForceSync}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
+                            >
+                                <UploadIcon className="w-5 h-5" />
+                                <span>전체 데이터 강제 동기화</span>
+                            </button>
+                        </div>
+                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
+                            <SyncSection dataType="customer" />
+                        </div>
                          <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
                            <SyncSection dataType="product" />
                         </div>

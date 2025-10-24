@@ -8,6 +8,7 @@ import * as googleDrive from '../services/googleDriveService';
 import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
 import { getDeviceId } from '../services/deviceService';
 import Toast from '../components/Toast';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 // FIX: The following import from 'firebase/database' causes errors with older Firebase SDK versions.
 // It is removed as the database operations are now using the v8 compat syntax provided by dbService.
 
@@ -91,6 +92,9 @@ interface ModalContextValue {
     closeEditItemModal: () => void;
     openMemoModal: (data: MemoModalPayload) => void;
     closeMemoModal: () => void;
+    isHistoryModalOpen: boolean;
+    openHistoryModal: () => void;
+    closeHistoryModal: () => void;
 }
 
 // Scanner Context
@@ -104,7 +108,7 @@ interface ScannerContextValue {
 }
 
 // Sync Context
-interface SyncContextValue { isSyncing: boolean; }
+interface SyncContextValue { isSyncing: boolean; syncProgress: number; initialSyncCompleted: boolean; syncStatusText: string; }
 
 // PWA Install Context
 interface PWAInstallContextValue {
@@ -148,6 +152,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
     const [toast, setToast] = useState<ToastState>({ isOpen: false, message: '', type: 'success' });
     const [isSyncing, setIsSyncing] = useState(false);
+    const [syncProgress, setSyncProgress] = useState(0);
+    const [syncStatusText, setSyncStatusText] = useState('초기화 중...');
+    const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -161,6 +168,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [addItemModalProps, setAddItemModalProps] = useState<AddItemModalPayload | null>(null);
     const [editItemModalProps, setEditItemModalProps] = useState<EditItemModalPayload | null>(null);
     const [memoModalProps, setMemoModalProps] = useState<MemoModalPayload | null>(null);
+    const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null, products: string | null }>('last-sync-log-keys', { customers: null, products: null });
 
     // Alert Actions
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
@@ -201,7 +210,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         closeEditItemModal: () => setEditItemModalProps(null),
         openMemoModal: (data) => setMemoModalProps(data),
         closeMemoModal: () => setMemoModalProps(null),
-    }), [isDetailModalOpen, editingOrder, isDeliveryModalOpen, orderToExport, addItemModalProps, editItemModalProps, memoModalProps]);
+        isHistoryModalOpen,
+        openHistoryModal: () => setIsHistoryModalOpen(true),
+        closeHistoryModal: () => setIsHistoryModalOpen(false),
+    }), [isDetailModalOpen, editingOrder, isDeliveryModalOpen, orderToExport, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen]);
     
     const scannerContextValue = useMemo(() => ({
         isScannerOpen, scannerContext, isContinuousScan, onScanSuccess,
@@ -214,7 +226,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         closeScanner: () => { setIsScannerOpen(false); setIsContinuousScan(false); setScannerContext(null); },
     }), [isScannerOpen, scannerContext, isContinuousScan, onScanSuccess]);
     
-    const syncContextValue = useMemo(() => ({ isSyncing }), [isSyncing]);
+    const syncContextValue = useMemo(() => ({ isSyncing, syncProgress, initialSyncCompleted, syncStatusText }), [isSyncing, syncProgress, initialSyncCompleted, syncStatusText]);
     
     const pwaInstallContextValue = useMemo(() => ({
         isInstallPromptAvailable: !!installPromptEvent,
@@ -287,24 +299,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         forceFullSync: async () => {
             setIsSyncing(true);
             try {
-                // Clear local cache
-                await cache.setCachedData('customers', []);
-                await cache.setCachedData('products', []);
+                // Get fresh data from the primary data nodes
+                const customers = await db.getStore<Customer>('customers');
+                const products = await db.getStore<Product>('products');
 
-                // Get fresh data and populate cache
-                await db.getStoreByChunks<Customer>('customers', 500, async (chunk, isFirstChunk) => {
-                    if (isFirstChunk) await cache.setCachedData('customers', chunk);
-                    else await cache.appendCachedData('customers', chunk);
-                });
-                await db.getStoreByChunks<Product>('products', 500, async (chunk, isFirstChunk) => {
-                    if (isFirstChunk) await cache.setCachedData('products', chunk);
-                    else await cache.appendCachedData('products', chunk);
-                });
+                // Overwrite local cache with the full fresh dataset
+                await Promise.all([
+                    cache.setCachedData('customers', customers),
+                    cache.setCachedData('products', products)
+                ]);
                 
-                // Update state
-                const customers = await cache.getCachedData<Customer>('customers');
-                const products = await cache.getCachedData<Product>('products');
+                // Update the application's state
                 setDataState(prev => ({...prev, customers, products }));
+
+                // CRITICAL: Find the latest log keys and reset the sync markers
+                // This ensures the next incremental sync starts from this point.
+                const lastCustomerKey = await db.getLastSyncLogKey('customers');
+                const lastProductKey = await db.getLastSyncLogKey('products');
+                setLastSyncKeys({ customers: lastCustomerKey, products: lastProductKey });
 
                 showToast("데이터 강제 동기화가 완료되었습니다.", "success");
             } catch (error) {
@@ -314,62 +326,212 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setIsSyncing(false);
             }
         },
-    }), [user, showToast, showAlert]);
+    }), [user, showToast, showAlert, setLastSyncKeys]);
 
-     useEffect(() => {
+    useEffect(() => {
         if (!user) {
             setDataState({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
+            if (lastSyncKeys?.customers || lastSyncKeys?.products) {
+                 setLastSyncKeys({ customers: null, products: null });
+            }
+            setInitialSyncCompleted(false); 
             return;
         }
-
-        const initData = async () => {
+    
+        let isMounted = true;
+        const unsubscribers: (() => void)[] = [];
+    
+        const performSync = async () => {
+            if (!isMounted) return;
             setIsSyncing(true);
+            setSyncProgress(0);
+            setSyncStatusText('동기화 시작...');
+    
+            try {
+                // 1. Load local cache first for instant UI response
+                if (isMounted) {
+                    setSyncProgress(10);
+                    setSyncStatusText('로컬 캐시 로딩 중...');
+                }
+                const [cachedCustomers, cachedProducts] = await Promise.all([
+                    cache.getCachedData<Customer>('customers'),
+                    cache.getCachedData<Product>('products'),
+                ]);
+                if (isMounted) {
+                    setDataState(prev => ({ ...prev, customers: cachedCustomers, products: cachedProducts }));
+                    setSyncProgress(20);
+                    setSyncStatusText('서버와 변경사항 확인 중...');
+                }
+    
+                // 2. Sync function for a given data type
+                const syncDataType = async (dataType: 'customers' | 'products'): Promise<void> => {
+                    let localData = dataType === 'customers' ? cachedCustomers : cachedProducts;
+                    const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
+                    const lastKey = lastSyncKeys?.[dataType] ?? null;
 
-            // 1. Immediately load from cache to provide an instant UI
-            const cachedCustomers = await cache.getCachedData<Customer>('customers');
-            const cachedProducts = await cache.getCachedData<Product>('products');
+                    // --- OPTIMIZATION ---
+                    // If local cache is empty, perform a faster full sync instead of processing all logs.
+                    if (localData.length === 0) {
+                        console.log(`Cache for ${dataType} is empty. Performing initial full sync.`);
+                        const fullData = await db.getStore<Customer | Product>(dataType);
 
-            if (cachedCustomers.length > 0 || cachedProducts.length > 0) {
-                 setDataState(prev => ({...prev, customers: cachedCustomers, products: cachedProducts }));
-            }
+                        if (isMounted && fullData.length > 0) {
+                            await cache.setCachedData(dataType, fullData as any);
+                            setDataState(prev => ({ ...prev, [dataType]: fullData }));
+                            
+                            const latestLogKey = await db.getLastSyncLogKey(dataType);
+                            if (latestLogKey) {
+                                setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: latestLogKey }));
+                            }
+                            
+                            if (!isMounted) return;
+                            const unsub = db.listenForNewLogs(dataType, latestLogKey, (newItem, itemKey) => {
+                                if (!isMounted) return;
+                                
+                                setDataState(prev => {
+                                    const currentData = prev[dataType];
+                                    const dataMap = new Map(currentData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
+                                    
+                                    if ((newItem as any)._deleted) {
+                                        dataMap.delete((newItem as any)[keyField]);
+                                    } else {
+                                        dataMap.set((newItem as any)[keyField], newItem);
+                                    }
+                                    const updatedData = Array.from(dataMap.values());
             
-            // 2. Flags to track when initial data from Firebase has been loaded.
-            let customersLoaded = false;
-            let productsLoaded = false;
-            const checkSyncDone = () => {
-                if (customersLoaded && productsLoaded) {
+                                    cache.setCachedData(dataType, updatedData as any).then(() => {
+                                        if (isMounted) {
+                                            setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: itemKey }));
+                                        }
+                                    }).catch(err => {
+                                        console.error(`Failed to cache and update sync key for ${dataType}`, err);
+                                    });
+                                    
+                                    return { ...prev, [dataType]: updatedData };
+                                });
+                            });
+                            unsubscribers.push(unsub);
+                        }
+                        return;
+                    }
+
+
+                    // --- Original Incremental Sync Logic (for when cache is already populated) ---
+                    const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
+    
+                    if (isMounted && changes.length > 0) {
+                        const dataMap = new Map(localData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
+                        
+                        for (const change of changes) {
+                            const key = (change as any)[keyField];
+                            if (!key) {
+                                console.warn(`Sync change for ${dataType} is missing keyField '${keyField}'. Change:`, change);
+                                continue;
+                            }
+                            if ((change as any)._deleted) {
+                                dataMap.delete(key);
+                            } else {
+                                dataMap.set(key, change);
+                            }
+                        }
+                        const updatedLocalData = Array.from(dataMap.values());
+                        
+                        await cache.setCachedData(dataType, updatedLocalData as any);
+                        setDataState(prev => ({ ...prev, [dataType]: updatedLocalData }));
+                    }
+    
+                    const finalKeyForListener = newLastKey || lastKey;
+                    if (isMounted && newLastKey !== lastKey) {
+                        setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: newLastKey }));
+                    }
+    
+                    if (!isMounted) return;
+                    const unsub = db.listenForNewLogs(dataType, finalKeyForListener, (newItem, itemKey) => {
+                        if (!isMounted) return;
+                        
+                        setDataState(prev => {
+                            const currentData = prev[dataType];
+                            const dataMap = new Map(currentData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
+                            
+                            if ((newItem as any)._deleted) {
+                                dataMap.delete((newItem as any)[keyField]);
+                            } else {
+                                dataMap.set((newItem as any)[keyField], newItem);
+                            }
+                            const updatedData = Array.from(dataMap.values());
+    
+                            // Ensure cache and sync key are updated atomically after UI state update.
+                            cache.setCachedData(dataType, updatedData as any).then(() => {
+                                if (isMounted) { // Check mount status again in async callback
+                                    setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: itemKey }));
+                                }
+                            }).catch(err => {
+                                console.error(`Failed to cache and update sync key for ${dataType}`, err);
+                            });
+                            
+                            return { ...prev, [dataType]: updatedData };
+                        });
+                    });
+                    unsubscribers.push(unsub);
+                };
+    
+                // Run sync for both in parallel
+                const customerSyncPromise = syncDataType('customers').then(() => {
+                    if (isMounted) {
+                        setSyncProgress(prev => prev + 40);
+                        setSyncStatusText('상품 정보 동기화...');
+                    }
+                });
+                const productSyncPromise = syncDataType('products').then(() => {
+                    if (isMounted) {
+                        setSyncProgress(prev => prev + 40);
+                        setSyncStatusText('마무리 중...');
+                    }
+                });
+
+                await Promise.all([customerSyncPromise, productSyncPromise]);
+
+                if (isMounted) {
+                    setSyncProgress(100);
+                }
+    
+            } catch (error) {
+                console.error("Incremental sync failed:", error);
+                if (isMounted) showAlert("데이터 동기화에 실패했습니다. 강제 동기화를 시도해보세요.");
+            } finally {
+                if (isMounted) {
                     setIsSyncing(false);
+                    setInitialSyncCompleted(true);
+                     // After a short delay, reset progress for future background syncs
+                    setTimeout(() => {
+                        if (isMounted) setSyncProgress(0);
+                    }, 1000);
                 }
-            };
-            
-            // 3. Setup listeners that fetch initial data and then listen for changes.
-            const unsubCustomers = db.listenToStore<Customer>('customers', (customers) => {
-                setDataState(prev => ({...prev, customers }));
-                cache.setCachedData('customers', customers); // Overwrite cache with fresh data
-                if (!customersLoaded) {
-                    customersLoaded = true;
-                    checkSyncDone();
-                }
-            });
-
-            const unsubProducts = db.listenToStore<Product>('products', (products) => {
-                setDataState(prev => ({...prev, products }));
-                cache.setCachedData('products', products); // Overwrite cache with fresh data
-                if (!productsLoaded) {
-                    productsLoaded = true;
-                    checkSyncDone();
-                }
-            });
-            
-            return () => {
-                unsubCustomers();
-                unsubProducts();
-            };
+            }
         };
 
-        initData();
-        
-    }, [user, showAlert]);
+        const performMaintenance = async () => {
+            try {
+                const retentionDays = await db.getValue<number>('settings/sync-logs/retentionDays', 30);
+                if (retentionDays > 0) {
+                    await Promise.all([
+                        db.cleanupSyncLogs('customers', retentionDays),
+                        db.cleanupSyncLogs('products', retentionDays)
+                    ]);
+                }
+            } catch (error) {
+                console.warn("Sync log cleanup failed:", error);
+            }
+        };
+    
+        performSync();
+        performMaintenance();
+    
+        return () => {
+            isMounted = false;
+            unsubscribers.forEach(unsub => unsub());
+        };
+    }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
 
 
     return (

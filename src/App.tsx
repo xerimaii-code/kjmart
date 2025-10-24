@@ -19,6 +19,7 @@ const ScannerModal = lazy(() => import('./components/ScannerModal'));
 const AddItemModal = lazy(() => import('./components/AddItemModal'));
 const EditItemModal = lazy(() => import('./components/EditItemModal'));
 const MemoModal = lazy(() => import('./components/MemoModal'));
+const SyncHistoryModal = lazy(() => import('./components/SyncHistoryModal'));
 
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
 
@@ -106,6 +107,72 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 };
 // --- End Top Tab Bar Component ---
 
+
+const InitialSyncLoader: React.FC = () => {
+    const { syncProgress, syncStatusText } = useSyncState();
+    const [displayedProgress, setDisplayedProgress] = useState(0);
+    const circumference = 2 * Math.PI * 42; // r = 42
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setDisplayedProgress(prev => {
+                if (prev < syncProgress) {
+                    const diff = syncProgress - prev;
+                    // Move faster for larger gaps, but ensure at least 1% increment
+                    const step = Math.max(1, Math.floor(diff / 10)); 
+                    return Math.min(prev + step, syncProgress);
+                }
+                if (prev > syncProgress) {
+                    return syncProgress; // Snap back if progress goes down
+                }
+                clearInterval(interval);
+                return prev;
+            });
+        }, 30); // ~33fps animation feels smooth
+
+        return () => clearInterval(interval);
+    }, [syncProgress]);
+
+
+    return (
+        <div className="w-full h-full flex flex-col items-center justify-center bg-transparent">
+            <div className="relative w-24 h-24">
+                <svg className="w-full h-full" viewBox="0 0 100 100">
+                    {/* Background circle */}
+                    <circle
+                        className="text-gray-200"
+                        strokeWidth="8"
+                        stroke="currentColor"
+                        fill="transparent"
+                        r="42"
+                        cx="50"
+                        cy="50"
+                    />
+                    {/* Progress circle */}
+                    <circle
+                        className="text-blue-500"
+                        strokeWidth="8"
+                        strokeDasharray={circumference}
+                        strokeDashoffset={circumference * (1 - displayedProgress / 100)}
+                        strokeLinecap="round"
+                        stroke="currentColor"
+                        fill="transparent"
+                        r="42"
+                        cx="50"
+                        cy="50"
+                        style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 0.2s linear' }}
+                    />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-xl font-bold text-gray-700 tabular-nums">
+                    {Math.round(displayedProgress)}%
+                </span>
+            </div>
+            <p className="mt-4 text-lg font-semibold text-gray-600 animate-fade-in-up" key={syncStatusText}>{syncStatusText}</p>
+        </div>
+    );
+};
+
+
 const AppContent: React.FC = () => {
     const [activePage, setActivePage] = useState<Page>('product-inquiry');
     const { 
@@ -119,14 +186,15 @@ const AppContent: React.FC = () => {
         closeEditItemModal,
         memoModalProps,
         closeMemoModal,
+        isHistoryModalOpen,
+        closeHistoryModal,
      } = useModals();
     const { isScannerOpen, onScanSuccess, closeScanner } = useScanner();
-
     const { updateOrderStatus } = useDataActions();
     
     const swipeContainerRef = useRef<HTMLDivElement>(null);
     const activePageIndex = useMemo(() => pages.indexOf(activePage), [activePage]);
-
+    
     const handleExportConfirm = (deliveryType: '일반배송' | '택배배송') => {
         if (orderToExport) {
             exportToXLS(orderToExport, deliveryType);
@@ -141,13 +209,23 @@ const AppContent: React.FC = () => {
         setActivePage(targetPage);
     };
 
+    const isAnyModalOpen = useMemo(() => (
+        isDetailModalOpen || 
+        isDeliveryModalOpen || 
+        isScannerOpen || 
+        !!addItemModalProps || 
+        !!editItemModalProps || 
+        !!memoModalProps || 
+        isHistoryModalOpen
+    ), [isDetailModalOpen, isDeliveryModalOpen, isScannerOpen, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen]);
+
     const { onTouchStart, onTouchMove, onTouchEnd, containerStyle } = useSwipeNavigation({
         items: pages,
         activeIndex: activePageIndex,
         onNavigate: handleNavigation,
         containerRef: swipeContainerRef,
     });
-
+    
     return (
         <div className="h-full w-full flex flex-col bg-transparent">
             <Header />
@@ -157,9 +235,9 @@ const AppContent: React.FC = () => {
                     ref={swipeContainerRef}
                     className="h-full w-full flex"
                     style={{ ...containerStyle, width: `${pages.length * 100}%` }}
-                    onTouchStart={onTouchStart}
-                    onTouchMove={onTouchMove}
-                    onTouchEnd={onTouchEnd}
+                    onTouchStart={!isAnyModalOpen ? onTouchStart : undefined}
+                    onTouchMove={!isAnyModalOpen ? onTouchMove : undefined}
+                    onTouchEnd={!isAnyModalOpen ? onTouchEnd : undefined}
                 >
                     {pages.map((page, index) => {
                         const PageComponent = pageComponents[page];
@@ -206,6 +284,7 @@ const AppContent: React.FC = () => {
                       onSave={memoModalProps.onSave}
                   />
               )}
+              {isHistoryModalOpen && <SyncHistoryModal isOpen={isHistoryModalOpen} onClose={closeHistoryModal} />}
             </Suspense>
             <DeliveryTypeModal
                 isOpen={isDeliveryModalOpen}
@@ -234,6 +313,7 @@ const AccessDeniedPage: React.FC = () => {
 
 const AppRouter: React.FC = () => {
     const { user, loading, isAdmin } = useAuth();
+    const { initialSyncCompleted } = useSyncState();
 
     if (loading) {
         return <PageSuspenseFallback />;
@@ -245,6 +325,10 @@ const AppRouter: React.FC = () => {
 
     if (!isAdmin) {
         return <AccessDeniedPage />;
+    }
+
+    if (!initialSyncCompleted) {
+        return <InitialSyncLoader />;
     }
     
     return <AppContent />;
