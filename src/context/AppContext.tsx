@@ -622,9 +622,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             } finally {
                 if (isMounted) {
                     setIsSyncing(false);
-                    if (!initialSyncCompleted) {
-                        showToast("초기 데이터 동기화가 완료되었습니다.", "success");
-                    }
                     setInitialSyncCompleted(true);
                     setTimeout(() => {
                         if (isMounted) setSyncProgress(0);
