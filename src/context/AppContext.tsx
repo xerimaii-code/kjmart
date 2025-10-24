@@ -47,8 +47,8 @@ interface DataState {
     scanSettings: { vibrateOnScan: boolean; soundOnScan: boolean; };
 }
 interface DataActions {
-    smartSyncCustomers: (customers: Customer[], userEmail: string) => Promise<void>;
-    smartSyncProducts: (products: Product[], userEmail: string) => Promise<void>;
+    smartSyncCustomers: (customers: Customer[], userEmail: string, onProgress?: (message: string) => void) => Promise<void>;
+    smartSyncProducts: (products: Product[], userEmail: string, onProgress?: (message: string) => void) => Promise<void>;
     addOrder: (orderData: { customer: Customer; items: OrderItem[]; total: number; memo?: string; }) => Promise<number>;
     updateOrder: (updatedOrder: Order) => Promise<void>;
     updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
@@ -271,8 +271,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, [user]);
 
     const dataActions: DataActions = useMemo(() => ({
-        smartSyncCustomers: (customers, userEmail) => db.smartSyncData('customers', customers, userEmail),
-        smartSyncProducts: (products, userEmail) => db.smartSyncData('products', products, userEmail),
+        smartSyncCustomers: (customers, userEmail, onProgress) => db.smartSyncData('customers', customers, userEmail, onProgress),
+        smartSyncProducts: (products, userEmail, onProgress) => db.smartSyncData('products', products, userEmail, onProgress),
         addOrder: ({ customer, items, total, memo }) => db.addOrderWithItems({ customer, total, memo }, items),
         updateOrder: async (updatedOrder) => {
             const { items, ...orderData } = updatedOrder;

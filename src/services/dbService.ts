@@ -341,12 +341,16 @@ export const restoreFromBackup = (json: string): Promise<void> => {
 export const smartSyncData = async (
     storeName: 'customers' | 'products',
     newData: (Customer | Product)[],
-    userEmail: string
+    userEmail: string,
+    onProgress?: (message: string) => void
 ): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
 
     const keyField = storeName === 'customers' ? 'comcode' : 'barcode';
     
+    onProgress?.('기존 데이터 로딩 중...');
+    await new Promise(resolve => setTimeout(resolve, 0)); // Yield to main thread
+
     const existingDataArray = await getStore<Customer | Product>(storeName);
     const existingDataMap = new Map(existingDataArray.map(item => [(item as any)[keyField], item]));
     const newDataMap = new Map(newData.map(item => [(item as any)[keyField], item]));
@@ -356,7 +360,10 @@ export const smartSyncData = async (
     const nowISO = new Date().toISOString();
     const logUser = userEmail.split('@')[0];
 
-    // Find updates and additions
+    const totalNew = newData.length;
+    let processedNew = 0;
+
+    // Process updates and additions
     for (const [key, newItem] of newDataMap.entries()) {
         const existingItem = existingDataMap.get(key);
         
@@ -372,9 +379,17 @@ export const smartSyncData = async (
                 updates[`/sync-logs/${storeName}/${logRefKey}`] = { ...itemWithMeta, timestamp, user: logUser };
             }
         }
+
+        processedNew++;
+        if (processedNew % 100 === 0) { // Yield to main thread every 100 items
+            onProgress?.(`변경/추가 확인 중... (${processedNew}/${totalNew})`);
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
     }
 
-    // Find deletions
+    const totalExisting = existingDataArray.length;
+    let processedExisting = 0;
+    // Process deletions
     for (const [key, existingItem] of existingDataMap.entries()) {
         if (!newDataMap.has(key)) {
             const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
@@ -389,9 +404,15 @@ export const smartSyncData = async (
                 };
             }
         }
+        processedExisting++;
+        if (processedExisting % 100 === 0) { // Yield to main thread every 100 items
+            onProgress?.(`삭제 항목 확인 중... (${processedExisting}/${totalExisting})`);
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
     }
 
     if (Object.keys(updates).length > 0) {
+        onProgress?.('데이터베이스에 업로드 중...');
         await db.ref().update(updates);
     }
 };

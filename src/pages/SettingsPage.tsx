@@ -32,6 +32,7 @@ const SyncSection: React.FC<{
     const { showToast, showAlert } = useAlert();
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isSyncing, setIsSyncing] = useState(false);
+    const [syncProgressMessage, setSyncProgressMessage] = useState<string | null>(null);
     const [isPicking, setIsPicking] = useState(false);
     const [isApiReady, setIsApiReady] = useState(false);
 
@@ -85,19 +86,23 @@ const SyncSection: React.FC<{
         }
 
         setIsSyncing(true);
+        setSyncProgressMessage(null);
         try {
             if (!await initializeApi()) return;
+            setSyncProgressMessage('파일 정보 확인 중...');
             const metadata = await googleDrive.getFileMetadata(settings.fileId);
+            setSyncProgressMessage('파일 다운로드 중...');
             const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
+            setSyncProgressMessage('엑셀 파일 분석 중...');
             const rows = await parseExcelFile(fileBlob);
             
             let result;
             if (dataType === 'customer') {
                 result = processCustomerData(rows);
-                if (result.valid.length > 0) await smartSyncCustomers(result.valid, user.email);
+                if (result.valid.length > 0) await smartSyncCustomers(result.valid, user.email, setSyncProgressMessage);
             } else {
                 result = processProductData(rows);
-                if (result.valid.length > 0) await smartSyncProducts(result.valid, user.email);
+                if (result.valid.length > 0) await smartSyncProducts(result.valid, user.email, setSyncProgressMessage);
             }
 
             showToast(`${dataTypeKorean} 데이터 동기화가 완료되었습니다.`, 'success');
@@ -114,6 +119,7 @@ const SyncSection: React.FC<{
             showToast(`${dataTypeKorean} 데이터 동기화 중 오류가 발생했습니다.`, 'error');
         } finally {
             setIsSyncing(false);
+            setSyncProgressMessage(null);
         }
     };
     
@@ -194,11 +200,16 @@ const SyncSection: React.FC<{
                             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-sky-600 text-white font-semibold rounded-lg hover:bg-sky-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
                         >
                             {isSyncing ? (
-                                <SpinnerIcon className="w-5 h-5" />
+                                <div className="flex items-center justify-center gap-2">
+                                    <SpinnerIcon className="w-5 h-5" />
+                                    <span className="truncate text-sm">{syncProgressMessage || '동기화 중...'}</span>
+                                </div>
                             ) : (
-                                <UploadIcon className="w-5 h-5" />
+                                <>
+                                    <UploadIcon className="w-5 h-5" />
+                                    <span>동기화</span>
+                                </>
                             )}
-                            <span>동기화</span>
                         </button>
                     </div>
                 </div>
