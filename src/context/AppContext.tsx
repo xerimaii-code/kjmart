@@ -5,12 +5,11 @@ import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
 import { useAuth } from './AuthContext';
 import * as googleDrive from '../services/googleDriveService';
-import { parseExcelFile, processCustomerData, processProductData } from '../services/dataService';
 import { getDeviceId } from '../services/deviceService';
 import Toast from '../components/Toast';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-// FIX: The following import from 'firebase/database' causes errors with older Firebase SDK versions.
-// It is removed as the database operations are now using the v8 compat syntax provided by dbService.
+import { processExcelFileInWorker, DiffResult } from '../services/dataService';
+import firebase from 'firebase/compat/app';
 
 // --- TYPE DEFINITIONS ---
 
@@ -47,8 +46,8 @@ interface DataState {
     scanSettings: { vibrateOnScan: boolean; soundOnScan: boolean; };
 }
 interface DataActions {
-    smartSyncCustomers: (customers: Customer[], userEmail: string, onProgress?: (message: string) => void) => Promise<void>;
-    smartSyncProducts: (products: Product[], userEmail: string, onProgress?: (message: string) => void) => Promise<void>;
+    smartSyncCustomers: (customers: Customer[], userEmail: string, onProgress?: (message: string) => void, options?: { bypassMassDeleteCheck?: boolean }) => Promise<void>;
+    smartSyncProducts: (products: Product[], userEmail: string, onProgress?: (message: string) => void, options?: { bypassMassDeleteCheck?: boolean }) => Promise<void>;
     addOrder: (orderData: { customer: Customer; items: OrderItem[]; total: number; memo?: string; }) => Promise<number>;
     updateOrder: (updatedOrder: Order) => Promise<void>;
     updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
@@ -57,6 +56,7 @@ interface DataActions {
     setScanSettings: (settings: Partial<{ vibrateOnScan: boolean; soundOnScan: boolean; }>) => Promise<void>;
     clearOrders: () => Promise<void>;
     forceFullSync: () => Promise<void>;
+    syncFromFile: (file: Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<DiffResult<Customer | Product>>;
 }
 
 // Alert Context
@@ -108,7 +108,13 @@ interface ScannerContextValue {
 }
 
 // Sync Context
-interface SyncContextValue { isSyncing: boolean; syncProgress: number; initialSyncCompleted: boolean; syncStatusText: string; }
+interface SyncContextValue {
+    isSyncing: boolean;
+    syncProgress: number;
+    initialSyncCompleted: boolean;
+    syncStatusText: string;
+    syncDataType: 'customers' | 'products' | null;
+}
 
 // PWA Install Context
 interface PWAInstallContextValue {
@@ -154,6 +160,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState(0);
     const [syncStatusText, setSyncStatusText] = useState('초기화 중...');
+    const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -170,6 +177,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [memoModalProps, setMemoModalProps] = useState<MemoModalPayload | null>(null);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null, products: string | null }>('last-sync-log-keys', { customers: null, products: null });
+    
+    const isSyncingRef = useRef(isSyncing);
+    useEffect(() => {
+        isSyncingRef.current = isSyncing;
+    }, [isSyncing]);
 
     // Alert Actions
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
@@ -226,7 +238,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         closeScanner: () => { setIsScannerOpen(false); setIsContinuousScan(false); setScannerContext(null); },
     }), [isScannerOpen, scannerContext, isContinuousScan, onScanSuccess]);
     
-    const syncContextValue = useMemo(() => ({ isSyncing, syncProgress, initialSyncCompleted, syncStatusText }), [isSyncing, syncProgress, initialSyncCompleted, syncStatusText]);
+    const syncContextValue = useMemo(() => ({ isSyncing, syncProgress, initialSyncCompleted, syncStatusText, syncDataType }), [isSyncing, syncProgress, initialSyncCompleted, syncStatusText, syncDataType]);
     
     const pwaInstallContextValue = useMemo(() => ({
         isInstallPromptAvailable: !!installPromptEvent,
@@ -250,10 +262,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (!user || !db.isInitialized() || !db.db) return;
         
         const deviceId = getDeviceId();
-        // FIX: Use v8 compat API
         const settingsRef = db.db.ref(`device-settings/${deviceId}`);
         
-        // FIX: Use v8 compat API
         const listener = settingsRef.on('value', (snapshot) => {
             const settings = snapshot.val();
             setDataState(prevState => ({
@@ -266,13 +276,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }));
         });
         
-        // FIX: Use v8 compat API
         return () => settingsRef.off('value', listener);
     }, [user]);
 
     const dataActions: DataActions = useMemo(() => ({
-        smartSyncCustomers: (customers, userEmail, onProgress) => db.smartSyncData('customers', customers, userEmail, onProgress),
-        smartSyncProducts: (products, userEmail, onProgress) => db.smartSyncData('products', products, userEmail, onProgress),
+        smartSyncCustomers: (customers, userEmail, onProgress, options) => db.smartSyncData('customers', customers, userEmail, onProgress, options),
+        smartSyncProducts: (products, userEmail, onProgress, options) => db.smartSyncData('products', products, userEmail, onProgress, options),
         addOrder: ({ customer, items, total, memo }) => db.addOrderWithItems({ customer, total, memo }, items),
         updateOrder: async (updatedOrder) => {
             const { items, ...orderData } = updatedOrder;
@@ -281,13 +290,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateOrderStatus: (orderId, completionDetails) => db.updateOrderStatus(orderId, completionDetails),
         deleteOrder: (orderId) => db.deleteOrderAndItems(orderId),
         setSelectedCameraId: async (id) => {
-            // FIX: Use v8 compat API
             if (!user || !db.isInitialized() || !db.db) return;
             const deviceId = getDeviceId();
             await db.db.ref(`device-settings/${deviceId}/selectedCameraId`).set(id);
         },
         setScanSettings: async (settings) => {
-            // FIX: Use v8 compat API
             if (!user || !db.isInitialized() || !db.db) return;
             const deviceId = getDeviceId();
             const updates: { [key: string]: any } = {};
@@ -298,26 +305,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         clearOrders: () => db.clearOrders(),
         forceFullSync: async () => {
             setIsSyncing(true);
+            setSyncDataType(null);
             try {
-                // Get fresh data from the primary data nodes
                 const customers = await db.getStore<Customer>('customers');
                 const products = await db.getStore<Product>('products');
-
-                // Overwrite local cache with the full fresh dataset
                 await Promise.all([
                     cache.setCachedData('customers', customers),
                     cache.setCachedData('products', products)
                 ]);
-                
-                // Update the application's state
                 setDataState(prev => ({...prev, customers, products }));
-
-                // CRITICAL: Find the latest log keys and reset the sync markers
-                // This ensures the next incremental sync starts from this point.
                 const lastCustomerKey = await db.getLastSyncLogKey('customers');
                 const lastProductKey = await db.getLastSyncLogKey('products');
                 setLastSyncKeys({ customers: lastCustomerKey, products: lastProductKey });
-
                 showToast("데이터 강제 동기화가 완료되었습니다.", "success");
             } catch (error) {
                 console.error("Force full sync failed:", error);
@@ -326,8 +325,137 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setIsSyncing(false);
             }
         },
-    }), [user, showToast, showAlert, setLastSyncKeys]);
+        syncFromFile: async (file, dataType, source) => {
+            if (!user?.email) {
+                showAlert("동기화를 진행하려면 로그인이 필요합니다.");
+                throw new Error("User not logged in");
+            }
 
+            setIsSyncing(true);
+            setSyncDataType(dataType);
+            setSyncStatusText('준비 중...');
+            setSyncProgress(0);
+
+            const proceedWithUpdate = async (diffResult: DiffResult<Customer | Product>): Promise<DiffResult<Customer | Product>> => {
+                if (!user?.email || !db.db) throw new Error("DB or user not available");
+        
+                const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
+                const storeName = dataType;
+                const logUser = user.email.split('@')[0];
+                const nowISO = new Date().toISOString();
+            
+                const CHUNK_SIZE = 250;
+                const totalItems = diffResult.toAddOrUpdate.length + diffResult.toDelete.length;
+                let processedCount = 0;
+            
+                const processAndWriteChunk = async (items: any[], isDeletion: boolean) => {
+                    const chunkUpdates: { [key: string]: any } = {};
+                    for (const item of items) {
+                        const key = isDeletion ? item[keyField] : (item as any)[keyField];
+                        const logRefKey = db.db.ref(`/sync-logs/${storeName}`).push().key;
+            
+                        if (key && logRefKey) {
+                            if (isDeletion) {
+                                chunkUpdates[`/${storeName}/${key}`] = null;
+                                chunkUpdates[`/sync-logs/${storeName}/${logRefKey}`] = {
+                                    [keyField]: key, name: item.name, _deleted: true,
+                                    timestamp: firebase.database.ServerValue.TIMESTAMP, user: logUser
+                                };
+                            } else {
+                                const itemWithMeta = { ...item, lastModified: nowISO };
+                                chunkUpdates[`/${storeName}/${key}`] = itemWithMeta;
+                                chunkUpdates[`/sync-logs/${storeName}/${logRefKey}`] = {
+                                    ...itemWithMeta, timestamp: firebase.database.ServerValue.TIMESTAMP, user: logUser
+                                };
+                            }
+                        }
+                    }
+                    if (Object.keys(chunkUpdates).length > 0) {
+                        await db.db.ref().update(chunkUpdates);
+                    }
+                };
+            
+                setSyncStatusText('DB 업데이트 준비 중...');
+                setSyncProgress(0);
+
+                for (let i = 0; i < diffResult.toAddOrUpdate.length; i += CHUNK_SIZE) {
+                    const chunk = diffResult.toAddOrUpdate.slice(i, i + CHUNK_SIZE);
+                    await processAndWriteChunk(chunk, false);
+                    processedCount += chunk.length;
+                    setSyncStatusText(`추가/수정 중... (${processedCount}/${totalItems})`);
+                    setSyncProgress(Math.round((processedCount / totalItems) * 100));
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            
+                for (let i = 0; i < diffResult.toDelete.length; i += CHUNK_SIZE) {
+                    const chunk = diffResult.toDelete.slice(i, i + CHUNK_SIZE);
+                    await processAndWriteChunk(chunk, true);
+                    processedCount += chunk.length;
+                    setSyncStatusText(`삭제 중... (${processedCount}/${totalItems})`);
+                    setSyncProgress(Math.round((processedCount / totalItems) * 100));
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+
+                setSyncStatusText('로컬 데이터 업데이트 중...');
+                await new Promise(resolve => setTimeout(resolve, 10));
+                
+                const existingData = dataState[dataType];
+                const dataMap = new Map(existingData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
+
+                diffResult.toAddOrUpdate.forEach(item => {
+                    const key = (item as any)[keyField];
+                    const itemWithMeta = { ...item, lastModified: nowISO };
+                    dataMap.set(key, itemWithMeta);
+                });
+
+                diffResult.toDelete.forEach(item => {
+                    dataMap.delete((item as any)[keyField]);
+                });
+
+                const updatedData = Array.from(dataMap.values());
+
+                setDataState(prev => ({ ...prev, [dataType]: updatedData as any }));
+                await cache.setCachedData(dataType, updatedData as any);
+
+                const latestLogKey = await db.getLastSyncLogKey(dataType);
+                if (latestLogKey) {
+                    setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: latestLogKey }));
+                }
+
+                return diffResult;
+            };
+
+            try {
+                const singularType = dataType === 'customers' ? 'customer' : 'product';
+                const existingData = dataState[dataType];
+                const diffResult = await processExcelFileInWorker(
+                    file, singularType, existingData, user.email,
+                    (message: string) => setSyncStatusText(message)
+                );
+    
+                return await proceedWithUpdate(diffResult);
+    
+            } catch (error) {
+                if (error instanceof Error && error.message === 'MASS_DELETION_DETECTED') {
+                    const newError = new Error(error.message);
+                    (newError as any).details = (error as any).details;
+                    (newError as any).details.proceed = () => proceedWithUpdate((error as any).details.diffResult);
+                    throw newError;
+                } else {
+                    console.error("File processing error:", error);
+                    showAlert(`파일 처리 중 오류가 발생했습니다: ${(error as Error).message}`);
+                    throw error;
+                }
+            } finally {
+                setIsSyncing(false);
+                setSyncDataType(null);
+                setSyncStatusText('');
+                setSyncProgress(0);
+            }
+        },
+    }), [user, dataState, showAlert, showToast, setLastSyncKeys]);
+
+    // FIX: This entire useEffect hook was refactored to fix scoping and logic errors.
     useEffect(() => {
         if (!user) {
             setDataState({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
@@ -344,11 +472,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const performSync = async () => {
             if (!isMounted) return;
             setIsSyncing(true);
+            setSyncDataType(null);
             setSyncProgress(0);
             setSyncStatusText('동기화 시작...');
     
             try {
-                // 1. Load local cache first for instant UI response
                 if (isMounted) {
                     setSyncProgress(10);
                     setSyncStatusText('로컬 캐시 로딩 중...');
@@ -363,14 +491,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     setSyncStatusText('서버와 변경사항 확인 중...');
                 }
     
-                // 2. Sync function for a given data type
                 const syncDataType = async (dataType: 'customers' | 'products'): Promise<void> => {
                     let localData = dataType === 'customers' ? cachedCustomers : cachedProducts;
                     const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
                     const lastKey = lastSyncKeys?.[dataType] ?? null;
 
-                    // --- OPTIMIZATION ---
-                    // If local cache is empty, perform a faster full sync instead of processing all logs.
                     if (localData.length === 0) {
                         console.log(`Cache for ${dataType} is empty. Performing initial full sync.`);
                         const fullData = await db.getStore<Customer | Product>(dataType);
@@ -386,7 +511,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                             
                             if (!isMounted) return;
                             const unsub = db.listenForNewLogs(dataType, latestLogKey, (newItem, itemKey) => {
-                                if (!isMounted) return;
+                                if (!isMounted || isSyncingRef.current) return;
                                 
                                 setDataState(prev => {
                                     const currentData = prev[dataType];
@@ -415,8 +540,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         return;
                     }
 
-
-                    // --- Original Incremental Sync Logic (for when cache is already populated) ---
                     const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
     
                     if (isMounted && changes.length > 0) {
@@ -447,7 +570,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
                     if (!isMounted) return;
                     const unsub = db.listenForNewLogs(dataType, finalKeyForListener, (newItem, itemKey) => {
-                        if (!isMounted) return;
+                        if (!isMounted || isSyncingRef.current) return;
                         
                         setDataState(prev => {
                             const currentData = prev[dataType];
@@ -460,9 +583,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                             }
                             const updatedData = Array.from(dataMap.values());
     
-                            // Ensure cache and sync key are updated atomically after UI state update.
                             cache.setCachedData(dataType, updatedData as any).then(() => {
-                                if (isMounted) { // Check mount status again in async callback
+                                if (isMounted) {
                                     setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: itemKey }));
                                 }
                             }).catch(err => {
@@ -475,7 +597,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     unsubscribers.push(unsub);
                 };
     
-                // Run sync for both in parallel
                 const customerSyncPromise = syncDataType('customers').then(() => {
                     if (isMounted) {
                         setSyncProgress(prev => prev + 40);
@@ -501,8 +622,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             } finally {
                 if (isMounted) {
                     setIsSyncing(false);
+                    if (!initialSyncCompleted) {
+                        showToast("초기 데이터 동기화가 완료되었습니다.", "success");
+                    }
                     setInitialSyncCompleted(true);
-                     // After a short delay, reset progress for future background syncs
                     setTimeout(() => {
                         if (isMounted) setSyncProgress(0);
                     }, 1000);

@@ -356,7 +356,8 @@ export const smartSyncData = async (
     storeName: 'customers' | 'products',
     newData: (Customer | Product)[],
     userEmail: string,
-    onProgress?: (message: string) => void
+    onProgress?: (message: string) => void,
+    options?: { bypassMassDeleteCheck?: boolean }
 ): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
 
@@ -369,6 +370,18 @@ export const smartSyncData = async (
     const existingDataMap = new Map(existingDataArray.map(item => [(item as any)[keyField], item]));
     const newDataMap = new Map(newData.map(item => [(item as any)[keyField], item]));
     
+    const deletions = Array.from(existingDataMap.keys()).filter(key => !newDataMap.has(key));
+    const numDeletions = deletions.length;
+    const numExisting = existingDataMap.size;
+    const numNew = newDataMap.size;
+
+    // Safeguard against accidental mass deletion
+    if (!options?.bypassMassDeleteCheck && numExisting > 100 && numDeletions > numExisting * 0.5) {
+        const error = new Error("MASS_DELETION_DETECTED");
+        (error as any).details = { numExisting, numNew, numDeletions };
+        throw error;
+    }
+
     const updates: { [key: string]: any } = {};
     const timestamp = firebase.database.ServerValue.TIMESTAMP;
     const nowISO = new Date().toISOString();
@@ -401,25 +414,24 @@ export const smartSyncData = async (
         }
     }
 
-    const totalExisting = existingDataArray.length;
+    const totalExisting = deletions.length;
     let processedExisting = 0;
     // Process deletions
-    for (const [key, existingItem] of existingDataMap.entries()) {
-        if (!newDataMap.has(key)) {
-            const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
-            if (logRefKey) {
-                updates[`/${storeName}/${key}`] = null;
-                updates[`/sync-logs/${storeName}/${logRefKey}`] = { 
-                    [keyField]: key, 
-                    name: (existingItem as any)?.name,
-                    _deleted: true, 
-                    timestamp, 
-                    user: logUser 
-                };
-            }
+    for (const key of deletions) {
+        const existingItem = existingDataMap.get(key);
+        const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
+        if (logRefKey) {
+            updates[`/${storeName}/${key}`] = null;
+            updates[`/sync-logs/${storeName}/${logRefKey}`] = { 
+                [keyField]: key, 
+                name: (existingItem as any)?.name,
+                _deleted: true, 
+                timestamp, 
+                user: logUser 
+            };
         }
         processedExisting++;
-        if (processedExisting % 100 === 0) { // Yield to main thread every 100 items
+        if (processedExisting % 100 === 0) {
             onProgress?.(`삭제 항목 확인 중... (${processedExisting}/${totalExisting})`);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
