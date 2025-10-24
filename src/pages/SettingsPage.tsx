@@ -326,17 +326,21 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             }
 
             setIsImporting(fileImportType);
+            setIsLoading(true);
+            setLoadingMessage('엑셀 파일 분석 중...');
             
             try {
                 const rows = await parseExcelFile(file);
                 
                 let result;
+                const progressCallback = (message: string) => setLoadingMessage(message);
+
                 if (fileImportType === 'customer') {
                     result = processCustomerData(rows);
-                    await smartSyncCustomers(result.valid, user.email);
+                    await smartSyncCustomers(result.valid, user.email, progressCallback);
                 } else {
                     result = processProductData(rows);
-                    await smartSyncProducts(result.valid, user.email);
+                    await smartSyncProducts(result.valid, user.email, progressCallback);
                 }
                 
                 showToast(`데이터 동기화가 완료되었습니다.`, 'success');
@@ -350,6 +354,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 showAlert(`파일 처리 중 오류가 발생했습니다: ${errorMessage}`);
             } finally {
                 setIsImporting(null);
+                setIsLoading(false);
+                setLoadingMessage('');
                 if(fileInputRef.current) fileInputRef.current.value = "";
             }
         }

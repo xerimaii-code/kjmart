@@ -187,10 +187,24 @@ export const listenToValue = <T>(path: string, callback: (data: T | null) => voi
 export const getStore = async <T>(storeName: string): Promise<T[]> => {
     if (!isFirebaseInitialized || !db) return [];
     try {
-        // FIX: Use v8 compat API for get()
         const snapshot = await db.ref(storeName).get();
         const data = snapshot.val();
-        return data ? Object.values(data).filter(item => item != null) as T[] : [];
+        if (!data) {
+            return [];
+        }
+
+        const values = Object.values(data).filter(item => item != null);
+        
+        if (storeName === 'customers') {
+            return values.filter(item => (item as Customer).comcode) as T[];
+        }
+        if (storeName === 'products') {
+            return values.filter(item => (item as Product).barcode) as T[];
+        }
+        
+        // For any other store, just return the non-null values
+        return values as T[];
+
     } catch (error) {
         console.error(`Error getting store ${storeName}:`, error);
         return [];
