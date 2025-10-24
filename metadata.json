@@ -1,6 +1,6 @@
 {
   "name": "KJmart-app",
-  "description": "",
+  "description": "발주관리",
   "requestFramePermissions": [
     "camera"
   ]

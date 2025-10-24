@@ -6,6 +6,7 @@ let gapiReady = false;
 let gisReady = false;
 let pickerApiLoaded = false;
 let tokenClient: any;
+let initPromise: Promise<void> | null = null;
 
 // TypeScript declarations for gapi and google.picker
 declare const gapi: any;
@@ -30,34 +31,33 @@ function loadScript(src: string): Promise<void> {
 
 // Main initialization function
 export const initGoogleApi = (): Promise<void> => {
-    return new Promise(async (resolve, reject) => {
+    if (initPromise) {
+        return initPromise;
+    }
+
+    initPromise = new Promise(async (resolve, reject) => {
         if (gapiReady && gisReady) {
             return resolve();
         }
         if (GOOGLE_API_KEY.startsWith('YOUR_') || GOOGLE_CLIENT_ID.startsWith('YOUR_')) {
             const errorMsg = "Google API Key/Client ID is not set. Google Drive feature will be disabled. Please update googleApiConfig.ts";
             console.warn(errorMsg);
-            // Resolve without initializing so the app doesn't break, and the button remains disabled.
             return resolve();
         }
         
         try {
-             // First, load both scripts in parallel
             await Promise.all([
                 loadScript('https://apis.google.com/js/api.js'),
                 loadScript('https://accounts.google.com/gsi/client')
             ]);
 
-            // Now that scripts are loaded, initialize clients
-            // 1. Initialize GIS token client (this is synchronous)
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: GOOGLE_CLIENT_ID,
                 scope: SCOPES,
-                callback: '', // Callback is handled by the promise wrapper in getAccessToken
+                callback: '',
             });
             gisReady = true;
             
-            // 2. Initialize GAPI client for Drive and Picker (this is asynchronous)
             gapi.load('client:picker', () => {
                 gapi.client.init({
                     apiKey: GOOGLE_API_KEY,
@@ -65,13 +65,18 @@ export const initGoogleApi = (): Promise<void> => {
                 }).then(() => {
                     gapiReady = true;
                     pickerApiLoaded = true;
-                    resolve(); // Resolve promise when both are ready
-                }).catch(reject);
+                    resolve();
+                }).catch((err: any) => {
+                    initPromise = null; // Allow retry on failure
+                    reject(err);
+                });
             });
         } catch (scriptLoadError) {
+            initPromise = null; // Allow retry on failure
             reject(scriptLoadError);
         }
     });
+    return initPromise;
 };
 
 // Helper function to get an access token, triggering a user popup if necessary.
@@ -137,19 +142,24 @@ export const showPicker = (): Promise<string> => {
                 .build();
             picker.setVisible(true);
 
-        } catch(err) {
+        } catch(err: any) {
             console.error("Picker or Auth error:", err);
-            const errorDetails = err as any;
-
-            // User-initiated actions like closing the auth popup or cancelling the picker
-            // should not be treated as application errors. We reject with a specific
-            // message that the UI layer can identify and handle silently.
-            if (errorDetails.type === 'popup_closed' || (errorDetails.message && errorDetails.message.includes("cancelled"))) {
-                reject(new Error("Picker was cancelled by user."));
-            } else {
-                // For all other errors (e.g., access denied, network issues), reject with a generic failure message.
-                reject(new Error("Google 로그인 또는 파일 선택에 실패했습니다."));
+            
+            // Check for GSI token client errors which come as objects with an `error` property
+            if (err && err.error) {
+                if (err.error === 'popup_closed_by_user' || err.error === 'access_denied') {
+                    // These are user actions, not system errors. Reject with a specific message for silent handling.
+                    return reject(new Error("Picker was cancelled by user."));
+                }
             }
+            
+            // Check for picker cancellation which comes as an Error object
+            if (err instanceof Error && err.message.includes("cancelled")) {
+                 return reject(new Error("Picker was cancelled by user."));
+            }
+            
+            // For all other errors, reject with a generic failure message to be shown to the user.
+            reject(new Error("Google 로그인 또는 파일 선택에 실패했습니다."));
         }
     });
 };
