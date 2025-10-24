@@ -190,7 +190,7 @@ export const getStore = async <T>(storeName: string): Promise<T[]> => {
         // FIX: Use v8 compat API for get()
         const snapshot = await db.ref(storeName).get();
         const data = snapshot.val();
-        return data ? Object.values(data) as T[] : [];
+        return data ? Object.values(data).filter(item => item != null) as T[] : [];
     } catch (error) {
         console.error(`Error getting store ${storeName}:`, error);
         return [];
