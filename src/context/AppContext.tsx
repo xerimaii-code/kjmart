@@ -10,6 +10,7 @@ import Toast from '../components/Toast';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { processExcelFileInWorker, DiffResult } from '../services/dataService';
 import firebase from 'firebase/compat/app';
+import 'firebase/compat/database';
 
 // --- TYPE DEFINITIONS ---
 
