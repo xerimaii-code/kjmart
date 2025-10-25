@@ -152,7 +152,7 @@ export const useMiscUI = () => useContext(MiscUIContext);
 
 // --- MAIN PROVIDER ---
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
 
     // States
     const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
@@ -415,7 +415,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const updatedData = Array.from(dataMap.values());
 
                 setDataState(prev => ({ ...prev, [dataType]: updatedData as any }));
-                await cache.setCachedData(dataType, updatedData as any);
+                await cache.setCachedData(dataType, updatedData as (Customer[] | Product[]));
 
                 const latestLogKey = await db.getLastSyncLogKey(dataType);
                 if (latestLogKey) {
@@ -426,12 +426,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             };
 
             try {
-                const singularType = dataType === 'customers' ? 'customer' : 'product';
-                const existingData = dataState[dataType];
-                const diffResult = await processExcelFileInWorker(
-                    file, singularType, existingData, user.email,
-                    (message: string) => setSyncStatusText(message)
-                );
+                // FIX: Use a conditional to properly type `existingData` for `processExcelFileInWorker`.
+                // `dataState[dataType]` has a union type `Customer[] | Product[]` which is not assignable to `T[]`.
+                // This ensures we pass the correctly typed array based on `dataType`.
+                const diffResult = await (async () => {
+                    if (dataType === 'customers') {
+                        return processExcelFileInWorker(
+                            file, 'customer', dataState.customers, user.email,
+                            (message: string) => setSyncStatusText(message)
+                        );
+                    } else {
+                        return processExcelFileInWorker(
+                            file, 'product', dataState.products, user.email,
+                            (message: string) => setSyncStatusText(message)
+                        );
+                    }
+                })();
     
                 return await proceedWithUpdate(diffResult);
     
@@ -457,7 +467,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // FIX: This entire useEffect hook was refactored to fix scoping and logic errors.
     useEffect(() => {
+        if (authLoading) {
+            return; // Wait for authentication to resolve before doing anything.
+        }
+
         if (!user) {
+            // This now only runs AFTER auth is resolved and we know for sure there is no user.
             setDataState({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
             if (lastSyncKeys?.customers || lastSyncKeys?.products) {
                  setLastSyncKeys({ customers: null, products: null });
@@ -651,7 +666,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             isMounted = false;
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
+    }, [user, authLoading, showAlert, lastSyncKeys, setLastSyncKeys]);
 
 
     return (
