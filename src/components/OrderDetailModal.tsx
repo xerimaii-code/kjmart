@@ -32,17 +32,17 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
     return (
         <div
             ref={ref}
-            className={`flex items-center p-3.5 space-x-3 transition-colors duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
+            className={`relative overflow-hidden flex items-center p-3.5 space-x-3 transition-colors duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
             onClick={() => !isCompleted && onEdit(item)}
         >
+            {saleIsActive && hasSalePrice && (
+                <div className="sale-ribbon">SALE</div>
+            )}
             <div className="flex-grow min-w-0 pr-1 space-y-1.5">
                 {/* Product Name */}
                 <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
                     {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5 tracking-wide">NEW</span>}
                     {isModified && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5 tracking-wide">수정</span>}
-                    {saleIsActive && hasSalePrice && (
-                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
-                    )}
                     <span>{item.name}</span>
                 </p>
 
@@ -105,14 +105,14 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
     const hasSalePrice = !!product.salePrice;
 
     return (
-        <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
+        <div onClick={() => onClick(product)} className="relative overflow-hidden p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
+            {saleIsActive && hasSalePrice && (
+                <div className="sale-ribbon">SALE</div>
+            )}
             <div className="flex flex-col items-start w-full gap-y-1">
                 {/* Line 1: Product Name, Sale Badge */}
                 <div className="flex items-center gap-2 flex-wrap w-full">
                     <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
-                    {saleIsActive && hasSalePrice && (
-                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
-                    )}
                 </div>
 
                 {/* Line 2: Barcode */}

@@ -12,15 +12,15 @@ const ProductCard: React.FC<{ product: Product, index: number }> = ({ product, i
 
     return (
         <div
-            className="p-4 flex flex-col items-start gap-y-1 animate-card-enter"
+            className="relative overflow-hidden p-4 flex flex-col items-start gap-y-1 animate-card-enter"
             style={{ animationDelay: `${Math.min(index * 50, 500)}ms` }}
         >
+            {saleIsActive && hasSalePrice && (
+                <div className="sale-ribbon">SALE</div>
+            )}
             {/* Line 1: Product Name, Sale Badge */}
             <div className="flex items-center gap-2 flex-wrap w-full">
                 <p className="font-bold text-gray-800 text-base whitespace-pre-wrap">{product.name}</p>
-                {saleIsActive && hasSalePrice && (
-                    <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
-                )}
             </div>
             
             {/* Line 2: Barcode */}

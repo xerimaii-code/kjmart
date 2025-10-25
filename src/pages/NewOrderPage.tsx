@@ -30,14 +30,14 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove }: { item: OrderIte
 
     return (
         <div
-            className="flex items-center p-3.5 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
+            className="relative overflow-hidden flex items-center p-3.5 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
             onClick={() => onEdit(item)}
         >
+            {saleIsActive && hasSalePrice && (
+                <div className="sale-ribbon">SALE</div>
+            )}
             <div className="flex-grow min-w-0 pr-1 space-y-1.5">
-                <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
-                    {saleIsActive && hasSalePrice && (
-                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
-                    )}
+                <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap">
                     <span>{item.name}</span>
                 </p>
 
@@ -300,13 +300,13 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
 
     const handleResetOrder = useCallback(() => {
         showAlert(
-            "작성 중인 모든 내용을 초기화하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
+            "작성 중인 모든 내용을 삭제하시겠습니까?\n임시 저장된 내용도 삭제됩니다.",
             () => {
                 deleteDraft(DRAFT_KEY)
                     .catch(err => console.warn("Could not delete draft on reset:", err));
                 resetOrder();
             },
-            '초기화',
+            '삭제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
     }, [showAlert, resetOrder]);
@@ -521,7 +521,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                         </button>
                         <button onClick={handleResetOrder} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 active:scale-95 col-span-1">
                             <TrashIcon className="w-5 h-5" />
-                            <span>초기화</span>
+                            <span>삭제</span>
                         </button>
                         <button onClick={handleSaveOrder} disabled={isSaving || items.length === 0 || !selectedCustomer} className="h-10 bg-blue-600 text-white rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
                             {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '발주 저장'}
