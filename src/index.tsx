@@ -6,10 +6,9 @@ import App from './App';
 if ('serviceWorker' in navigator) {
   // Defer registration until after the page has loaded to avoid race conditions.
   window.addEventListener('load', () => {
-    // FIX: Construct an absolute URL for the service worker to prevent same-origin policy errors in sandboxed environments
-    // where the document's base URI might be different from its actual origin.
-    const swUrl = new URL('/service-worker.js', window.location.origin).href;
-    navigator.serviceWorker.register(swUrl)
+    // Use a standard relative path for the service worker. This is more robust
+    // than constructing an absolute URL, which can fail in sandboxed environments.
+    navigator.serviceWorker.register('/service-worker.js')
       .then(registration => {
         console.log('Service Worker registered successfully with scope:', registration.scope);
       })

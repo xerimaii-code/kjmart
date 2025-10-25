@@ -2,12 +2,14 @@
 
 const CACHE_NAME = 'kjmart-app-cache-v1';
 // This list includes the essential files for the app shell to work offline.
+// Using relative paths for better compatibility across different hosting environments.
 const URLS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png',
-  '/icons/apple-touch-icon.png',
+  './',
+  './index.html',
+  './metadata.json',
+  './icons/icon-192x192.png',
+  './icons/icon-512x512.png',
+  './icons/apple-touch-icon.png',
   'https://cdn.tailwindcss.com'
 ];
 
