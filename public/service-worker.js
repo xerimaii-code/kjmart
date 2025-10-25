@@ -21,8 +21,15 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('Opened cache');
-        // Add all URLs to cache. This is atomic; if one file fails, the whole cache operation fails.
-        return cache.addAll(URLS_TO_CACHE);
+        // Use individual add requests to be resilient to missing files (like icons).
+        // This ensures the app shell caches even if optional assets are missing.
+        const cachePromises = URLS_TO_CACHE.map(urlToCache => {
+            return cache.add(urlToCache).catch(err => {
+                console.warn(`Failed to cache ${urlToCache}:`, err);
+            });
+        });
+
+        return Promise.all(cachePromises);
       })
   );
 });
@@ -79,7 +86,10 @@ self.addEventListener('fetch', (event) => {
               .then((cache) => {
                 // Prevent caching of non-http schemes like chrome-extension
                 if (event.request.url.startsWith('http')) {
-                    cache.put(event.request, responseToCache);
+                    cache.put(event.request, responseToCache).catch(err => {
+                        // Non-critical error, e.g., storage quota exceeded.
+                        console.warn(`Failed to cache resource: ${event.request.url}`, err);
+                    });
                 }
               });
 
