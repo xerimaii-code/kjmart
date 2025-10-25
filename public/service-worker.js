@@ -5,7 +5,6 @@ const CACHE_NAME = 'kjmart-app-cache-v1';
 const URLS_TO_CACHE = [
   '/',
   '/index.html',
-  '/metadata.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/apple-touch-icon.png',
