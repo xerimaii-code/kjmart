@@ -26,21 +26,23 @@ const LoginPage: React.FC = () => {
             }
         } catch (err) {
             console.error(err);
-            if (err instanceof Error) {
-                switch ((err as any).code) {
+            // Refined error handling for Firebase Auth errors
+            let errorMessage = '로그인에 실패했습니다. 다시 시도해주세요.';
+            if (err && typeof err === 'object' && 'code' in err) {
+                const firebaseError = err as { code: string };
+                switch (firebaseError.code) {
                     case 'auth/user-not-found':
                     case 'auth/wrong-password':
                     case 'auth/invalid-credential':
-                        setError('이메일 또는 비밀번호가 올바르지 않습니다.');
+                        errorMessage = '이메일 또는 비밀번호가 올바르지 않습니다.';
                         break;
                     case 'auth/invalid-email':
-                        setError('유효하지 않은 이메일 형식입니다.');
+                        errorMessage = '유효하지 않은 이메일 형식입니다.';
                         break;
-                    default:
-                        setError('로그인에 실패했습니다. 다시 시도해주세요.');
-                        break;
+                    // Keep the generic message for other unexpected Firebase errors
                 }
             }
+            setError(errorMessage);
         } finally {
             setIsLoading(false);
         }
