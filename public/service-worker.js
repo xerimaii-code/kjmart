@@ -1,101 +1,99 @@
-
-
-const CACHE_NAME = 'kjmart-app-cache-v1';
-// This list includes the essential files for the app shell to work offline.
-// Using relative paths for better compatibility across different hosting environments.
-const URLS_TO_CACHE = [
-  './',
-  './index.html',
-  './metadata.json',
-  './icons/icon-192x192.png',
-  './icons/icon-512x512.png',
-  './icons/apple-touch-icon.png',
-  'https://cdn.tailwindcss.com'
+const CACHE_NAME = 'kjmart-app-cache-v3'; // Bump version to force update.
+const STATIC_ASSETS = [
+  '/',
+  '/index.html',
+  '/metadata.json',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/icons/apple-touch-icon.png',
+  // External assets are not pre-cached to prevent installation failure if offline.
+  // They will be cached on the first fetch.
 ];
 
 /**
- * Install event: Caches the application shell.
+ * Install event: Caches the application shell and static assets.
  */
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('Opened cache');
-        // Use individual add requests to be resilient to missing files (like icons).
-        // This ensures the app shell caches even if optional assets are missing.
-        const cachePromises = URLS_TO_CACHE.map(urlToCache => {
-            return cache.add(urlToCache).catch(err => {
-                console.warn(`Failed to cache ${urlToCache}:`, err);
-            });
-        });
-
-        return Promise.all(cachePromises);
-      })
-  );
-});
-
-/**
- * Activate event: Cleans up old caches.
- */
-self.addEventListener('activate', (event) => {
-  const cacheWhitelist = [CACHE_NAME];
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheWhitelist.indexOf(cacheName) === -1) {
-            console.log('Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log('Service Worker: Caching app shell');
+      return cache.addAll(STATIC_ASSETS);
     })
   );
 });
 
 /**
- * Fetch event: Serves content from cache, falling back to the network.
- * This is a "Cache First" strategy.
+ * Activate event: Cleans up old caches and takes control of the page.
+ */
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('Service Worker: Deleting old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
+/**
+ * Fetch event: Implements caching strategies for offline functionality and performance.
  */
 self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Cache hit - return response
-        if (response) {
+  const { request } = event;
+
+  // For SPA navigation, use a Network-first strategy.
+  // This ensures the user gets the latest HTML, but the app still loads offline from cache.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then(response => {
+          // If the network request is successful, clone it, cache it, and return it.
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(request, responseToCache);
+          });
           return response;
-        }
+        })
+        .catch(() => {
+          // If the network fails, serve the main app page from the cache.
+          return caches.match('/index.html');
+        })
+    );
+    return;
+  }
 
-        // Not in cache - fetch from network
-        return fetch(event.request).then(
-          (response) => {
-            // Check if we received a valid response.
-            // We only cache successful GET requests.
-            // The status check also prevents caching opaque responses (status 0).
-            if (!response || response.status !== 200 || event.request.method !== 'GET') {
-              return response;
-            }
-
-            // IMPORTANT: Clone the response. A response is a stream
-            // and because we want the browser to consume the response
-            // as well as the cache consuming the response, we need
-            // to clone it so we have two streams.
-            const responseToCache = response.clone();
-
-            caches.open(CACHE_NAME)
-              .then((cache) => {
-                // Prevent caching of non-http schemes like chrome-extension
-                if (event.request.url.startsWith('http')) {
-                    cache.put(event.request, responseToCache).catch(err => {
-                        // Non-critical error, e.g., storage quota exceeded.
-                        console.warn(`Failed to cache resource: ${event.request.url}`, err);
-                    });
-                }
-              });
-
-            return response;
+  // For all other requests (JS, CSS, images, fonts), use a Stale-While-Revalidate strategy.
+  event.respondWith(
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const cachedResponse = await cache.match(request);
+      
+      // Fetch from the network in the background to update the cache.
+      const fetchPromise = fetch(request)
+        .then((networkResponse) => {
+          // Check for a valid response to cache.
+          if (networkResponse && networkResponse.status === 200) {
+            cache.put(request, networkResponse.clone());
           }
-        );
-      })
+          return networkResponse;
+        })
+        .catch(err => {
+          // Network failed. This is expected when offline.
+          // If there was no cached response, this error will propagate.
+          console.warn(`Service Worker: Network request for ${request.url} failed.`, err);
+          // We must re-throw if there's no cached version,
+          // so the browser knows the request failed.
+          if (!cachedResponse) {
+            throw err;
+          }
+        });
+
+      // Return the cached response immediately if available, otherwise wait for the network.
+      return cachedResponse || fetchPromise;
+    })
   );
 });

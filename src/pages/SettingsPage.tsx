@@ -3,7 +3,7 @@ import { useDataState, useDataActions, useAlert, usePWAInstall, useModals, useSy
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { DiffResult } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon, HistoryIcon, ArrowDownTrayIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon, HistoryIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
@@ -441,7 +441,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 onClick={triggerInstallPrompt}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition active:scale-95"
                             >
-                                <ArrowDownTrayIcon className="w-5 h-5" />
+                                <DownloadIcon className="w-5 h-5" />
                                 <span>홈 화면에 앱 설치</span>
                             </button>
                         )}

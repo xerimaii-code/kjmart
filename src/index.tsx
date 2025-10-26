@@ -3,9 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 
 // --- PWA Service Worker Registration ---
-// Only register the service worker in production builds to avoid conflicts with the dev server.
-// FIX: Cast 'import.meta' to 'any' to resolve the TypeScript error 'Property 'env' does not exist on type 'ImportMeta''.
-if ((import.meta as any).env && (import.meta as any).env.PROD && 'serviceWorker' in navigator) {
+if ('serviceWorker' in navigator) {
   // Defer registration until after the page has loaded to avoid race conditions.
   window.addEventListener('load', () => {
     // Use a standard relative path for the service worker. This is more robust
