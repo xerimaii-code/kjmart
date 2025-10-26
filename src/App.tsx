@@ -20,6 +20,8 @@ const AddItemModal = lazy(() => import('./components/AddItemModal'));
 const EditItemModal = lazy(() => import('./components/EditItemModal'));
 const MemoModal = lazy(() => import('./components/MemoModal'));
 const SyncHistoryModal = lazy(() => import('./components/SyncHistoryModal'));
+const ClearHistoryModal = lazy(() => import('./components/ClearHistoryModal'));
+
 
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
 
@@ -188,6 +190,8 @@ const AppContent: React.FC = () => {
         closeMemoModal,
         isHistoryModalOpen,
         closeHistoryModal,
+        isClearHistoryModalOpen,
+        closeClearHistoryModal,
      } = useModals();
     const { isScannerOpen, onScanSuccess, closeScanner } = useScanner();
     const { updateOrderStatus } = useDataActions();
@@ -216,8 +220,9 @@ const AppContent: React.FC = () => {
         !!addItemModalProps || 
         !!editItemModalProps || 
         !!memoModalProps || 
-        isHistoryModalOpen
-    ), [isDetailModalOpen, isDeliveryModalOpen, isScannerOpen, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen]);
+        isHistoryModalOpen ||
+        isClearHistoryModalOpen
+    ), [isDetailModalOpen, isDeliveryModalOpen, isScannerOpen, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen, isClearHistoryModalOpen]);
 
     const { onTouchStart, onTouchMove, onTouchEnd, containerStyle } = useSwipeNavigation({
         items: pages,
@@ -285,6 +290,7 @@ const AppContent: React.FC = () => {
                   />
               )}
               {isHistoryModalOpen && <SyncHistoryModal isOpen={isHistoryModalOpen} onClose={closeHistoryModal} />}
+              {isClearHistoryModalOpen && <ClearHistoryModal isOpen={isClearHistoryModalOpen} onClose={closeClearHistoryModal} />}
             </Suspense>
             <DeliveryTypeModal
                 isOpen={isDeliveryModalOpen}

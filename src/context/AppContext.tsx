@@ -56,6 +56,7 @@ interface DataActions {
     setSelectedCameraId: (id: string | null) => Promise<void>;
     setScanSettings: (settings: Partial<{ vibrateOnScan: boolean; soundOnScan: boolean; }>) => Promise<void>;
     clearOrders: () => Promise<void>;
+    clearOrdersBeforeDate: (date: Date) => Promise<number>;
     forceFullSync: () => Promise<void>;
     syncFromFile: (file: Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<DiffResult<Customer | Product>>;
 }
@@ -96,6 +97,9 @@ interface ModalContextValue {
     isHistoryModalOpen: boolean;
     openHistoryModal: () => void;
     closeHistoryModal: () => void;
+    isClearHistoryModalOpen: boolean;
+    openClearHistoryModal: () => void;
+    closeClearHistoryModal: () => void;
 }
 
 // Scanner Context
@@ -176,6 +180,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [editItemModalProps, setEditItemModalProps] = useState<EditItemModalPayload | null>(null);
     const [memoModalProps, setMemoModalProps] = useState<MemoModalPayload | null>(null);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+    const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false);
     const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null, products: string | null }>('last-sync-log-keys', { customers: null, products: null });
     const [initialSyncSucceeded, setInitialSyncSucceeded] = useLocalStorage<boolean>('initial-sync-succeeded', false);
     const [isAppVisible, setIsAppVisible] = useState(!document.hidden);
@@ -255,7 +260,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isHistoryModalOpen,
         openHistoryModal: () => setIsHistoryModalOpen(true),
         closeHistoryModal: () => setIsHistoryModalOpen(false),
-    }), [isDetailModalOpen, editingOrder, isDeliveryModalOpen, orderToExport, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen]);
+        isClearHistoryModalOpen,
+        openClearHistoryModal: () => setIsClearHistoryModalOpen(true),
+        closeClearHistoryModal: () => setIsClearHistoryModalOpen(false),
+    }), [isDetailModalOpen, editingOrder, isDeliveryModalOpen, orderToExport, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen, isClearHistoryModalOpen]);
     
     const scannerContextValue = useMemo(() => ({
         isScannerOpen, scannerContext, isContinuousScan, onScanSuccess,
@@ -339,6 +347,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (Object.keys(updates).length > 0) await db.db.ref().update(updates);
         },
         clearOrders: () => db.clearOrders(),
+        clearOrdersBeforeDate: (date: Date) => db.clearOrdersBeforeDate(date.toISOString()),
         forceFullSync: async () => {
             setIsSyncing(true);
             setSyncDataType(null);
@@ -565,8 +574,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         const fullData = await db.getStore<Customer | Product>(dataType);
 
                         if (isMounted && fullData.length > 0) {
-                            await cache.setCachedData(dataType, fullData as any);
-                            setDataState(prev => ({ ...prev, [dataType]: fullData }));
+                            // FIX: Use type-specific updates for state and cache
+                            if (dataType === 'customers') {
+                                await cache.setCachedData(dataType, fullData as Customer[]);
+                                setDataState(prev => ({ ...prev, customers: fullData as Customer[] }));
+                            } else {
+                                await cache.setCachedData(dataType, fullData as Product[]);
+                                setDataState(prev => ({ ...prev, products: fullData as Product[] }));
+                            }
                             
                             const latestLogKey = await db.getLastSyncLogKey(dataType);
                             if (latestLogKey) {
@@ -597,8 +612,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         }
                         const updatedLocalData = Array.from(dataMap.values());
                         
-                        await cache.setCachedData(dataType, updatedLocalData as any);
-                        setDataState(prev => ({ ...prev, [dataType]: updatedLocalData }));
+                        // FIX: Use type-specific updates for state and cache
+                        if (dataType === 'customers') {
+                            await cache.setCachedData(dataType, updatedLocalData as Customer[]);
+                            setDataState(prev => ({ ...prev, customers: updatedLocalData as Customer[] }));
+                        } else {
+                            await cache.setCachedData(dataType, updatedLocalData as Product[]);
+                            setDataState(prev => ({ ...prev, products: updatedLocalData as Product[] }));
+                        }
                     }
     
                     if (isMounted && newLastKey !== lastKey) {
@@ -666,6 +687,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, [user, authLoading, showAlert, lastSyncKeys, setLastSyncKeys, initialSyncSucceeded, setInitialSyncSucceeded]);
 
     // This effect handles live updates AFTER the initial sync and manages background/foreground state.
+    // FIX: Refactored to be type-safe and avoid async race conditions with state updates.
     useEffect(() => {
         if (!initialSyncCompleted || !user || !isAppVisible) {
             return;
@@ -673,7 +695,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
         let isMounted = true;
     
-        const handleNewLog = async (
+        const handleNewLog = (
             dataType: 'customers' | 'products',
             logItem: any,
             newKey: string
@@ -692,8 +714,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 return;
             }
     
-            // Update main data state
-            let updatedData: (Customer[] | Product[]) = [];
+            // Use functional update to ensure atomicity
             setDataState(prevState => {
                 const currentData = prevState[dataType];
                 const dataMap = new Map(currentData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
@@ -706,22 +727,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     dataMap.set(itemKey, itemData);
                 }
                 
-                updatedData = Array.from(dataMap.values());
-                return { ...prevState, [dataType]: updatedData };
+                const updatedData = Array.from(dataMap.values());
+                
+                // Fire-and-forget cache update from within the atomic state update
+                if (dataType === 'customers') {
+                    cache.setCachedData('customers', updatedData as Customer[]).catch(error => {
+                        console.error(`[Live Sync] Failed to update cache for customers:`, error);
+                    });
+                    return { ...prevState, customers: updatedData as Customer[] };
+                } else {
+                    cache.setCachedData('products', updatedData as Product[]).catch(error => {
+                        console.error(`[Live Sync] Failed to update cache for products:`, error);
+                    });
+                    return { ...prevState, products: updatedData as Product[] };
+                }
             });
     
-            // Update cache and the last sync key
-            try {
-                await cache.setCachedData(dataType, updatedData as any);
-                setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: newKey }));
-            } catch (error) {
-                console.error(`[Live Sync] Failed to update cache or sync key for ${dataType}:`, error);
-            } finally {
-                // Hide syncing indicator after a short delay
-                setTimeout(() => {
-                    if(isMounted) setIsSyncing(false);
-                }, 500);
-            }
+            // Update the last sync key state (this is safe to do outside)
+            setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: newKey }));
+
+            // Hide syncing indicator after a short delay
+            setTimeout(() => {
+                if(isMounted) setIsSyncing(false);
+            }, 500);
         };
     
         const unsubCustomers = db.listenForNewLogs('customers', lastSyncKeys?.customers ?? null, (item, key) => {

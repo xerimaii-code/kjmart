@@ -222,10 +222,10 @@ const SyncSection: React.FC<{
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId, scanSettings } = useDataState();
-    const { setSelectedCameraId, setScanSettings, clearOrders, forceFullSync, syncFromFile } = useDataActions();
+    const { setSelectedCameraId, setScanSettings, forceFullSync, syncFromFile } = useDataActions();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const { showAlert, showToast } = useAlert();
-    const { openHistoryModal } = useModals();
+    const { openHistoryModal, openClearHistoryModal } = useModals();
     const { logout, user } = useAuth();
     const { isSyncing, syncStatusText, syncDataType } = useSyncState();
 
@@ -363,19 +363,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         showAlert("이 기능은 현재 비활성화되어 있습니다.");
     };
     
-    const handleClearOrders = () => {
-        showAlert(
-            "모든 발주 내역을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다!",
-            () => {
-                clearOrders()
-                    .then(() => showToast("모든 발주 내역이 삭제되었습니다.", 'success'))
-                    .catch(() => showAlert("발주 내역 삭제에 실패했습니다."));
-            },
-            '모두 삭제',
-            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
-        );
-    };
-
     const handleForceSync = () => {
         showAlert(
             "이 작업은 서버의 최신 데이터로 로컬 데이터를 덮어씁니다. 계속하시겠습니까?",
@@ -573,16 +560,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             </div>
                         </div>
                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">데이터 초기화</h4>
+                            <h4 className="text-sm font-bold text-gray-600 mb-2">발주 내역 정리</h4>
                              <p className="text-xs text-gray-500 mb-3">
-                                모든 발주 내역을 삭제합니다. 이 작업은 되돌릴 수 없습니다. 거래처 및 상품 데이터는 유지됩니다.
+                                오래된 발주 내역을 삭제하여 앱 성능을 최적화할 수 있습니다. 이 작업은 되돌릴 수 없습니다.
                             </p>
                             <button
-                                onClick={handleClearOrders}
+                                onClick={openClearHistoryModal}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-100 text-red-800 font-semibold rounded-lg hover:bg-red-200 transition active:scale-95"
                             >
                                 <TrashIcon className="w-5 h-5" />
-                                <span>발주 내역 전체 삭제</span>
+                                <span>발주 내역 삭제 관리</span>
                             </button>
                         </div>
                          <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">

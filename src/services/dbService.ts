@@ -276,6 +276,34 @@ export const clearOrders = (): Promise<void> => {
     return db.ref().update(updates);
 };
 
+export const clearOrdersBeforeDate = async (isoDateString: string): Promise<number> => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+
+    const ordersQuery = db.ref('orders').orderByChild('date').endAt(isoDateString);
+    const snapshot = await ordersQuery.get();
+
+    if (!snapshot.exists()) {
+        return 0; // No orders to delete
+    }
+
+    const updates: { [key: string]: null } = {};
+    let deletedCount = 0;
+    snapshot.forEach(childSnapshot => {
+        const orderId = childSnapshot.key;
+        if (orderId) {
+            updates[`/orders/${orderId}`] = null;
+            updates[`/order-items/${orderId}`] = null;
+            deletedCount++;
+        }
+    });
+
+    if (Object.keys(updates).length > 0) {
+        await db.ref().update(updates);
+    }
+    
+    return deletedCount;
+};
+
 export const setValue = (path: string, value: any): Promise<void> => {
     if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     // FIX: Use v8 compat API for set()
