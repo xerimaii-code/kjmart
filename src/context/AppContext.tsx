@@ -169,7 +169,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [scannerContext, setScannerContext] = useState<ScannerContext>(null);
     const [isContinuousScan, setIsContinuousScan] = useState(false);
     const onScanCallbackRef = useRef<(barcode: string) => void>(() => {});
-    const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
     const [lastModifiedOrderId, setLastModifiedOrderId] = useState<number | null>(null);
     const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
     const [orderToExport, setOrderToExport] = useState<Order | null>(null);
@@ -179,6 +178,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null, products: string | null }>('last-sync-log-keys', { customers: null, products: null });
     
+    // States for PWA installation
+    const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
+    const [showIosInstall, setShowIosInstall] = useState(false);
+
     const isSyncingRef = useRef(isSyncing);
     useEffect(() => {
         isSyncingRef.current = isSyncing;
@@ -192,12 +195,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const showToast = useCallback((message: string, type: 'success' | 'error') => setToast({ isOpen: true, message, type }), []);
     const hideToast = useCallback(() => setToast(prev => ({...prev, isOpen: false})), []);
 
-    // PWA Install Event Listener
+    // PWA Install logic
     useEffect(() => {
-        const handleBeforeInstallPrompt = (e: Event) => { e.preventDefault(); setInstallPromptEvent(e); };
-        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-        return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    }, []);
+        // Platform detection logic moved inside useEffect to ensure it runs client-side
+        const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+
+        if (isIos && !isStandalone) {
+            setShowIosInstall(true);
+        } else if (!isIos) {
+            const handleBeforeInstallPrompt = (e: Event) => {
+                e.preventDefault();
+                setInstallPromptEvent(e);
+            };
+            window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+            return () => {
+                window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+            };
+        }
+    }, []); // Empty dependency array ensures this runs once on mount.
 
     const onScanSuccess = useCallback((barcode: string) => {
         onScanCallbackRef.current?.(barcode);
@@ -242,16 +258,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const syncContextValue = useMemo(() => ({ isSyncing, syncProgress, initialSyncCompleted, syncStatusText, syncDataType }), [isSyncing, syncProgress, initialSyncCompleted, syncStatusText, syncDataType]);
     
     const pwaInstallContextValue = useMemo(() => ({
-        isInstallPromptAvailable: !!installPromptEvent,
+        isInstallPromptAvailable: !!installPromptEvent || showIosInstall,
         triggerInstallPrompt: () => {
-            if (!installPromptEvent) {
-                showAlert('앱을 설치할 수 없습니다. 브라우저가 이 기능을 지원하는지 확인해주세요.');
-                return;
+            if (installPromptEvent) {
+                (installPromptEvent as any).prompt();
+                setInstallPromptEvent(null);
+            } else if (showIosInstall) {
+                showAlert(
+                    "앱을 홈 화면에 추가하려면, 브라우저의 공유 버튼을 누른 뒤 '홈 화면에 추가'를 선택하세요.",
+                    undefined, // No confirm action, just close
+                    "확인"
+                );
+            } else {
+                 showAlert('앱을 설치할 수 없습니다. 브라우저가 이 기능을 지원하는지 확인해주세요.');
             }
-            (installPromptEvent as any).prompt();
-            setInstallPromptEvent(null);
         },
-    }), [installPromptEvent, showAlert]);
+    }), [installPromptEvent, showIosInstall, showAlert]);
 
     const miscUIContextValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
     
@@ -602,7 +624,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                             cache.setCachedData(dataType, updatedData as any).then(() => {
                                 if (isMounted) {
                                     setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: itemKey }));
-                                }
+                                 }
                             }).catch(err => {
                                 console.error(`Failed to cache and update sync key for ${dataType}`, err);
                             });
