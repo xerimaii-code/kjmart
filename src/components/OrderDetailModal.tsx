@@ -445,14 +445,15 @@ const OrderDetailModal: React.FC = () => {
                             <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                         </div>
                         {!isCompleted && (
-                             <div className="grid grid-cols-6 gap-2">
-                                <button onClick={handleOpenMemoModal} className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1">
+                             <div className="grid grid-cols-3 gap-2">
+                                <button onClick={handleOpenMemoModal} className="h-14 px-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 active:scale-95">
                                     <DocumentTextIcon className="w-5 h-5"/>
+                                    <span>메모</span>
                                 </button>
-                                <button onClick={handleClose} className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-2">
+                                <button onClick={handleClose} className="h-14 px-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">
                                     닫기
                                 </button>
-                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="relative bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
+                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="h-14 relative bg-blue-600 text-white px-4 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95">
                                     <span className={isSaving ? 'opacity-0' : 'opacity-100'}>변경사항 저장</span>
                                     {isSaving && (
                                         <div className="absolute inset-0 flex items-center justify-center">
