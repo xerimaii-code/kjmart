@@ -177,6 +177,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [memoModalProps, setMemoModalProps] = useState<MemoModalPayload | null>(null);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null, products: string | null }>('last-sync-log-keys', { customers: null, products: null });
+    const [initialSyncSucceeded, setInitialSyncSucceeded] = useLocalStorage<boolean>('initial-sync-succeeded', false);
+    const [isAppVisible, setIsAppVisible] = useState(!document.hidden);
     
     // States for PWA installation
     const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
@@ -217,6 +219,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const onScanSuccess = useCallback((barcode: string) => {
         onScanCallbackRef.current?.(barcode);
+    }, []);
+
+    // Background/Foreground detection for efficient data syncing
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            setIsAppVisible(!document.hidden);
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, []);
     
     // --- Context Value Objects ---
@@ -422,23 +435,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSyncStatusText('로컬 데이터 업데이트 중...');
                 await new Promise(resolve => setTimeout(resolve, 10));
                 
-                const existingData = dataState[dataType];
-                const dataMap = new Map(existingData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
-
-                diffResult.toAddOrUpdate.forEach(item => {
-                    const key = (item as any)[keyField];
-                    const itemWithMeta = { ...item, lastModified: nowISO };
-                    dataMap.set(key, itemWithMeta);
-                });
-
-                diffResult.toDelete.forEach(item => {
-                    dataMap.delete((item as any)[keyField]);
-                });
-
-                const updatedData = Array.from(dataMap.values());
-
-                setDataState(prev => ({ ...prev, [dataType]: updatedData as any }));
-                await cache.setCachedData(dataType, updatedData as (Customer[] | Product[]));
+                // FIX: This block is refactored for type safety to address the error.
+                if (dataType === 'customers') {
+                    const existingData = dataState.customers;
+                    const dataMap = new Map(existingData.map(item => [item.comcode, item]));
+                    (diffResult.toAddOrUpdate as Customer[]).forEach(item => {
+                        const itemWithMeta = { ...item, lastModified: nowISO };
+                        dataMap.set(item.comcode, itemWithMeta);
+                    });
+                    diffResult.toDelete.forEach(item => {
+                        dataMap.delete((item as any).comcode);
+                    });
+                    const updatedData = Array.from(dataMap.values());
+                    setDataState(prev => ({ ...prev, customers: updatedData }));
+                    await cache.setCachedData('customers', updatedData);
+                } else {
+                    const existingData = dataState.products;
+                    const dataMap = new Map(existingData.map(item => [item.barcode, item]));
+                    (diffResult.toAddOrUpdate as Product[]).forEach(item => {
+                        const itemWithMeta = { ...item, lastModified: nowISO };
+                        dataMap.set(item.barcode, itemWithMeta);
+                    });
+                    diffResult.toDelete.forEach(item => {
+                        dataMap.delete((item as any).barcode);
+                    });
+                    const updatedData = Array.from(dataMap.values());
+                    setDataState(prev => ({ ...prev, products: updatedData }));
+                    await cache.setCachedData('products', updatedData);
+                }
 
                 const latestLogKey = await db.getLastSyncLogKey(dataType);
                 if (latestLogKey) {
@@ -449,9 +473,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             };
 
             try {
-                // FIX: Use a conditional to properly type `existingData` for `processExcelFileInWorker`.
-                // `dataState[dataType]` has a union type `Customer[] | Product[]` which is not assignable to `T[]`.
-                // This ensures we pass the correctly typed array based on `dataType`.
                 const diffResult = await (async () => {
                     if (dataType === 'customers') {
                         return processExcelFileInWorker(
@@ -488,7 +509,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         },
     }), [user, dataState, showAlert, showToast, setLastSyncKeys]);
 
-    // FIX: This entire useEffect hook was refactored to fix scoping and logic errors.
     useEffect(() => {
         if (authLoading) {
             return; // Wait for authentication to resolve before doing anything.
@@ -505,7 +525,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
     
         let isMounted = true;
-        const unsubscribers: (() => void)[] = [];
     
         const performSync = async () => {
             if (!isMounted) return;
@@ -523,6 +542,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     cache.getCachedData<Customer>('customers'),
                     cache.getCachedData<Product>('products'),
                 ]);
+
+                // Safety Net: Check for cleared cache after initial sync has succeeded once.
+                if (isMounted && initialSyncSucceeded && cachedCustomers.length === 0 && cachedProducts.length === 0) {
+                     setSyncStatusText('캐시가 비어있어 전체 데이터를 다시 동기화합니다...');
+                }
+
                 if (isMounted) {
                     setDataState(prev => ({ ...prev, customers: cachedCustomers, products: cachedProducts }));
                     setSyncProgress(20);
@@ -533,9 +558,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     let localData = dataType === 'customers' ? cachedCustomers : cachedProducts;
                     const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
                     const lastKey = lastSyncKeys?.[dataType] ?? null;
+                    console.log(`[Sync] Starting sync for '${dataType}' from key: ${lastKey || 'beginning'}`);
 
                     if (localData.length === 0) {
-                        console.log(`Cache for ${dataType} is empty. Performing initial full sync.`);
+                        console.log(`[Sync] Cache for ${dataType} is empty. Performing initial full sync.`);
                         const fullData = await db.getStore<Customer | Product>(dataType);
 
                         if (isMounted && fullData.length > 0) {
@@ -544,41 +570,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                             
                             const latestLogKey = await db.getLastSyncLogKey(dataType);
                             if (latestLogKey) {
+                                console.log(`[Sync] Full sync for '${dataType}' complete. New last key: ${latestLogKey}`);
                                 setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: latestLogKey }));
                             }
-                            
-                            if (!isMounted) return;
-                            const unsub = db.listenForNewLogs(dataType, latestLogKey, (newItem, itemKey) => {
-                                if (!isMounted || isSyncingRef.current) return;
-                                
-                                setDataState(prev => {
-                                    const currentData = prev[dataType];
-                                    const dataMap = new Map(currentData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
-                                    
-                                    if ((newItem as any)._deleted) {
-                                        dataMap.delete((newItem as any)[keyField]);
-                                    } else {
-                                        dataMap.set((newItem as any)[keyField], newItem);
-                                    }
-                                    const updatedData = Array.from(dataMap.values());
-            
-                                    cache.setCachedData(dataType, updatedData as any).then(() => {
-                                        if (isMounted) {
-                                            setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: itemKey }));
-                                        }
-                                    }).catch(err => {
-                                        console.error(`Failed to cache and update sync key for ${dataType}`, err);
-                                    });
-                                    
-                                    return { ...prev, [dataType]: updatedData };
-                                });
-                            });
-                            unsubscribers.push(unsub);
                         }
                         return;
                     }
 
                     const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
+                    console.log(`[Sync] Found ${changes.length} new changes for '${dataType}'. New last key will be: ${newLastKey}`);
     
                     if (isMounted && changes.length > 0) {
                         const dataMap = new Map(localData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
@@ -586,7 +586,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         for (const change of changes) {
                             const key = (change as any)[keyField];
                             if (!key) {
-                                console.warn(`Sync change for ${dataType} is missing keyField '${keyField}'. Change:`, change);
+                                console.warn(`[Sync] Change for ${dataType} is missing keyField '${keyField}'. Change:`, change);
                                 continue;
                             }
                             if ((change as any)._deleted) {
@@ -601,38 +601,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         setDataState(prev => ({ ...prev, [dataType]: updatedLocalData }));
                     }
     
-                    const finalKeyForListener = newLastKey || lastKey;
                     if (isMounted && newLastKey !== lastKey) {
                         setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: newLastKey }));
                     }
-    
-                    if (!isMounted) return;
-                    const unsub = db.listenForNewLogs(dataType, finalKeyForListener, (newItem, itemKey) => {
-                        if (!isMounted || isSyncingRef.current) return;
-                        
-                        setDataState(prev => {
-                            const currentData = prev[dataType];
-                            const dataMap = new Map(currentData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
-                            
-                            if ((newItem as any)._deleted) {
-                                dataMap.delete((newItem as any)[keyField]);
-                            } else {
-                                dataMap.set((newItem as any)[keyField], newItem);
-                            }
-                            const updatedData = Array.from(dataMap.values());
-    
-                            cache.setCachedData(dataType, updatedData as any).then(() => {
-                                if (isMounted) {
-                                    setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: itemKey }));
-                                 }
-                            }).catch(err => {
-                                console.error(`Failed to cache and update sync key for ${dataType}`, err);
-                            });
-                            
-                            return { ...prev, [dataType]: updatedData };
-                        });
-                    });
-                    unsubscribers.push(unsub);
                 };
     
                 const customerSyncPromise = syncDataType('customers').then(() => {
@@ -652,15 +623,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
                 if (isMounted) {
                     setSyncProgress(100);
+                    setInitialSyncCompleted(true);
+                    setInitialSyncSucceeded(true); // Mark that the first sync has succeeded at least once
                 }
     
             } catch (error) {
                 console.error("Incremental sync failed:", error);
-                if (isMounted) showAlert("데이터 동기화에 실패했습니다. 강제 동기화를 시도해보세요.");
+                if (isMounted) {
+                    showAlert("데이터 동기화에 실패했습니다. 오프라인 데이터로 앱을 시작합니다.");
+                    setInitialSyncCompleted(true); // Allow app to start with cached data
+                }
             } finally {
                 if (isMounted) {
                     setIsSyncing(false);
-                    setInitialSyncCompleted(true);
                     setTimeout(() => {
                         if (isMounted) setSyncProgress(0);
                     }, 1000);
@@ -687,9 +662,82 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
         return () => {
             isMounted = false;
-            unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, authLoading, showAlert, lastSyncKeys, setLastSyncKeys]);
+    }, [user, authLoading, showAlert, lastSyncKeys, setLastSyncKeys, initialSyncSucceeded, setInitialSyncSucceeded]);
+
+    // This effect handles live updates AFTER the initial sync and manages background/foreground state.
+    useEffect(() => {
+        if (!initialSyncCompleted || !user || !isAppVisible) {
+            return;
+        }
+    
+        let isMounted = true;
+    
+        const handleNewLog = async (
+            dataType: 'customers' | 'products',
+            logItem: any,
+            newKey: string
+        ) => {
+            if (!isMounted) return;
+    
+            // Briefly show syncing indicator for user feedback
+            setIsSyncing(true);
+    
+            const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
+            const itemKey = logItem[keyField];
+    
+            if (!itemKey) {
+                console.warn(`[Live Sync] Received log for ${dataType} without a key.`, logItem);
+                setIsSyncing(false);
+                return;
+            }
+    
+            // Update main data state
+            let updatedData: (Customer[] | Product[]) = [];
+            setDataState(prevState => {
+                const currentData = prevState[dataType];
+                const dataMap = new Map(currentData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
+    
+                if (logItem._deleted) {
+                    dataMap.delete(itemKey);
+                } else {
+                    // Remove internal sync properties before saving to state
+                    const { timestamp, user, _deleted, ...itemData } = logItem;
+                    dataMap.set(itemKey, itemData);
+                }
+                
+                updatedData = Array.from(dataMap.values());
+                return { ...prevState, [dataType]: updatedData };
+            });
+    
+            // Update cache and the last sync key
+            try {
+                await cache.setCachedData(dataType, updatedData as any);
+                setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: newKey }));
+            } catch (error) {
+                console.error(`[Live Sync] Failed to update cache or sync key for ${dataType}:`, error);
+            } finally {
+                // Hide syncing indicator after a short delay
+                setTimeout(() => {
+                    if(isMounted) setIsSyncing(false);
+                }, 500);
+            }
+        };
+    
+        const unsubCustomers = db.listenForNewLogs('customers', lastSyncKeys?.customers ?? null, (item, key) => {
+            handleNewLog('customers', item, key);
+        });
+    
+        const unsubProducts = db.listenForNewLogs('products', lastSyncKeys?.products ?? null, (item, key) => {
+            handleNewLog('products', item, key);
+        });
+    
+        return () => {
+            isMounted = false;
+            unsubCustomers();
+            unsubProducts();
+        };
+    }, [initialSyncCompleted, user, lastSyncKeys, setLastSyncKeys, isAppVisible]);
 
 
     return (

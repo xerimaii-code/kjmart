@@ -47,59 +47,6 @@ const arrayToObject = (arr: any[], keyField: string) => {
 export const isInitialized = () => isFirebaseInitialized;
 
 // --- Listener functions for realtime updates ---
-export const attachStoreListener = <T extends { comcode: string } | { barcode: string }>(
-    storeName: 'customers' | 'products',
-    callbacks: {
-        onAdd: (item: T) => void;
-        onChange: (item: T) => void;
-        onRemove: (key: string) => void;
-    }
-): (() => void) => {
-    if (!isFirebaseInitialized || !db) return () => {};
-    const storeRef = db.ref(storeName);
-    
-    // FIX: Use v8 compat API for listeners
-    const onAdd = storeRef.on('child_added', (snapshot) => {
-        const item = snapshot.val() as T;
-        if (item) callbacks.onAdd(item);
-    });
-
-    const onChange = storeRef.on('child_changed', (snapshot) => {
-        const item = snapshot.val() as T;
-        if (item) callbacks.onChange(item);
-    });
-
-    const onRemove = storeRef.on('child_removed', (snapshot) => {
-        const key = snapshot.key;
-        if (key) callbacks.onRemove(key);
-    });
-
-    return () => {
-        storeRef.off('child_added', onAdd);
-        storeRef.off('child_changed', onChange);
-        storeRef.off('child_removed', onRemove);
-    };
-};
-
-export const listenToStore = <T>(storeName: string, callback: (items: T[]) => void): (() => void) => {
-    if (!isFirebaseInitialized || !db) {
-        callback([]);
-        return () => {};
-    }
-    const storeRef = db.ref(storeName);
-    // FIX: Use v8 compat API for listeners
-    const listener = storeRef.on('value', (snapshot) => {
-        const data = snapshot.val();
-        const itemsArray = data ? Object.values(data).filter(item => item != null) as T[] : [];
-        callback(itemsArray);
-    }, (error) => {
-        console.error(`Error listening to store ${storeName}:`, error);
-        callback([]);
-    });
-    // FIX: Unsubscribe using off() method
-    return () => storeRef.off('value', listener);
-};
-
 export const listenToOrderChangesByDateRange = (
     endDate: Date,
     callbacks: {
@@ -451,7 +398,7 @@ export const getSyncLogChanges = async (
 
     let query = db.ref(`sync-logs/${dataType}`).orderByKey();
     if (lastKey) {
-        query = query.startAt(lastKey);
+        query = query.startAfter(lastKey); // Use startAfter to avoid re-fetching the last key
     }
     
     const snapshot = await query.get();
@@ -463,10 +410,8 @@ export const getSyncLogChanges = async (
     let processedLastKey: string | null = lastKey;
 
     snapshot.forEach(childSnapshot => {
-        if (childSnapshot.key !== lastKey) {
-            items.push(childSnapshot.val());
-            processedLastKey = childSnapshot.key;
-        }
+        items.push(childSnapshot.val());
+        processedLastKey = childSnapshot.key;
     });
 
     return { items, newLastKey: processedLastKey };
@@ -505,11 +450,13 @@ export const listenForNewLogs = (
 
     let query = db.ref(`sync-logs/${dataType}`).orderByKey();
     if (startKey) {
-        query = query.startAt(startKey);
+        query = query.startAfter(startKey);
+    } else {
+        query = query.limitToLast(1); // On first load, only listen for new items
     }
 
     const listener = query.on('child_added', (snapshot) => {
-        if (snapshot.key && snapshot.key !== startKey) {
+        if (snapshot.key) {
             callback(snapshot.val(), snapshot.key);
         }
     });

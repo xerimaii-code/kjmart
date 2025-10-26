@@ -38,7 +38,6 @@ const LogItem: React.FC<{ log: SyncLog }> = ({ log }) => {
                 <p className="font-bold text-gray-800 truncate" title={itemName}>{itemName}</p>
                 <div className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="flex items-center gap-1">
-                        {/* FIX: Use the imported UserCircleIcon instead of the local UserIcon */}
                         <UserCircleIcon className="w-3.5 h-3.5" />
                         <span>{log.user || '시스템'}</span>
                     </span>
