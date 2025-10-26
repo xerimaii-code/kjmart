@@ -61,6 +61,7 @@ const OrderRow = memo(({
     index: number;
 }) => {
     const isCompleted = !!order.completedAt || !!order.completionDetails;
+    const isUpdated = order.updatedAt && order.createdAt && new Date(order.updatedAt).getTime() > new Date(order.createdAt).getTime();
 
     return (
         <div 
@@ -86,7 +87,7 @@ const OrderRow = memo(({
                             </p>
                             <div className="text-sm text-gray-500 mt-1">
                                 <span>{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                                {order.updatedAt && order.createdAt && order.updatedAt.slice(0, 19) > order.createdAt.slice(0, 19) && (
+                                {isUpdated && (
                                     <span className="text-xs text-gray-400 ml-1.5">(최초: {new Date(order.createdAt).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })})</span>
                                 )}
                             </div>
@@ -257,7 +258,9 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         const groups: { [key: string]: { orders: Order[]; total: number } } = {};
 
         visibleOrders.forEach(order => {
-            const dateKey = new Date(order.date).toISOString().slice(0, 10);
+            const d = new Date(order.date);
+            // Use local date components to form the key, avoiding timezone issues with toISOString()
+            const dateKey = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
             if (!groups[dateKey]) {
                 groups[dateKey] = { orders: [], total: 0 };
             }
