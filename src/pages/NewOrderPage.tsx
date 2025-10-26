@@ -516,8 +516,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                         <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                     </div>
                     <div className="grid grid-cols-5 gap-1.5">
-                         <button onClick={handleOpenMemoModal} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 flex-shrink-0 active:scale-95 col-span-1">
+                         <button onClick={handleOpenMemoModal} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 active:scale-95 col-span-1">
                             <DocumentTextIcon className="w-5 h-5"/>
+                            <span>메모</span>
                         </button>
                         <button onClick={handleResetOrder} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 active:scale-95 col-span-1">
                             <TrashIcon className="w-5 h-5" />
