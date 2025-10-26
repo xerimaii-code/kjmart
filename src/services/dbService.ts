@@ -426,7 +426,8 @@ export const getSyncLogChanges = async (
 
     let query = db.ref(`sync-logs/${dataType}`).orderByKey();
     if (lastKey) {
-        query = query.startAfter(lastKey); // Use startAfter to avoid re-fetching the last key
+        // 'startAfter' does not exist in the RTDB SDK. Use 'startAt' instead.
+        query = query.startAt(lastKey);
     }
     
     const snapshot = await query.get();
@@ -436,8 +437,17 @@ export const getSyncLogChanges = async (
 
     const items: any[] = [];
     let processedLastKey: string | null = lastKey;
+    let isFirst = true;
 
     snapshot.forEach(childSnapshot => {
+        // If we started at a specific key (lastKey), we must skip that key itself in the results
+        // because 'startAt' is inclusive.
+        if (lastKey && isFirst && childSnapshot.key === lastKey) {
+            isFirst = false; // Set flag so we don't skip subsequent items
+            return; // Skip this item
+        }
+        
+        isFirst = false; // Not the first item anymore
         items.push(childSnapshot.val());
         processedLastKey = childSnapshot.key;
     });
@@ -477,14 +487,25 @@ export const listenForNewLogs = (
     if (!isFirebaseInitialized || !db) return () => {};
 
     let query = db.ref(`sync-logs/${dataType}`).orderByKey();
+    
+    // The 'startAfter' method does not exist in the Realtime Database SDK.
+    // The correct approach is to use 'startAt'.
     if (startKey) {
-        query = query.startAfter(startKey);
+        query = query.startAt(startKey);
     } else {
-        query = query.limitToLast(1); // On first load, only listen for new items
+        // If there is no startKey, it means we've just completed a full sync and
+        // only want to listen for brand new changes from this point forward.
+        // We can generate a push key for "now" and start listening from there,
+        // effectively ignoring all past records. Firebase push keys are chronologically ordered.
+        const nowKey = db.ref().push().key;
+        if (nowKey) {
+            query = query.startAt(nowKey);
+        }
     }
 
     const listener = query.on('child_added', (snapshot) => {
-        if (snapshot.key) {
+        // Since startAt is inclusive, we must explicitly ignore the event for the startKey itself.
+        if (snapshot.key && snapshot.key !== startKey) {
             callback(snapshot.val(), snapshot.key);
         }
     });

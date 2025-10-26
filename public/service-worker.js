@@ -10,8 +10,6 @@ const APP_SHELL_URLS = [
   '/',
   '/index.html',
   '/metadata.json',
-  '/index.tsx', // Main app entry point
-  '/src/index.tsx', // Delegated app entry point
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/apple-touch-icon.png',

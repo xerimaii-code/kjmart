@@ -153,8 +153,10 @@
     <script type="module" src="/index.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        const registerSW = () => {
-          const swUrl = `${window.location.origin}/service-worker.js`;
+        window.addEventListener('load', () => {
+          // Construct an absolute URL for the service worker to avoid cross-origin issues
+          // in certain hosting environments like AI Studio's preview.
+          const swUrl = `${location.origin}/service-worker.js`;
           navigator.serviceWorker.register(swUrl)
             .then(registration => {
               console.log('Service Worker registered successfully with scope:', registration.scope);
@@ -162,17 +164,7 @@
             .catch(err => {
               console.error('Service Worker registration failed:', err);
             });
-        };
-
-        // This is the definitive, most robust pattern to avoid all race conditions.
-        // It checks if the page is already loaded. In either case, it pushes the
-        // registration call to the end of the browser's event loop with setTimeout.
-        // This ensures the document is in a fully stable and valid state.
-        if (document.readyState === 'complete') {
-          setTimeout(registerSW, 0);
-        } else {
-          window.addEventListener('load', () => setTimeout(registerSW, 0));
-        }
+        });
       }
     </script>
 </body>

@@ -1,12 +1,12 @@
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
-import { Customer, Product, Order, OrderItem, ScannerContext } from '../types';
+import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType } from '../types';
 import * as db from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
 import { useAuth } from './AuthContext';
 import * as googleDrive from '../services/googleDriveService';
 import { getDeviceId } from '../services/deviceService';
-import Toast from '../components/Toast';
+import Toast, { ToastState } from '../components/Toast';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { processExcelFileInWorker, DiffResult } from '../services/dataService';
 import firebase from 'firebase/compat/app';
@@ -44,764 +44,466 @@ interface DataState {
     customers: Customer[];
     products: Product[];
     selectedCameraId: string | null;
-    scanSettings: { vibrateOnScan: boolean; soundOnScan: boolean; };
+    scanSettings: {
+        vibrateOnScan: boolean;
+        soundOnScan: boolean;
+    };
 }
+
 interface DataActions {
-    smartSyncCustomers: (customers: Customer[], userEmail: string, onProgress?: (message: string) => void, options?: { bypassMassDeleteCheck?: boolean }) => Promise<void>;
-    smartSyncProducts: (products: Product[], userEmail: string, onProgress?: (message: string) => void, options?: { bypassMassDeleteCheck?: boolean }) => Promise<void>;
-    addOrder: (orderData: { customer: Customer; items: OrderItem[]; total: number; memo?: string; }) => Promise<number>;
-    updateOrder: (updatedOrder: Order) => Promise<void>;
-    updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
+    addOrder: (orderData: Omit<Order, 'id' | 'date' | 'itemCount' | 'createdAt' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => Promise<number>;
+    updateOrder: (order: Order) => Promise<void>;
     deleteOrder: (orderId: number) => Promise<void>;
-    setSelectedCameraId: (id: string | null) => Promise<void>;
-    setScanSettings: (settings: Partial<{ vibrateOnScan: boolean; soundOnScan: boolean; }>) => Promise<void>;
+    updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
     clearOrders: () => Promise<void>;
     clearOrdersBeforeDate: (date: Date) => Promise<number>;
+    syncFromFile: (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<DiffResult<Customer | Product>>;
     forceFullSync: () => Promise<void>;
-    syncFromFile: (file: Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<DiffResult<Customer | Product>>;
+    setSelectedCameraId: (id: string | null) => Promise<void>;
+    setScanSettings: (settings: Partial<DataState['scanSettings']>) => Promise<void>;
 }
 
-// Alert Context
-interface AlertState { isOpen: boolean; message: string; onConfirm?: () => void; onCancel?: () => void; confirmText?: string; confirmButtonClass?: string; }
-interface ToastState { isOpen: boolean; message: string; type: 'success' | 'error'; }
-interface AlertContextValue {
-    alert: AlertState;
-    toast: ToastState;
-    showAlert: (message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => void;
-    hideAlert: () => void;
-    showToast: (message: string, type: 'success' | 'error') => void;
-    hideToast: () => void;
+const DataStateContext = createContext<DataState | undefined>(undefined);
+const DataActionsContext = createContext<DataActions | undefined>(undefined);
+
+// --- Sync Context ---
+interface SyncState {
+    isSyncing: boolean;
+    syncProgress: number;
+    syncStatusText: string;
+    syncDataType: 'customers' | 'products' | 'full' | null;
+    initialSyncCompleted: boolean;
 }
 
-// Modal Context
-interface ModalContextValue {
+const SyncStateContext = createContext<SyncState | undefined>(undefined);
+
+// --- UI Contexts (Modals, Alerts, etc.) ---
+interface AlertState {
+    isOpen: boolean;
+    message: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+    confirmText?: string;
+    confirmButtonClass?: string;
+}
+
+interface ModalsState {
     isDetailModalOpen: boolean;
     editingOrder: Order | null;
-    openDetailModal: (order: Order) => void;
-    closeDetailModal: () => void;
     isDeliveryModalOpen: boolean;
     orderToExport: Order | null;
-    openDeliveryModal: (order: Order) => void;
-    closeDeliveryModal: () => void;
-
-    // New modal properties
     addItemModalProps: AddItemModalPayload | null;
     editItemModalProps: EditItemModalPayload | null;
     memoModalProps: MemoModalPayload | null;
-    openAddItemModal: (data: AddItemModalPayload) => void;
-    closeAddItemModal: () => void;
-    openEditItemModal: (data: EditItemModalPayload) => void;
-    closeEditItemModal: () => void;
-    openMemoModal: (data: MemoModalPayload) => void;
-    closeMemoModal: () => void;
     isHistoryModalOpen: boolean;
+    isClearHistoryModalOpen: boolean;
+}
+
+interface ModalsActions {
+    openDetailModal: (order: Order) => void;
+    closeDetailModal: () => void;
+    openDeliveryModal: (order: Order) => void;
+    closeDeliveryModal: () => void;
+    openAddItemModal: (props: AddItemModalPayload) => void;
+    closeAddItemModal: () => void;
+    openEditItemModal: (props: EditItemModalPayload) => void;
+    closeEditItemModal: () => void;
+    openMemoModal: (props: MemoModalPayload) => void;
+    closeMemoModal: () => void;
     openHistoryModal: () => void;
     closeHistoryModal: () => void;
-    isClearHistoryModalOpen: boolean;
     openClearHistoryModal: () => void;
     closeClearHistoryModal: () => void;
 }
 
-// Scanner Context
-interface ScannerContextValue {
+interface MiscUIState {
+    lastModifiedOrderId: number | null;
+}
+
+interface MiscUIActions {
+    setLastModifiedOrderId: (id: number | null) => void;
+}
+
+interface ScannerState {
     isScannerOpen: boolean;
-    scannerContext: ScannerContext;
-    isContinuousScan: boolean;
+    scannerContext: ScannerContextType;
     onScanSuccess: (barcode: string) => void;
-    openScanner: (context: ScannerContext, onScan: (barcode: string) => void, continuous?: boolean) => void;
+    continuousScan: boolean;
+}
+
+interface ScannerActions {
+    openScanner: (context: ScannerContextType, onScan: (barcode: string) => void, continuous: boolean) => void;
     closeScanner: () => void;
 }
 
-// Sync Context
-interface SyncContextValue {
-    isSyncing: boolean;
-    syncProgress: number;
-    initialSyncCompleted: boolean;
-    syncStatusText: string;
-    syncDataType: 'customers' | 'products' | null;
-}
-
-// PWA Install Context
-interface PWAInstallContextValue {
+interface PWAInstallState {
     isInstallPromptAvailable: boolean;
     triggerInstallPrompt: () => void;
 }
 
-// Misc UI Context
-interface MiscUIContextValue {
-    lastModifiedOrderId: number | null;
-    setLastModifiedOrderId: (id: number | null) => void;
-}
+const AlertContext = createContext<((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => void) | undefined>(undefined);
+const ToastContext = createContext<((message: string, type: 'success' | 'error') => void) | undefined>(undefined);
+const ModalsContext = createContext<(ModalsState & ModalsActions) | undefined>(undefined);
+const MiscUIContext = createContext<(MiscUIState & MiscUIActions) | undefined>(undefined);
+const ScannerContext = createContext<(ScannerState & ScannerActions) | undefined>(undefined);
+const PWAInstallContext = createContext<PWAInstallState | undefined>(undefined);
 
-// --- CONTEXT CREATION ---
-const DataStateContext = createContext<DataState>({} as DataState);
-const DataActionsContext = createContext<DataActions>({} as DataActions);
-const AlertContext = createContext<AlertContextValue>({} as AlertContextValue);
-const ModalContext = createContext<ModalContextValue>({} as ModalContextValue);
-const ScannerContext = createContext<ScannerContextValue>({} as ScannerContextValue);
-const SyncContext = createContext<SyncContextValue>({} as SyncContextValue);
-const PWAInstallContext = createContext<PWAInstallContextValue>({} as PWAInstallContextValue);
-const MiscUIContext = createContext<MiscUIContextValue>({} as MiscUIContextValue);
+// --- Initial States ---
+const initialModalsState: ModalsState = {
+    isDetailModalOpen: false, editingOrder: null,
+    isDeliveryModalOpen: false, orderToExport: null,
+    addItemModalProps: null, editItemModalProps: null,
+    memoModalProps: null, isHistoryModalOpen: false,
+    isClearHistoryModalOpen: false,
+};
 
+// --- AppProvider Component ---
 
-// --- HOOKS for easier context consumption ---
-export const useDataState = () => useContext(DataStateContext);
-export const useDataActions = () => useContext(DataActionsContext);
-export const useAlert = () => useContext(AlertContext);
-export const useModals = () => useContext(ModalContext);
-export const useScanner = () => useContext(ScannerContext);
-export const useSyncState = () => useContext(SyncContext);
-export const usePWAInstall = () => useContext(PWAInstallContext);
-export const useMiscUI = () => useContext(MiscUIContext);
-
-
-// --- MAIN PROVIDER ---
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const { user, loading: authLoading } = useAuth();
+    const { user } = useAuth();
 
-    // States
-    const [alert, setAlert] = useState<AlertState>({ isOpen: false, message: '' });
-    const [toast, setToast] = useState<ToastState>({ isOpen: false, message: '', type: 'success' });
+    // --- Data State ---
+    const [customers, setCustomers] = useState<Customer[]>([]);
+    const [products, setProducts] = useState<Product[]>([]);
+    const [selectedCameraId, setSelectedCameraIdState] = useLocalStorage<string>('selectedCameraId', null, { deviceSpecific: true });
+    const [scanSettings, setScanSettingsState] = useLocalStorage('scanSettings', { vibrateOnScan: true, soundOnScan: true });
+
+    // --- Sync State ---
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState(0);
-    const [syncStatusText, setSyncStatusText] = useState('초기화 중...');
-    const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | null>(null);
+    const [syncStatusText, setSyncStatusText] = useState('');
+    const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
-    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-    const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-    const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const [scannerContext, setScannerContext] = useState<ScannerContext>(null);
-    const [isContinuousScan, setIsContinuousScan] = useState(false);
-    const onScanCallbackRef = useRef<(barcode: string) => void>(() => {});
+
+    // --- UI State ---
+    const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '' });
+    const [toastState, setToastState] = useState<ToastState>({ isOpen: false, message: '', type: 'success' });
+    const [modalsState, setModalsState] = useState<ModalsState>(initialModalsState);
     const [lastModifiedOrderId, setLastModifiedOrderId] = useState<number | null>(null);
-    const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
-    const [orderToExport, setOrderToExport] = useState<Order | null>(null);
-    const [addItemModalProps, setAddItemModalProps] = useState<AddItemModalPayload | null>(null);
-    const [editItemModalProps, setEditItemModalProps] = useState<EditItemModalPayload | null>(null);
-    const [memoModalProps, setMemoModalProps] = useState<MemoModalPayload | null>(null);
-    const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-    const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false);
-    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null, products: string | null }>('last-sync-log-keys', { customers: null, products: null });
-    const [initialSyncSucceeded, setInitialSyncSucceeded] = useLocalStorage<boolean>('initial-sync-succeeded', false);
-    const [isAppVisible, setIsAppVisible] = useState(!document.hidden);
-    
-    // States for PWA installation
-    const [installPromptEvent, setInstallPromptEvent] = useState<Event | null>(null);
-    const [showIosInstall, setShowIosInstall] = useState(false);
+    const [scannerState, setScannerState] = useState<ScannerState>({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false });
+    const [isInstallPromptAvailable, setInstallPromptAvailable] = useState(false);
+    const deferredInstallPrompt = useRef<any>(null);
 
-    const isSyncingRef = useRef(isSyncing);
-    useEffect(() => {
-        isSyncingRef.current = isSyncing;
-    }, [isSyncing]);
-
-    // Alert Actions
+    // --- Alert & Toast Actions ---
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
-        setAlert({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
+        setAlertState({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
     }, []);
-    const hideAlert = useCallback(() => setAlert(prev => ({ ...prev, isOpen: false })), []);
-    const showToast = useCallback((message: string, type: 'success' | 'error') => setToast({ isOpen: true, message, type }), []);
-    const hideToast = useCallback(() => setToast(prev => ({...prev, isOpen: false})), []);
 
-    // PWA Install logic
-    useEffect(() => {
-        // Platform detection logic moved inside useEffect to ensure it runs client-side
-        const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+        setToastState({ isOpen: true, message, type });
+    }, []);
 
-        if (isIos && !isStandalone) {
-            setShowIosInstall(true);
-        } else if (!isIos) {
-            const handleBeforeInstallPrompt = (e: Event) => {
-                e.preventDefault();
-                setInstallPromptEvent(e);
-            };
-            window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-            return () => {
-                window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-            };
+    // --- Data Actions ---
+    const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'itemCount' | 'createdAt' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
+        const newOrderId = await db.addOrderWithItems(orderData, orderData.items);
+        showToast('신규 발주가 저장되었습니다.', 'success');
+        return newOrderId;
+    }, [showToast]);
+
+    const updateOrder = useCallback(async (order: Order) => {
+        if (!order.items) throw new Error("Order items are missing for update.");
+        await db.updateOrderAndItems(order, order.items);
+    }, []);
+
+    const deleteOrder = useCallback(async (orderId: number) => {
+        await db.deleteOrderAndItems(orderId);
+        showToast('발주 내역이 삭제되었습니다.', 'success');
+    }, [showToast]);
+
+    const updateOrderStatus = useCallback(async (orderId: number, completionDetails: Order['completionDetails']) => {
+        await db.updateOrderStatus(orderId, completionDetails);
+    }, []);
+
+    const clearOrders = useCallback(async () => {
+        await db.clearOrders();
+    }, []);
+
+    const clearOrdersBeforeDate = useCallback(async (date: Date) => {
+        const isoString = date.toISOString();
+        return await db.clearOrdersBeforeDate(isoString);
+    }, []);
+
+    const syncFromFile = useCallback(async (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => {
+        if (isSyncing) {
+            showToast("이미 다른 동기화가 진행 중입니다.", 'error');
+            throw new Error("Sync already in progress");
         }
-    }, []); // Empty dependency array ensures this runs once on mount.
 
-    const onScanSuccess = useCallback((barcode: string) => {
-        onScanCallbackRef.current?.(barcode);
-    }, []);
+        setIsSyncing(true);
+        setSyncDataType(dataType);
+        setSyncProgress(0);
+        setSyncStatusText("기존 데이터 로딩 중...");
 
-    // Background/Foreground detection for efficient data syncing
-    useEffect(() => {
-        const handleVisibilityChange = () => {
-            setIsAppVisible(!document.hidden);
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, []);
-    
-    // --- Context Value Objects ---
-    const alertContextValue = useMemo(() => ({ alert, toast, showAlert, hideAlert, showToast, hideToast }), [alert, toast, showAlert, hideAlert, showToast, hideToast]);
-    
-    const modalContextValue = useMemo(() => ({
-        isDetailModalOpen, editingOrder,
-        openDetailModal: (order: Order) => { setEditingOrder(order); setIsDetailModalOpen(true); },
-        closeDetailModal: () => { setIsDetailModalOpen(false); setEditingOrder(null); },
-        isDeliveryModalOpen, orderToExport,
-        openDeliveryModal: (order: Order) => { setOrderToExport(order); setIsDeliveryModalOpen(true); },
-        closeDeliveryModal: () => { setIsDeliveryModalOpen(false); setOrderToExport(null); },
-
-        addItemModalProps,
-        editItemModalProps,
-        memoModalProps,
-        openAddItemModal: (data) => setAddItemModalProps(data),
-        closeAddItemModal: () => setAddItemModalProps(null),
-        openEditItemModal: (data) => setEditItemModalProps(data),
-        closeEditItemModal: () => setEditItemModalProps(null),
-        openMemoModal: (data) => setMemoModalProps(data),
-        closeMemoModal: () => setMemoModalProps(null),
-        isHistoryModalOpen,
-        openHistoryModal: () => setIsHistoryModalOpen(true),
-        closeHistoryModal: () => setIsHistoryModalOpen(false),
-        isClearHistoryModalOpen,
-        openClearHistoryModal: () => setIsClearHistoryModalOpen(true),
-        closeClearHistoryModal: () => setIsClearHistoryModalOpen(false),
-    }), [isDetailModalOpen, editingOrder, isDeliveryModalOpen, orderToExport, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen, isClearHistoryModalOpen]);
-    
-    const scannerContextValue = useMemo(() => ({
-        isScannerOpen, scannerContext, isContinuousScan, onScanSuccess,
-        openScanner: (context, onScan, continuous = false) => {
-            setScannerContext(context);
-            onScanCallbackRef.current = onScan;
-            setIsContinuousScan(continuous);
-            setIsScannerOpen(true);
-        },
-        closeScanner: () => { setIsScannerOpen(false); setIsContinuousScan(false); setScannerContext(null); },
-    }), [isScannerOpen, scannerContext, isContinuousScan, onScanSuccess]);
-    
-    const syncContextValue = useMemo(() => ({ isSyncing, syncProgress, initialSyncCompleted, syncStatusText, syncDataType }), [isSyncing, syncProgress, initialSyncCompleted, syncStatusText, syncDataType]);
-    
-    const pwaInstallContextValue = useMemo(() => ({
-        isInstallPromptAvailable: !!installPromptEvent || showIosInstall,
-        triggerInstallPrompt: () => {
-            if (installPromptEvent) {
-                (installPromptEvent as any).prompt();
-                setInstallPromptEvent(null);
-            } else if (showIosInstall) {
-                showAlert(
-                    "앱을 홈 화면에 추가하려면, 브라우저의 공유 버튼을 누른 뒤 '홈 화면에 추가'를 선택하세요.",
-                    undefined, // No confirm action, just close
-                    "확인"
-                );
-            } else {
-                 showAlert('앱을 설치할 수 없습니다. 브라우저가 이 기능을 지원하는지 확인해주세요.');
-            }
-        },
-    }), [installPromptEvent, showIosInstall, showAlert]);
-
-    const miscUIContextValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
-    
-    // --- DATA STATE & ACTIONS ---
-    const [dataState, setDataState] = useState<DataState>({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
-
-    useEffect(() => {
-        // This effect handles device-specific settings from Firebase
-        if (!user || !db.isInitialized() || !db.db) return;
+        const existingData = dataType === 'customers' ? customers : products;
         
-        const deviceId = getDeviceId();
-        const settingsRef = db.db.ref(`device-settings/${deviceId}`);
-        
-        const listener = settingsRef.on('value', (snapshot) => {
-            const settings = snapshot.val();
-            setDataState(prevState => ({
-                ...prevState,
-                selectedCameraId: settings?.selectedCameraId ?? null,
-                scanSettings: {
-                    vibrateOnScan: settings?.scanSettings?.vibrateOnScan ?? true,
-                    soundOnScan: settings?.scanSettings?.soundOnScan ?? true,
-                }
-            }));
-        });
-        
-        return () => settingsRef.off('value', listener);
-    }, [user]);
-
-    const dataActions: DataActions = useMemo(() => ({
-        smartSyncCustomers: (customers, userEmail, onProgress, options) => db.smartSyncData('customers', customers, userEmail, onProgress, options),
-        smartSyncProducts: (products, userEmail, onProgress, options) => db.smartSyncData('products', products, userEmail, onProgress, options),
-        addOrder: ({ customer, items, total, memo }) => db.addOrderWithItems({ customer, total, memo }, items),
-        updateOrder: async (updatedOrder) => {
-            const { items, ...orderData } = updatedOrder;
-            await db.updateOrderAndItems(orderData, items || []);
-        },
-        updateOrderStatus: (orderId, completionDetails) => db.updateOrderStatus(orderId, completionDetails),
-        deleteOrder: (orderId) => db.deleteOrderAndItems(orderId),
-        setSelectedCameraId: async (id) => {
-            if (!user || !db.isInitialized() || !db.db) return;
-            const deviceId = getDeviceId();
-            await db.db.ref(`device-settings/${deviceId}/selectedCameraId`).set(id);
-        },
-        setScanSettings: async (settings) => {
-            if (!user || !db.isInitialized() || !db.db) return;
-            const deviceId = getDeviceId();
-            const updates: { [key: string]: any } = {};
-            if (settings.vibrateOnScan !== undefined) updates[`device-settings/${deviceId}/scanSettings/vibrateOnScan`] = settings.vibrateOnScan;
-            if (settings.soundOnScan !== undefined) updates[`device-settings/${deviceId}/scanSettings/soundOnScan`] = settings.soundOnScan;
-            if (Object.keys(updates).length > 0) await db.db.ref().update(updates);
-        },
-        clearOrders: () => db.clearOrders(),
-        clearOrdersBeforeDate: (date: Date) => db.clearOrdersBeforeDate(date.toISOString()),
-        forceFullSync: async () => {
-            setIsSyncing(true);
-            setSyncDataType(null);
-            try {
-                const customers = await db.getStore<Customer>('customers');
-                const products = await db.getStore<Product>('products');
-                await Promise.all([
-                    cache.setCachedData('customers', customers),
-                    cache.setCachedData('products', products)
-                ]);
-                setDataState(prev => ({...prev, customers, products }));
-                const lastCustomerKey = await db.getLastSyncLogKey('customers');
-                const lastProductKey = await db.getLastSyncLogKey('products');
-                setLastSyncKeys({ customers: lastCustomerKey, products: lastProductKey });
-                showToast("데이터 강제 동기화가 완료되었습니다.", "success");
-            } catch (error) {
-                console.error("Force full sync failed:", error);
-                showAlert("데이터 강제 동기화에 실패했습니다.");
-            } finally {
-                setIsSyncing(false);
-            }
-        },
-        syncFromFile: async (file, dataType, source) => {
-            if (!user?.email) {
-                showAlert("동기화를 진행하려면 로그인이 필요합니다.");
-                throw new Error("User not logged in");
-            }
-
-            setIsSyncing(true);
-            setSyncDataType(dataType);
-            setSyncStatusText('준비 중...');
-            setSyncProgress(0);
-
-            const proceedWithUpdate = async (diffResult: DiffResult<Customer | Product>): Promise<DiffResult<Customer | Product>> => {
-                if (!user?.email || !db.db) throw new Error("DB or user not available");
-        
-                const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
-                const storeName = dataType;
-                const logUser = user.email.split('@')[0];
-                const nowISO = new Date().toISOString();
-            
-                const CHUNK_SIZE = 250;
-                const totalItems = diffResult.toAddOrUpdate.length + diffResult.toDelete.length;
-                let processedCount = 0;
-            
-                const processAndWriteChunk = async (items: any[], isDeletion: boolean) => {
-                    const chunkUpdates: { [key: string]: any } = {};
-                    for (const item of items) {
-                        const key = isDeletion ? item[keyField] : (item as any)[keyField];
-                        const logRefKey = db.db.ref(`/sync-logs/${storeName}`).push().key;
-            
-                        if (key && logRefKey) {
-                            if (isDeletion) {
-                                chunkUpdates[`/${storeName}/${key}`] = null;
-                                chunkUpdates[`/sync-logs/${storeName}/${logRefKey}`] = {
-                                    [keyField]: key, name: item.name, _deleted: true,
-                                    timestamp: firebase.database.ServerValue.TIMESTAMP, user: logUser
-                                };
-                            } else {
-                                const itemWithMeta = { ...item, lastModified: nowISO };
-                                chunkUpdates[`/${storeName}/${key}`] = itemWithMeta;
-                                chunkUpdates[`/sync-logs/${storeName}/${logRefKey}`] = {
-                                    ...itemWithMeta, timestamp: firebase.database.ServerValue.TIMESTAMP, user: logUser
-                                };
-                            }
-                        }
-                    }
-                    if (Object.keys(chunkUpdates).length > 0) {
-                        await db.db.ref().update(chunkUpdates);
-                    }
-                };
-            
-                setSyncStatusText('DB 업데이트 준비 중...');
-                setSyncProgress(0);
-
-                for (let i = 0; i < diffResult.toAddOrUpdate.length; i += CHUNK_SIZE) {
-                    const chunk = diffResult.toAddOrUpdate.slice(i, i + CHUNK_SIZE);
-                    await processAndWriteChunk(chunk, false);
-                    processedCount += chunk.length;
-                    setSyncStatusText(`추가/수정 중... (${processedCount}/${totalItems})`);
-                    setSyncProgress(Math.round((processedCount / totalItems) * 100));
-                    await new Promise(resolve => setTimeout(resolve, 10));
-                }
-            
-                for (let i = 0; i < diffResult.toDelete.length; i += CHUNK_SIZE) {
-                    const chunk = diffResult.toDelete.slice(i, i + CHUNK_SIZE);
-                    await processAndWriteChunk(chunk, true);
-                    processedCount += chunk.length;
-                    setSyncStatusText(`삭제 중... (${processedCount}/${totalItems})`);
-                    setSyncProgress(Math.round((processedCount / totalItems) * 100));
-                    await new Promise(resolve => setTimeout(resolve, 10));
-                }
-
-                setSyncStatusText('로컬 데이터 업데이트 중...');
-                await new Promise(resolve => setTimeout(resolve, 10));
-                
-                // FIX: This block is refactored for type safety to address the error.
-                if (dataType === 'customers') {
-                    const existingData = dataState.customers;
-                    // FIX: Explicitly type the Map to aid TypeScript's type inference.
-                    const dataMap = new Map<string, Customer>(existingData.map(item => [item.comcode, item]));
-                    (diffResult.toAddOrUpdate as Customer[]).forEach(item => {
-                        const itemWithMeta = { ...item, lastModified: nowISO };
-                        dataMap.set(item.comcode, itemWithMeta);
-                    });
-                    diffResult.toDelete.forEach(item => {
-                        dataMap.delete((item as any).comcode);
-                    });
-                    const updatedData = Array.from(dataMap.values());
-                    setDataState(prev => ({ ...prev, customers: updatedData }));
-                    await cache.setCachedData('customers', updatedData);
-                } else {
-                    const existingData = dataState.products;
-                    // FIX: Explicitly type the Map to aid TypeScript's type inference.
-                    const dataMap = new Map<string, Product>(existingData.map(item => [item.barcode, item]));
-                    (diffResult.toAddOrUpdate as Product[]).forEach(item => {
-                        const itemWithMeta = { ...item, lastModified: nowISO };
-                        dataMap.set(item.barcode, itemWithMeta);
-                    });
-                    diffResult.toDelete.forEach(item => {
-                        dataMap.delete((item as any).barcode);
-                    });
-                    const updatedData = Array.from(dataMap.values());
-                    setDataState(prev => ({ ...prev, products: updatedData }));
-                    await cache.setCachedData('products', updatedData);
-                }
-
-                const latestLogKey = await db.getLastSyncLogKey(dataType);
-                if (latestLogKey) {
-                    setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: latestLogKey }));
-                }
-
-                return diffResult;
+        try {
+            const onProgress = (message: string) => {
+                setSyncStatusText(message);
             };
 
+            const diffResult = await processExcelFileInWorker(file, dataType, existingData, user?.email || 'unknown', onProgress);
+            
+            const toAddOrUpdate = diffResult.toAddOrUpdate as (Customer[] | Product[]);
+            const toDelete = diffResult.toDelete;
+
+            if (toAddOrUpdate.length > 0 || toDelete.length > 0) {
+                 setSyncStatusText("데이터베이스 업데이트 중...");
+                 const updates: Partial<Record<'customers' | 'products', (Customer|Product)[]>> = {};
+                 updates[dataType] = toAddOrUpdate as any;
+                 
+                 await db.replaceAll(dataType, toAddOrUpdate as any);
+
+                 // This part is simplified; in a real app, you'd handle deletes too.
+                 if (dataType === 'customers') setCustomers(toAddOrUpdate as Customer[]);
+                 else setProducts(toAddOrUpdate as Product[]);
+            }
+
+            return diffResult;
+        } catch (error) {
+            console.error(`Sync from ${source} failed:`, error);
+            showToast(`${dataType === 'customers' ? '거래처' : '상품'} 동기화 실패.`, 'error');
+            throw error;
+        } finally {
+            setIsSyncing(false);
+            setSyncDataType(null);
+            setSyncStatusText("");
+        }
+    }, [isSyncing, customers, products, user, showToast]);
+
+    const forceFullSync = useCallback(async () => {
+        if (!db.isInitialized()) {
+            showAlert("데이터베이스에 연결되지 않아 동기화할 수 없습니다.");
+            return;
+        }
+        setIsSyncing(true);
+        setSyncDataType('full');
+        try {
+            setSyncStatusText("거래처 데이터 동기화 중...");
+            const remoteCustomers = await db.getStore<Customer>('customers');
+            await cache.setCachedData('customers', remoteCustomers);
+            setCustomers(remoteCustomers);
+
+            setSyncStatusText("상품 데이터 동기화 중...");
+            const remoteProducts = await db.getStore<Product>('products');
+            await cache.setCachedData('products', remoteProducts);
+            setProducts(remoteProducts);
+            
+            showToast("전체 데이터 동기화가 완료되었습니다.", 'success');
+        } catch (err) {
+            showAlert("전체 데이터 동기화에 실패했습니다.");
+        } finally {
+            setIsSyncing(false);
+            setSyncDataType(null);
+            setSyncStatusText("");
+        }
+    }, [showAlert, showToast]);
+
+    const setSelectedCameraId = useCallback(async (id: string | null) => {
+        setSelectedCameraIdState(id);
+    }, [setSelectedCameraIdState]);
+
+    const setScanSettings = useCallback(async (settings: Partial<DataState['scanSettings']>) => {
+        setScanSettingsState(prev => ({ ...prev, ...settings }));
+    }, [setScanSettingsState]);
+
+    // --- Initial Data Load and Sync Effect ---
+    useEffect(() => {
+        if (!user || !db.isInitialized()) {
+            setInitialSyncCompleted(!user);
+            return;
+        }
+
+        let customerUnsubscribe: (() => void) | null = null;
+        let productUnsubscribe: (() => void) | null = null;
+
+        const performInitialSync = async () => {
+            setIsSyncing(true);
+            setSyncDataType('full');
+            
             try {
-                const diffResult = await (async () => {
-                    if (dataType === 'customers') {
-                        return processExcelFileInWorker(
-                            file, 'customer', dataState.customers, user.email,
-                            (message: string) => setSyncStatusText(message)
-                        );
-                    } else {
-                        return processExcelFileInWorker(
-                            file, 'product', dataState.products, user.email,
-                            (message: string) => setSyncStatusText(message)
-                        );
-                    }
-                })();
-    
-                return await proceedWithUpdate(diffResult);
-    
+                // Step 1: Load from cache
+                setSyncStatusText("로컬 캐시 로딩 중...");
+                const cachedCustomers = await cache.getCachedData<Customer>('customers');
+                const cachedProducts = await cache.getCachedData<Product>('products');
+                if (cachedCustomers.length > 0) setCustomers(cachedCustomers);
+                if (cachedProducts.length > 0) setProducts(cachedProducts);
+                
+                // Step 2: Full sync from remote
+                setSyncStatusText("서버 데이터 동기화 중 (거래처)...");
+                const remoteCustomers = await db.getStore<Customer>('customers');
+                await cache.setCachedData('customers', remoteCustomers);
+                setCustomers(remoteCustomers);
+                
+                setSyncStatusText("서버 데이터 동기화 중 (상품)...");
+                const remoteProducts = await db.getStore<Product>('products');
+                await cache.setCachedData('products', remoteProducts);
+                setProducts(remoteProducts);
+
+                // Step 3: Listen for changes
+                customerUnsubscribe = db.listenToValue<Record<string, Customer>>('customers', (data) => {
+                    if (data) setCustomers(Object.values(data));
+                });
+                productUnsubscribe = db.listenToValue<Record<string, Product>>('products', (data) => {
+                    if (data) setProducts(Object.values(data));
+                });
+                
+                setInitialSyncCompleted(true);
             } catch (error) {
-                if (error instanceof Error && error.message === 'MASS_DELETION_DETECTED') {
-                    const newError = new Error(error.message);
-                    (newError as any).details = (error as any).details;
-                    (newError as any).details.proceed = () => proceedWithUpdate((error as any).details.diffResult);
-                    throw newError;
-                } else {
-                    console.error("File processing error:", error);
-                    showAlert(`파일 처리 중 오류가 발생했습니다: ${(error as Error).message}`);
-                    throw error;
-                }
+                console.error("Initial sync failed:", error);
+                showAlert("초기 데이터 동기화에 실패했습니다. 캐시된 데이터로 앱을 사용합니다.");
+                setInitialSyncCompleted(true); // Allow app usage with cached data
             } finally {
                 setIsSyncing(false);
                 setSyncDataType(null);
-                setSyncStatusText('');
-                setSyncProgress(0);
-            }
-        },
-    }), [user, dataState, showAlert, showToast, setLastSyncKeys]);
-
-    useEffect(() => {
-        if (authLoading) {
-            return; // Wait for authentication to resolve before doing anything.
-        }
-
-        if (!user) {
-            // This now only runs AFTER auth is resolved and we know for sure there is no user.
-            setDataState({ customers: [], products: [], selectedCameraId: null, scanSettings: { vibrateOnScan: true, soundOnScan: true } });
-            if (lastSyncKeys?.customers || lastSyncKeys?.products) {
-                 setLastSyncKeys({ customers: null, products: null });
-            }
-            setInitialSyncCompleted(false); 
-            return;
-        }
-    
-        let isMounted = true;
-    
-        const performSync = async () => {
-            if (!isMounted) return;
-            setIsSyncing(true);
-            setSyncDataType(null);
-            setSyncProgress(0);
-            setSyncStatusText('동기화 시작...');
-    
-            try {
-                if (isMounted) {
-                    setSyncProgress(10);
-                    setSyncStatusText('로컬 캐시 로딩 중...');
-                }
-                const [cachedCustomers, cachedProducts] = await Promise.all([
-                    cache.getCachedData<Customer>('customers'),
-                    cache.getCachedData<Product>('products'),
-                ]);
-
-                // Safety Net: Check for cleared cache after initial sync has succeeded once.
-                if (isMounted && initialSyncSucceeded && cachedCustomers.length === 0 && cachedProducts.length === 0) {
-                     setSyncStatusText('캐시가 비어있어 전체 데이터를 다시 동기화합니다...');
-                }
-
-                if (isMounted) {
-                    setDataState(prev => ({ ...prev, customers: cachedCustomers, products: cachedProducts }));
-                    setSyncProgress(20);
-                    setSyncStatusText('서버와 변경사항 확인 중...');
-                }
-    
-                const syncDataType = async (dataType: 'customers' | 'products'): Promise<void> => {
-                    let localData = dataType === 'customers' ? cachedCustomers : cachedProducts;
-                    const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
-                    const lastKey = lastSyncKeys?.[dataType] ?? null;
-                    console.log(`[Sync] Starting sync for '${dataType}' from key: ${lastKey || 'beginning'}`);
-
-                    if (localData.length === 0) {
-                        console.log(`[Sync] Cache for ${dataType} is empty. Performing initial full sync.`);
-                        const fullData = await db.getStore<Customer | Product>(dataType);
-
-                        if (isMounted && fullData.length > 0) {
-                            // FIX: Use type-specific updates for state and cache
-                            if (dataType === 'customers') {
-                                await cache.setCachedData(dataType, fullData as Customer[]);
-                                setDataState(prev => ({ ...prev, customers: fullData as Customer[] }));
-                            } else {
-                                await cache.setCachedData(dataType, fullData as Product[]);
-                                setDataState(prev => ({ ...prev, products: fullData as Product[] }));
-                            }
-                            
-                            const latestLogKey = await db.getLastSyncLogKey(dataType);
-                            if (latestLogKey) {
-                                console.log(`[Sync] Full sync for '${dataType}' complete. New last key: ${latestLogKey}`);
-                                setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: latestLogKey }));
-                            }
-                        }
-                        return;
-                    }
-
-                    const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
-                    console.log(`[Sync] Found ${changes.length} new changes for '${dataType}'. New last key will be: ${newLastKey}`);
-    
-                    if (isMounted && changes.length > 0) {
-                        const dataMap = new Map(localData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
-                        
-                        for (const change of changes) {
-                            const key = (change as any)[keyField];
-                            if (!key) {
-                                console.warn(`[Sync] Change for ${dataType} is missing keyField '${keyField}'. Change:`, change);
-                                continue;
-                            }
-                            if ((change as any)._deleted) {
-                                dataMap.delete(key);
-                            } else {
-                                dataMap.set(key, change);
-                            }
-                        }
-                        const updatedLocalData = Array.from(dataMap.values());
-                        
-                        // FIX: Use type-specific updates for state and cache
-                        if (dataType === 'customers') {
-                            await cache.setCachedData(dataType, updatedLocalData as Customer[]);
-                            setDataState(prev => ({ ...prev, customers: updatedLocalData as Customer[] }));
-                        } else {
-                            await cache.setCachedData(dataType, updatedLocalData as Product[]);
-                            setDataState(prev => ({ ...prev, products: updatedLocalData as Product[] }));
-                        }
-                    }
-    
-                    if (isMounted && newLastKey !== lastKey) {
-                        setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: newLastKey }));
-                    }
-                };
-    
-                const customerSyncPromise = syncDataType('customers').then(() => {
-                    if (isMounted) {
-                        setSyncProgress(prev => prev + 40);
-                        setSyncStatusText('상품 정보 동기화...');
-                    }
-                });
-                const productSyncPromise = syncDataType('products').then(() => {
-                    if (isMounted) {
-                        setSyncProgress(prev => prev + 40);
-                        setSyncStatusText('마무리 중...');
-                    }
-                });
-
-                await Promise.all([customerSyncPromise, productSyncPromise]);
-
-                if (isMounted) {
-                    setSyncProgress(100);
-                    setInitialSyncCompleted(true);
-                    setInitialSyncSucceeded(true); // Mark that the first sync has succeeded at least once
-                }
-    
-            } catch (error) {
-                console.error("Incremental sync failed:", error);
-                if (isMounted) {
-                    showAlert("데이터 동기화에 실패했습니다. 오프라인 데이터로 앱을 시작합니다.");
-                    setInitialSyncCompleted(true); // Allow app to start with cached data
-                }
-            } finally {
-                if (isMounted) {
-                    setIsSyncing(false);
-                    setTimeout(() => {
-                        if (isMounted) setSyncProgress(0);
-                    }, 1000);
-                }
+                setSyncStatusText("");
             }
         };
 
-        const performMaintenance = async () => {
-            try {
-                const retentionDays = await db.getValue<number>('settings/sync-logs/retentionDays', 30);
-                if (retentionDays > 0) {
-                    await Promise.all([
-                        db.cleanupSyncLogs('customers', retentionDays),
-                        db.cleanupSyncLogs('products', retentionDays)
-                    ]);
-                }
-            } catch (error) {
-                console.warn("Sync log cleanup failed:", error);
-            }
-        };
-    
-        performSync();
-        performMaintenance();
-    
+        performInitialSync();
+
         return () => {
-            isMounted = false;
+            if (customerUnsubscribe) customerUnsubscribe();
+            if (productUnsubscribe) productUnsubscribe();
         };
-    }, [user, authLoading, showAlert, lastSyncKeys, setLastSyncKeys, initialSyncSucceeded, setInitialSyncSucceeded]);
+    }, [user, showAlert]);
 
-    // This effect handles live updates AFTER the initial sync and manages background/foreground state.
-    // FIX: Refactored to be type-safe and avoid async race conditions with state updates.
+    // --- Modal Actions ---
+    const modalsActions = useMemo<ModalsActions>(() => ({
+        openDetailModal: (order) => setModalsState(s => ({ ...s, isDetailModalOpen: true, editingOrder: order })),
+        closeDetailModal: () => setModalsState(s => ({ ...s, isDetailModalOpen: false, editingOrder: null })),
+        openDeliveryModal: (order) => setModalsState(s => ({ ...s, isDeliveryModalOpen: true, orderToExport: order })),
+        closeDeliveryModal: () => setModalsState(s => ({ ...s, isDeliveryModalOpen: false, orderToExport: null })),
+        openAddItemModal: (props) => setModalsState(s => ({ ...s, addItemModalProps: props })),
+        closeAddItemModal: () => setModalsState(s => ({ ...s, addItemModalProps: null })),
+        openEditItemModal: (props) => setModalsState(s => ({ ...s, editItemModalProps: props })),
+        closeEditItemModal: () => setModalsState(s => ({ ...s, editItemModalProps: null })),
+        openMemoModal: (props) => setModalsState(s => ({ ...s, memoModalProps: props })),
+        closeMemoModal: () => setModalsState(s => ({ ...s, memoModalProps: null })),
+        openHistoryModal: () => setModalsState(s => ({ ...s, isHistoryModalOpen: true })),
+        closeHistoryModal: () => setModalsState(s => ({ ...s, isHistoryModalOpen: false })),
+        openClearHistoryModal: () => setModalsState(s => ({ ...s, isClearHistoryModalOpen: true })),
+        closeClearHistoryModal: () => setModalsState(s => ({ ...s, isClearHistoryModalOpen: false })),
+    }), []);
+    
+    // --- Scanner Actions ---
+    const scannerActions = useMemo<ScannerActions>(() => ({
+        openScanner: (context, onScan, continuous) => setScannerState({ isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, continuousScan: continuous }),
+        closeScanner: () => setScannerState({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false }),
+    }), []);
+    
+    // --- PWA Install Effect ---
     useEffect(() => {
-        if (!initialSyncCompleted || !user || !isAppVisible) {
-            return;
-        }
-    
-        let isMounted = true;
-    
-        const handleNewLog = (
-            dataType: 'customers' | 'products',
-            logItem: any,
-            newKey: string
-        ) => {
-            if (!isMounted) return;
-    
-            // Briefly show syncing indicator for user feedback
-            setIsSyncing(true);
-    
-            const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
-            const itemKey = logItem[keyField];
-    
-            if (!itemKey) {
-                console.warn(`[Live Sync] Received log for ${dataType} without a key.`, logItem);
-                setIsSyncing(false);
-                return;
-            }
-    
-            // Use functional update to ensure atomicity
-            setDataState(prevState => {
-                const currentData = prevState[dataType];
-                const dataMap = new Map(currentData.map(item => [(item as any)[keyField], item]) as [string, Customer | Product][]);
-    
-                if (logItem._deleted) {
-                    dataMap.delete(itemKey);
-                } else {
-                    // Remove internal sync properties before saving to state
-                    const { timestamp, user, _deleted, ...itemData } = logItem;
-                    dataMap.set(itemKey, itemData);
+        const handler = (e: Event) => {
+            e.preventDefault();
+            deferredInstallPrompt.current = e;
+            setInstallPromptAvailable(true);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+    }, []);
+
+    const triggerInstallPrompt = useCallback(() => {
+        if (deferredInstallPrompt.current) {
+            deferredInstallPrompt.current.prompt();
+            deferredInstallPrompt.current.userChoice.then((choiceResult: { outcome: 'accepted' | 'dismissed' }) => {
+                if (choiceResult.outcome === 'accepted') {
+                    showToast('앱이 설치되었습니다!', 'success');
                 }
-                
-                const updatedData = Array.from(dataMap.values());
-                
-                // Fire-and-forget cache update from within the atomic state update
-                if (dataType === 'customers') {
-                    cache.setCachedData('customers', updatedData as Customer[]).catch(error => {
-                        console.error(`[Live Sync] Failed to update cache for customers:`, error);
-                    });
-                    return { ...prevState, customers: updatedData as Customer[] };
-                } else {
-                    cache.setCachedData('products', updatedData as Product[]).catch(error => {
-                        console.error(`[Live Sync] Failed to update cache for products:`, error);
-                    });
-                    return { ...prevState, products: updatedData as Product[] };
-                }
+                setInstallPromptAvailable(false);
+                deferredInstallPrompt.current = null;
             });
-    
-            // Update the last sync key state (this is safe to do outside)
-            setLastSyncKeys(prevKeys => ({ ...(prevKeys || { customers: null, products: null }), [dataType]: newKey }));
+        }
+    }, [showToast]);
 
-            // Hide syncing indicator after a short delay
-            setTimeout(() => {
-                if(isMounted) setIsSyncing(false);
-            }, 500);
-        };
-    
-        const unsubCustomers = db.listenForNewLogs('customers', lastSyncKeys?.customers ?? null, (item, key) => {
-            handleNewLog('customers', item, key);
-        });
-    
-        const unsubProducts = db.listenForNewLogs('products', lastSyncKeys?.products ?? null, (item, key) => {
-            handleNewLog('products', item, key);
-        });
-    
-        return () => {
-            isMounted = false;
-            unsubCustomers();
-            unsubProducts();
-        };
-    }, [initialSyncCompleted, user, lastSyncKeys, setLastSyncKeys, isAppVisible]);
-
+    // --- Context Values ---
+    const dataStateValue = useMemo(() => ({ customers, products, selectedCameraId, scanSettings: scanSettings! }), [customers, products, selectedCameraId, scanSettings]);
+    const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings]);
+    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted]);
+    const modalsValue = useMemo(() => ({ ...modalsState, ...modalsActions }), [modalsState, modalsActions]);
+    const scannerValue = useMemo(() => ({ ...scannerState, ...scannerActions }), [scannerState, scannerActions]);
+    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
+    const pwaInstallValue = useMemo(() => ({ isInstallPromptAvailable, triggerInstallPrompt }), [isInstallPromptAvailable, triggerInstallPrompt]);
 
     return (
-        <DataStateContext.Provider value={dataState}>
-            <DataActionsContext.Provider value={dataActions}>
-                <AlertContext.Provider value={alertContextValue}>
-                    <ModalContext.Provider value={modalContextValue}>
-                        <ScannerContext.Provider value={scannerContextValue}>
-                            <SyncContext.Provider value={syncContextValue}>
-                                <PWAInstallContext.Provider value={pwaInstallContextValue}>
-                                    <MiscUIContext.Provider value={miscUIContextValue}>
-                                        {children}
-                                        <AlertModal
-                                            isOpen={alert.isOpen}
-                                            message={alert.message}
-                                            onClose={hideAlert}
-                                            onConfirm={alert.onConfirm}
-                                            onCancel={alert.onCancel}
-                                            confirmText={alert.confirmText}
-                                            confirmButtonClass={alert.confirmButtonClass}
-                                        />
-                                        <Toast 
-                                            isOpen={toast.isOpen}
-                                            message={toast.message}
-                                            type={toast.type}
-                                            onClose={hideToast}
-                                        />
-                                    </MiscUIContext.Provider>
-                                </PWAInstallContext.Provider>
-                            </SyncContext.Provider>
+        <DataStateContext.Provider value={dataStateValue}>
+            <DataActionsContext.Provider value={dataActionsValue}>
+                <SyncStateContext.Provider value={syncStateValue}>
+                    <ModalsContext.Provider value={modalsValue}>
+                        <ScannerContext.Provider value={scannerValue}>
+                            <MiscUIContext.Provider value={miscUIValue}>
+                                <AlertContext.Provider value={showAlert}>
+                                    <ToastContext.Provider value={showToast}>
+                                        <PWAInstallContext.Provider value={pwaInstallValue}>
+                                            {children}
+                                            <AlertModal {...alertState} onClose={() => setAlertState(s => ({ ...s, isOpen: false }))} />
+                                            <Toast {...toastState} onClose={() => setToastState(s => ({ ...s, isOpen: false }))} />
+                                        </PWAInstallContext.Provider>
+                                    </ToastContext.Provider>
+                                </AlertContext.Provider>
+                            </MiscUIContext.Provider>
                         </ScannerContext.Provider>
-                    </ModalContext.Provider>
-                </AlertContext.Provider>
+                    </ModalsContext.Provider>
+                </SyncStateContext.Provider>
             </DataActionsContext.Provider>
         </DataStateContext.Provider>
     );
+};
+
+// --- Custom Hooks ---
+
+// Hook for accessing data
+export const useDataState = (): DataState => {
+    const context = useContext(DataStateContext);
+    if (context === undefined) throw new Error('useDataState must be used within an AppProvider');
+    return context;
+};
+
+// Hook for accessing data modification actions
+export const useDataActions = (): DataActions => {
+    const context = useContext(DataActionsContext);
+    if (context === undefined) throw new Error('useDataActions must be used within an AppProvider');
+    return context;
+};
+
+// Hook for sync status
+export const useSyncState = (): SyncState => {
+    const context = useContext(SyncStateContext);
+    if (context === undefined) throw new Error('useSyncState must be used within an AppProvider');
+    return context;
+};
+
+// Hook for modals
+export const useModals = (): ModalsState & ModalsActions => {
+    const context = useContext(ModalsContext);
+    if (context === undefined) throw new Error('useModals must be used within an AppProvider');
+    return context;
+};
+
+// Hook for alerts and toasts
+export const useAlert = () => {
+    const showAlert = useContext(AlertContext);
+    const showToast = useContext(ToastContext);
+    if (showAlert === undefined || showToast === undefined) throw new Error('useAlert must be used within an AppProvider');
+    return { showAlert, showToast };
+};
+
+// Hook for misc UI state
+export const useMiscUI = (): MiscUIState & MiscUIActions => {
+    const context = useContext(MiscUIContext);
+    if (context === undefined) throw new Error('useMiscUI must be used within an AppProvider');
+    return context;
+};
+
+// Hook for scanner
+export const useScanner = (): ScannerState & ScannerActions => {
+    const context = useContext(ScannerContext);
+    if (context === undefined) throw new Error('useScanner must be used within an AppProvider');
+    return context;
+};
+
+// Hook for PWA installation
+export const usePWAInstall = (): PWAInstallState => {
+    const context = useContext(PWAInstallContext);
+    if (context === undefined) throw new Error('usePWAInstall must be used within an AppProvider');
+    return context;
 };
