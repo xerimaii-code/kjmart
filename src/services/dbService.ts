@@ -154,10 +154,13 @@ export const listenForNewChanges = <T extends Customer | Product>(
     
     const addListener = query.on('child_added', (snapshot) => {
         const item = snapshot.val() as T;
-        // Ignore the initial event for the item at the exact start timestamp
-        if (item.lastModified !== timestamp) {
-            callbacks.onAdd(item);
+        // FIX: Ignore the initial event for items at the exact start timestamp.
+        // This prevents re-processing data that was already handled by the initial sync.
+        if (item.lastModified && timestamp && item.lastModified === timestamp) {
+            return;
         }
+        // Only process truly new items that arrived after the initial sync.
+        callbacks.onAdd(item);
     });
 
     const changeListener = query.on('child_changed', (snapshot) => {

@@ -18,7 +18,6 @@ import 'firebase/compat/database';
 export interface AddItemModalPayload {
     product: Product;
     existingItem: OrderItem | null;
-    // FIX: Corrected syntax from 'from => void' to '=> void'
     onAdd: (details: { quantity: number; unit: '개' | '박스'; memo?: string }) => void;
     onNextScan?: () => void;
     trigger: 'scan' | 'search';
@@ -315,7 +314,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             return;
         }
     
-        const findLastTimestamp = (items: (Customer[] | Product[])): string | null => {
+        const findLastTimestamp = (items: (Customer | Product)[]): string | null => {
             if (!items || items.length === 0) return null;
             return items.reduce((latest, item) => {
                 if (!item.lastModified) return latest;
@@ -337,10 +336,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setCustomers(Array.from(customerMap.values()));
             setProducts(Array.from(productMap.values()));
             
-            if (cachedCustomers.length > 0 || cachedProducts.length > 0) {
-                setInitialSyncCompleted(true);
-            }
-    
             setSyncStatusText("서버 변경사항 확인 중...");
             
             const lastCustomerTimestamp = findLastTimestamp(cachedCustomers);
@@ -349,53 +344,58 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const customerUpdates = await db.fetchUpdatesSince<Customer>('customers', lastCustomerTimestamp);
             const productUpdates = await db.fetchUpdatesSince<Product>('products', lastProductTimestamp);
     
-            let finalCustomerTimestamp = lastCustomerTimestamp;
             if (customerUpdates.length > 0) {
                 customerUpdates.forEach(c => customerMap.set(c.comcode, c));
                 setCustomers(Array.from(customerMap.values()));
                 await cache.appendCachedData('customers', customerUpdates);
-                finalCustomerTimestamp = findLastTimestamp(customerUpdates) || lastCustomerTimestamp;
             }
     
-            let finalProductTimestamp = lastProductTimestamp;
             if (productUpdates.length > 0) {
                 productUpdates.forEach(p => productMap.set(p.barcode, p));
                 setProducts(Array.from(productMap.values()));
                 await cache.appendCachedData('products', productUpdates);
-                finalProductTimestamp = findLastTimestamp(productUpdates) || lastProductTimestamp;
             }
             
             setSyncStatusText("실시간 동기화 시작...");
-            setInitialSyncCompleted(true);
-            setIsSyncing(false);
-            setSyncDataType(null);
-            setSyncStatusText("");
 
-            const customerUnsubscribe = db.listenForNewChanges<Customer>('customers', finalCustomerTimestamp, {
+            // FIX: Use a new timestamp from right after the sync to avoid re-processing old events.
+            const listenTimestamp = new Date().toISOString();
+
+            const customerUnsubscribe = db.listenForNewChanges<Customer>('customers', listenTimestamp, {
                 onAdd: (customer) => {
-                    customerMap.set(customer.comcode, customer);
-                    setCustomers(prev => [...prev.filter(c => c.comcode !== customer.comcode), customer]);
+                    setCustomers(prev => {
+                        const newMap = new Map(prev.map(c => [c.comcode, c]));
+                        newMap.set(customer.comcode, customer);
+                        return Array.from(newMap.values());
+                    });
                     cache.addOrUpdateCachedItem('customers', customer);
                 },
                 onChange: (customer) => {
-                    customerMap.set(customer.comcode, customer);
                     setCustomers(prev => prev.map(c => c.comcode === customer.comcode ? customer : c));
                     cache.addOrUpdateCachedItem('customers', customer);
                 }
             });
 
-            const productUnsubscribe = db.listenForNewChanges<Product>('products', finalProductTimestamp, {
+            const productUnsubscribe = db.listenForNewChanges<Product>('products', listenTimestamp, {
                  onAdd: (product) => {
-                    productMap.set(product.barcode, product);
-                    setProducts(prev => [...prev.filter(p => p.barcode !== product.barcode), product]);
+                    setProducts(prev => {
+                        const newMap = new Map(prev.map(p => [p.barcode, p]));
+                        newMap.set(product.barcode, product);
+                        return Array.from(newMap.values());
+                    });
                     cache.addOrUpdateCachedItem('products', product);
                 },
                 onChange: (product) => {
-                    productMap.set(product.barcode, product);
                     setProducts(prev => prev.map(p => p.barcode === product.barcode ? product : p));
                     cache.addOrUpdateCachedItem('products', product);
                 }
             });
+
+            // FIX: Set completion and stop sync spinner AFTER fetching updates and attaching listeners.
+            setInitialSyncCompleted(true);
+            setIsSyncing(false);
+            setSyncDataType(null);
+            setSyncStatusText("");
     
             return () => {
                 customerUnsubscribe();
