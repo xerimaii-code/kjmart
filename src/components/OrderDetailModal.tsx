@@ -446,8 +446,7 @@ const OrderDetailModal: React.FC = () => {
                         </div>
                         {!isCompleted && (
                              <div className="grid grid-cols-4 gap-2">
-                                <button onClick={handleOpenMemoModal} className="h-14 px-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center gap-2 active:scale-95 col-span-1">
-                                    <DocumentTextIcon className="w-5 h-5"/>
+                                <button onClick={handleOpenMemoModal} className="h-14 px-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
                                     <span>메모</span>
                                 </button>
                                 <button onClick={handleClose} className="h-14 px-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
