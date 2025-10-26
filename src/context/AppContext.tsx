@@ -51,7 +51,7 @@ interface DataState {
 }
 
 interface DataActions {
-    addOrder: (orderData: Omit<Order, 'id' | 'date' | 'itemCount' | 'createdAt' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => Promise<number>;
+    addOrder: (orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'itemCount' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => Promise<number>;
     updateOrder: (order: Order) => Promise<void>;
     deleteOrder: (orderId: number) => Promise<void>;
     updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
@@ -195,7 +195,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, []);
 
     // --- Data Actions ---
-    const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'itemCount' | 'createdAt' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
+    const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'itemCount' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
         const newOrderId = await db.addOrderWithItems(orderData, orderData.items);
         showToast('신규 발주가 저장되었습니다.', 'success');
         return newOrderId;

@@ -84,7 +84,12 @@ const OrderRow = memo(({
                                 <span className="truncate">{order.customer.name}</span>
                                 {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
                             </p>
-                            <p className="text-sm text-gray-500 mt-1">{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                            <div className="text-sm text-gray-500 mt-1">
+                                <span>{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                                {order.updatedAt && order.createdAt && order.updatedAt.slice(0, 19) > order.createdAt.slice(0, 19) && (
+                                    <span className="text-xs text-gray-400 ml-1.5">(최초: {new Date(order.createdAt).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })})</span>
+                                )}
+                            </div>
                         </div>
                         <p className="font-semibold text-gray-800 text-base tabular-nums tracking-tighter flex-shrink-0">
                             {order.total.toLocaleString()} 원
@@ -188,13 +193,17 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                     setOrders(prevOrders => {
                         if (prevOrders.some(o => o.id === newOrder.id)) return prevOrders;
                         const newArr = [...prevOrders, newOrder];
-                        newArr.sort((a, b) => b.id - a.id);
+                        newArr.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
                         return newArr;
                     });
                     setIsLoading(false);
                 },
                 onChange: (changedOrder) => {
-                    setOrders(prevOrders => prevOrders.map(o => o.id === changedOrder.id ? changedOrder : o));
+                    setOrders(prevOrders => 
+                        prevOrders
+                            .map(o => o.id === changedOrder.id ? changedOrder : o)
+                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    );
                 },
                 onRemove: (removedOrder) => {
                     setOrders(prevOrders => prevOrders.filter(o => o.id !== removedOrder.id));

@@ -174,7 +174,7 @@ export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
 const DB_UNINITIALIZED_ERROR = new Error("Database not initialized");
 
 export const addOrderWithItems = async (
-    orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'completedAt' | 'completionDetails' | 'itemCount' | 'items'>, 
+    orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'completedAt' | 'completionDetails' | 'itemCount' | 'items'>, 
     items: OrderItem[]
 ): Promise<number> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
@@ -186,6 +186,7 @@ export const addOrderWithItems = async (
         id: newOrderId,
         date: now,
         createdAt: now,
+        updatedAt: now,
         itemCount: items.length,
         completedAt: null,
         completionDetails: null,
@@ -203,7 +204,8 @@ export const addOrderWithItems = async (
 export const updateOrderAndItems = async (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     
-    const updatedOrderData = { ...order, itemCount: items.length };
+    const now = new Date().toISOString();
+    const updatedOrderData = { ...order, itemCount: items.length, updatedAt: now, date: now };
     
     const updates: { [key: string]: any } = {};
     updates[`/orders/${order.id}`] = updatedOrderData;
@@ -218,10 +220,13 @@ export const updateOrderStatus = async (
     completionDetails: Order['completionDetails']
 ): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    const completedAt = completionDetails ? new Date().toISOString() : null;
+    const now = new Date().toISOString();
+    const completedAt = completionDetails ? now : null;
     const updates: { [key: string]: any } = {
         [`/orders/${orderId}/completedAt`]: completedAt,
         [`/orders/${orderId}/completionDetails`]: completionDetails,
+        [`/orders/${orderId}/updatedAt`]: now,
+        [`/orders/${orderId}/date`]: now,
     };
     // FIX: Use v8 compat API for update()
     return db.ref().update(updates);

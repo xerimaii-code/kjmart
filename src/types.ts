@@ -26,13 +26,14 @@ export interface OrderItem {
 
 export interface Order {
     id: number;
-    date: string;
-    createdAt?: string;
+    date: string; // Effective sort/display date
+    createdAt: string; // Original creation date
+    updatedAt: string; // Last modification date
     customer: Customer;
     itemCount: number;
     total: number;
     memo?: string;
-    completedAt?: string | null; // For backward compatibility
+    completedAt?: string | null;
     completionDetails?: {
         type: 'sms' | 'xls';
         timestamp: string;
