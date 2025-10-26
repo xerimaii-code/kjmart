@@ -1,5 +1,5 @@
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
-import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType } from '../types';
+import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType, SyncLog } from '../types';
 import * as db from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
@@ -167,6 +167,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [products, setProducts] = useState<Product[]>([]);
     const [selectedCameraId, setSelectedCameraIdState] = useLocalStorage<string>('selectedCameraId', null, { deviceSpecific: true });
     const [scanSettings, setScanSettingsState] = useLocalStorage('scanSettings', { vibrateOnScan: true, soundOnScan: true });
+    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage('lastSyncKeys', { customers: null, products: null });
 
     // --- Sync State ---
     const [isSyncing, setIsSyncing] = useState(false);
@@ -314,101 +315,134 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             return;
         }
     
-        const findLastTimestamp = (items: (Customer | Product)[]): string | null => {
-            if (!items || items.length === 0) return null;
-            return items.reduce((latest, item) => {
-                if (!item.lastModified) return latest;
-                return !latest || item.lastModified > latest ? item.lastModified : latest;
-            }, null as string | null);
+        const unsubscribers: (() => void)[] = [];
+        let syncTimeout: number;
+    
+        const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
+            if (changes.length === 0) return;
+    
+            const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
+            const setData = dataType === 'customers' ? setCustomers : setProducts;
+    
+            // Batch cache updates
+            for (const change of changes) {
+                const key = (change as any)[keyField];
+                if (change._deleted) {
+                    await cache.removeCachedItem(dataType, key);
+                } else {
+                    const { _key, timestamp, user, ...itemData } = change;
+                    await cache.addOrUpdateCachedItem(dataType, itemData as any);
+                }
+            }
+    
+            // Batch state updates
+            setData(prevData => {
+                const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
+                changes.forEach(change => {
+                    const key = (change as any)[keyField];
+                    if (change._deleted) {
+                        dataMap.delete(key);
+                    } else {
+                        const { _key, timestamp, user, ...itemData } = change;
+                        dataMap.set(key, itemData);
+                    }
+                });
+                return Array.from(dataMap.values()) as any;
+            });
         };
     
-        const loadFromCacheAndSync = async () => {
+        const runInitialSync = async () => {
             setIsSyncing(true);
             setSyncDataType('full');
+            setSyncProgress(0);
             setSyncStatusText("로컬 캐시 로딩 중...");
     
-            const cachedCustomers = await cache.getCachedData<Customer>('customers');
-            const cachedProducts = await cache.getCachedData<Product>('products');
+            const [cachedCustomers, cachedProducts] = await Promise.all([
+                cache.getCachedData<Customer>('customers'),
+                cache.getCachedData<Product>('products'),
+            ]);
     
-            const customerMap = new Map(cachedCustomers.map(c => [c.comcode, c]));
-            const productMap = new Map(cachedProducts.map(p => [p.barcode, p]));
+            setCustomers(cachedCustomers);
+            setProducts(cachedProducts);
+            setSyncProgress(10);
     
-            setCustomers(Array.from(customerMap.values()));
-            setProducts(Array.from(productMap.values()));
-            
-            setSyncStatusText("서버 변경사항 확인 중...");
-            
-            const lastCustomerTimestamp = findLastTimestamp(cachedCustomers);
-            const lastProductTimestamp = findLastTimestamp(cachedProducts);
-            
-            const customerUpdates = await db.fetchUpdatesSince<Customer>('customers', lastCustomerTimestamp);
-            const productUpdates = await db.fetchUpdatesSince<Product>('products', lastProductTimestamp);
-    
-            if (customerUpdates.length > 0) {
-                customerUpdates.forEach(c => customerMap.set(c.comcode, c));
-                setCustomers(Array.from(customerMap.values()));
-                await cache.appendCachedData('customers', customerUpdates);
-            }
-    
-            if (productUpdates.length > 0) {
-                productUpdates.forEach(p => productMap.set(p.barcode, p));
-                setProducts(Array.from(productMap.values()));
-                await cache.appendCachedData('products', productUpdates);
-            }
-            
-            setSyncStatusText("실시간 동기화 시작...");
-
-            // FIX: Use a new timestamp from right after the sync to avoid re-processing old events.
-            const listenTimestamp = new Date().toISOString();
-
-            const customerUnsubscribe = db.listenForNewChanges<Customer>('customers', listenTimestamp, {
-                onAdd: (customer) => {
-                    setCustomers(prev => {
-                        const newMap = new Map(prev.map(c => [c.comcode, c]));
-                        newMap.set(customer.comcode, customer);
-                        return Array.from(newMap.values());
-                    });
-                    cache.addOrUpdateCachedItem('customers', customer);
-                },
-                onChange: (customer) => {
-                    setCustomers(prev => prev.map(c => c.comcode === customer.comcode ? customer : c));
-                    cache.addOrUpdateCachedItem('customers', customer);
+            syncTimeout = window.setTimeout(() => {
+                if (!initialSyncCompleted) {
+                    console.warn("Sync timed out. Using cached data.");
+                    showAlert("서버 동기화에 시간이 초과되었습니다. 오프라인 데이터로 시작합니다.");
+                    setInitialSyncCompleted(true);
+                    setIsSyncing(false);
                 }
-            });
-
-            const productUnsubscribe = db.listenForNewChanges<Product>('products', listenTimestamp, {
-                 onAdd: (product) => {
-                    setProducts(prev => {
-                        const newMap = new Map(prev.map(p => [p.barcode, p]));
-                        newMap.set(product.barcode, product);
-                        return Array.from(newMap.values());
-                    });
-                    cache.addOrUpdateCachedItem('products', product);
-                },
-                onChange: (product) => {
-                    setProducts(prev => prev.map(p => p.barcode === product.barcode ? product : p));
-                    cache.addOrUpdateCachedItem('products', product);
-                }
-            });
-
-            // FIX: Set completion and stop sync spinner AFTER fetching updates and attaching listeners.
-            setInitialSyncCompleted(true);
-            setIsSyncing(false);
-            setSyncDataType(null);
-            setSyncStatusText("");
+            }, 20000);
     
-            return () => {
-                customerUnsubscribe();
-                productUnsubscribe();
+            const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null) => {
+                const typeName = dataType === 'customers' ? '거래처' : '상품';
+                const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
+    
+                if (!lastKey || !hasCache) { // Full Sync
+                    setSyncStatusText(`${typeName} 전체 데이터 동기화 중...`);
+                    const remoteData = await db.getStore<Customer | Product>(dataType);
+                    if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
+                    await cache.setCachedData(dataType, remoteData as any);
+                    const newLastKey = await db.getLastSyncLogKey(dataType);
+                    setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
+                    return newLastKey;
+                } else { // Incremental Sync
+                    setSyncStatusText(`${typeName} 변경사항 확인 중...`);
+                    const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
+                    if (changes.length > 0) {
+                        setSyncStatusText(`${typeName} ${changes.length}건 업데이트 중...`);
+                        await applyChanges(dataType, changes);
+                    }
+                    if (newLastKey !== lastKey) {
+                        setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
+                    }
+                    return newLastKey;
+                }
             };
+    
+            try {
+                const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers);
+                setSyncProgress(55);
+                unsubscribers.push(
+                    db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
+                        await applyChanges('customers', [newItem]);
+                        setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
+                    })
+                );
+    
+                const finalProductKey = await syncDataType('products', lastSyncKeys.products);
+                setSyncProgress(100);
+                unsubscribers.push(
+                    db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
+                        await applyChanges('products', [newItem]);
+                        setLastSyncKeys(prev => ({ ...prev, products: newKey }));
+                    })
+                );
+    
+                clearTimeout(syncTimeout);
+                setSyncStatusText("동기화 완료");
+                setTimeout(() => {
+                    setInitialSyncCompleted(true);
+                    setIsSyncing(false);
+                }, 300);
+    
+            } catch (error) {
+                console.error("Sync failed:", error);
+                showAlert("데이터 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
+                clearTimeout(syncTimeout);
+                setInitialSyncCompleted(true);
+                setIsSyncing(false);
+            }
         };
     
-        const unsubscribePromise = loadFromCacheAndSync();
-        
+        runInitialSync();
+    
         return () => {
-            unsubscribePromise.then(unsub => unsub && unsub());
+            clearTimeout(syncTimeout);
+            unsubscribers.forEach(unsub => unsub());
         };
-    }, [user]);
+    }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
 
     // --- Modal Actions ---
     const modalsActions = useMemo<ModalsActions>(() => ({
