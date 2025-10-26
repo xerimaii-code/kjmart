@@ -3,7 +3,7 @@ import { AppProvider, useModals, useScanner, useSyncState, useDataState, useData
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import Header from './components/Header';
-import { SpinnerIcon } from './components/Icons';
+import { SpinnerIcon, CheckCircleIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS, loadScript } from './services/dataService';
@@ -113,7 +113,9 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 const InitialSyncLoader: React.FC = () => {
     const { syncProgress, syncStatusText } = useSyncState();
     const [displayedProgress, setDisplayedProgress] = useState(0);
-    const circumference = 2 * Math.PI * 42; // r = 42
+    const radius = 42;
+    const strokeWidth = 10;
+    const circumference = 2 * Math.PI * radius;
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -127,6 +129,7 @@ const InitialSyncLoader: React.FC = () => {
                 if (prev > syncProgress) {
                     return syncProgress; // Snap back if progress goes down
                 }
+                // At this point, prev === syncProgress, so we can stop.
                 clearInterval(interval);
                 return prev;
             });
@@ -134,42 +137,100 @@ const InitialSyncLoader: React.FC = () => {
 
         return () => clearInterval(interval);
     }, [syncProgress]);
-
+    
+    const syncSteps = [
+        { name: '로컬 캐시 로딩', progressThreshold: 0 },
+        { name: '거래처 데이터 동기화', progressThreshold: 10 },
+        { name: '상품 데이터 동기화', progressThreshold: 55 },
+        { name: '앱 준비 완료', progressThreshold: 100 },
+    ];
+    
+    const SyncStep: React.FC<{ label: string; status: 'completed' | 'in-progress' | 'pending' }> = ({ label, status }) => {
+        const getStatusIcon = () => {
+            switch (status) {
+                case 'completed':
+                    return <CheckCircleIcon className="w-5 h-5 text-green-500" />;
+                case 'in-progress':
+                    return <SpinnerIcon className="w-5 h-5 text-blue-500" />;
+                case 'pending':
+                    return <div className="w-5 h-5 flex items-center justify-center"><div className="w-2.5 h-2.5 bg-gray-300 rounded-full"></div></div>;
+            }
+        };
+    
+        return (
+            <li className={`flex items-center gap-3 transition-all duration-300 ${status === 'pending' ? 'text-gray-400' : 'text-gray-800 font-semibold'}`}>
+                {getStatusIcon()}
+                <span>{label}</span>
+            </li>
+        );
+    };
 
     return (
-        <div className="w-full h-full flex flex-col items-center justify-center bg-transparent">
-            <div className="relative w-24 h-24">
+        <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-4">
+            <div className="relative w-36 h-36 mb-4">
                 <svg className="w-full h-full" viewBox="0 0 100 100">
+                     <defs>
+                        <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="rgb(96 165 250)" /> {/* blue-400 */}
+                            <stop offset="100%" stopColor="rgb(59 130 246)" /> {/* blue-500 */}
+                        </linearGradient>
+                    </defs>
                     {/* Background circle */}
                     <circle
                         className="text-gray-200"
-                        strokeWidth="8"
+                        strokeWidth={strokeWidth}
                         stroke="currentColor"
                         fill="transparent"
-                        r="42"
+                        r={radius}
                         cx="50"
                         cy="50"
                     />
                     {/* Progress circle */}
                     <circle
-                        className="text-blue-500"
-                        strokeWidth="8"
+                        strokeWidth={strokeWidth}
                         strokeDasharray={circumference}
                         strokeDashoffset={circumference * (1 - displayedProgress / 100)}
                         strokeLinecap="round"
-                        stroke="currentColor"
+                        stroke="url(#progressGradient)"
                         fill="transparent"
-                        r="42"
+                        r={radius}
                         cx="50"
                         cy="50"
                         style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 0.2s linear' }}
                     />
                 </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-xl font-bold text-gray-700 tabular-nums">
-                    {Math.round(displayedProgress)}%
-                </span>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                    <span className="text-4xl font-bold text-gray-800 tabular-nums">
+                        {Math.round(displayedProgress)}%
+                    </span>
+                    <p className="mt-1 text-sm font-medium text-gray-500 h-5" key={syncStatusText}>
+                        {syncStatusText}
+                    </p>
+                </div>
             </div>
-            <p className="mt-4 text-lg font-semibold text-gray-600 animate-fade-in-up" key={syncStatusText}>{syncStatusText}</p>
+            
+            <div className="mt-4 w-full max-w-xs bg-white/50 backdrop-blur-sm p-5 rounded-xl shadow-lg border border-gray-200/60 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
+                <ul className="space-y-3">
+                    {syncSteps.map((step, index) => {
+                        const nextStep = syncSteps[index + 1];
+                        const isCompleted = syncProgress >= (nextStep?.progressThreshold ?? 100);
+                        const isInProgress = syncProgress >= step.progressThreshold && !isCompleted;
+
+                        let status: 'completed' | 'in-progress' | 'pending' = 'pending';
+                        if (isCompleted) {
+                            status = 'completed';
+                        } else if (isInProgress) {
+                            status = 'in-progress';
+                        }
+                        
+                        if (step.progressThreshold === 100 && syncProgress >= 100) {
+                            status = 'completed';
+                        }
+
+                        return <SyncStep key={step.name} label={step.name} status={status} />;
+                    })}
+                </ul>
+            </div>
         </div>
     );
 };
