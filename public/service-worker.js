@@ -1,7 +1,7 @@
 // public/service-worker.js
 
 // Define cache names for better management and versioning
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const APP_SHELL_CACHE_NAME = `kjmart-app-shell-${CACHE_VERSION}`; // For core app files
 const STATIC_ASSETS_CACHE_NAME = `kjmart-static-assets-${CACHE_VERSION}`; // For fonts, styles from CDNs
 
@@ -10,6 +10,8 @@ const APP_SHELL_URLS = [
   '/',
   '/index.html',
   '/metadata.json',
+  '/index.tsx', // Main app entry point
+  '/src/index.tsx', // Delegated app entry point
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/apple-touch-icon.png',
@@ -26,7 +28,13 @@ self.addEventListener('install', event => {
     caches.open(APP_SHELL_CACHE_NAME)
       .then(cache => {
         console.log('Service Worker: Caching app shell');
-        return cache.addAll(APP_SHELL_URLS);
+        // Cache URLs individually to make it more robust against single failures.
+        const promises = APP_SHELL_URLS.map(url => {
+            return cache.add(url).catch(err => {
+                console.warn(`[SW] Failed to cache ${url}:`, err);
+            });
+        });
+        return Promise.all(promises);
       })
       .then(() => self.skipWaiting())
       .catch(err => console.error("App shell caching failed:", err))
@@ -62,9 +70,9 @@ const staleWhileRevalidate = (request, cacheName) => {
         }
         return networkResponse;
       }).catch(err => {
-          console.warn(`Service Worker: Fetch failed for ${request.url}. Serving from cache if available.`, err);
-          // If network fails, and we have a cached response, we already returned it.
-          // If not, the promise rejects and the browser shows its offline page.
+          console.warn(`Service Worker: Fetch failed for ${request.url}.`, err);
+          // Re-throw the error to ensure the promise rejects if there's no cached response.
+          throw err;
       });
 
       // Return cached response immediately if available, otherwise wait for the network.
@@ -99,8 +107,8 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(request)
         .catch(() => {
-            console.log('Service Worker: Serving navigation request from cache.');
-            return caches.match('/'); // Serve the main entry point from cache
+            console.log('Service Worker: Serving navigation request from cache for offline access.');
+            return caches.match('/index.html'); // Serve the main HTML shell from cache
         })
     );
     return;
