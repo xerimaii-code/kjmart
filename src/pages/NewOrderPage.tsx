@@ -523,8 +523,13 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             <TrashIcon className="w-5 h-5" />
                             <span>삭제</span>
                         </button>
-                        <button onClick={handleSaveOrder} disabled={isSaving || items.length === 0 || !selectedCustomer} className="h-10 bg-blue-600 text-white rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
-                            {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '발주 저장'}
+                        <button onClick={handleSaveOrder} disabled={isSaving || items.length === 0 || !selectedCustomer} className="relative h-10 bg-blue-600 text-white rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
+                            <span className={isSaving ? 'opacity-0' : 'opacity-100'}>발주 저장</span>
+                            {isSaving && (
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <SpinnerIcon className="w-6 h-6"/>
+                                </div>
+                            )}
                         </button>
                     </div>
                 </div>

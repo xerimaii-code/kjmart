@@ -452,8 +452,13 @@ const OrderDetailModal: React.FC = () => {
                                 <button onClick={handleClose} className="px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-2">
                                     닫기
                                 </button>
-                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
-                                    {isSaving ? <SpinnerIcon className="w-6 h-6"/> : '변경사항 저장'}
+                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="relative bg-blue-600 text-white p-3 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
+                                    <span className={isSaving ? 'opacity-0' : 'opacity-100'}>변경사항 저장</span>
+                                    {isSaving && (
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <SpinnerIcon className="w-6 h-6"/>
+                                        </div>
+                                    )}
                                 </button>
                             </div>
                         )}

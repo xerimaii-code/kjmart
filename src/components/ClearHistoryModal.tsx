@@ -130,9 +130,14 @@ const ClearHistoryModal: React.FC<ClearHistoryModalProps> = ({ isOpen, onClose }
                     <button
                         onClick={handleConfirm}
                         disabled={isLoading || (clearOption === 'beforeDate' && !date)}
-                        className="text-white px-6 py-3 rounded-xl font-bold bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 transition active:scale-95 disabled:bg-rose-400 disabled:cursor-not-allowed flex items-center justify-center"
+                        className="relative text-white px-6 py-3 rounded-xl font-bold bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 transition active:scale-95 disabled:bg-rose-400 disabled:cursor-not-allowed flex items-center justify-center"
                     >
-                        {isLoading ? <SpinnerIcon className="w-6 h-6"/> : '삭제 실행'}
+                        <span className={isLoading ? 'opacity-0' : 'opacity-100'}>삭제 실행</span>
+                        {isLoading && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <SpinnerIcon className="w-6 h-6"/>
+                            </div>
+                        )}
                     </button>
                 </div>
             </div>

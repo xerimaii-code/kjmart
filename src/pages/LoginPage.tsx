@@ -113,9 +113,14 @@ const LoginPage: React.FC = () => {
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
+                        className="relative w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95"
                     >
-                        {isLoading ? <SpinnerIcon className="w-6 h-6" /> : '로그인'}
+                        <span className={isLoading ? 'opacity-0' : 'opacity-100'}>로그인</span>
+                        {isLoading && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <SpinnerIcon className="w-6 h-6" />
+                            </div>
+                        )}
                     </button>
                 </form>
             </div>
