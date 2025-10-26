@@ -112,23 +112,64 @@ export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[
     return () => itemsRef.off('value', listener);
 };
 
-export const listenToValue = <T>(path: string, callback: (data: T | null) => void): (() => void) => {
-     if (!isFirebaseInitialized || !db) {
-         callback(null);
-         return () => {};
-     }
-    const dataRef = db.ref(path);
-    // FIX: Use v8 compat API for listeners
-    const listener = dataRef.on('value', (snapshot) => {
-        const data = snapshot.val();
-        callback(data);
-    }, (error) => {
-        console.error(`Error listening to ${path}:`, error);
-        callback(null);
+export const fetchUpdatesSince = async <T extends Customer | Product>(storeName: string, timestamp: string | null): Promise<T[]> => {
+    if (!isInitialized() || !db) return [];
+    
+    let query = db.ref(storeName).orderByChild('lastModified');
+    if (timestamp) {
+        // startAt is inclusive, so we need to handle the first item carefully if it matches the timestamp.
+        // A simple way is to fetch and filter, or add a tiny bit to the timestamp string if possible,
+        // but for ISO strings, direct comparison works.
+        query = query.startAt(timestamp);
+    }
+
+    const snapshot = await query.get();
+    if (!snapshot.exists()) return [];
+
+    const updates: T[] = [];
+    snapshot.forEach(childSnapshot => {
+        const item = childSnapshot.val() as T;
+        // Exclude the item that exactly matches the starting timestamp to avoid reprocessing it.
+        if (item.lastModified !== timestamp) {
+            updates.push(item);
+        }
     });
-    // FIX: Unsubscribe using off() method
-    return () => dataRef.off('value', listener);
+    return updates;
 };
+
+export const listenForNewChanges = <T extends Customer | Product>(
+    storeName: string, 
+    timestamp: string | null,
+    callbacks: { 
+        onAdd: (item: T) => void, 
+        onChange: (item: T) => void,
+    }
+): (() => void) => {
+    if (!isInitialized() || !db) return () => {};
+
+    let query = db.ref(storeName).orderByChild('lastModified');
+    if (timestamp) {
+        query = query.startAt(timestamp);
+    }
+    
+    const addListener = query.on('child_added', (snapshot) => {
+        const item = snapshot.val() as T;
+        // Ignore the initial event for the item at the exact start timestamp
+        if (item.lastModified !== timestamp) {
+            callbacks.onAdd(item);
+        }
+    });
+
+    const changeListener = query.on('child_changed', (snapshot) => {
+        callbacks.onChange(snapshot.val() as T);
+    });
+    
+    return () => {
+        query.off('child_added', addListener);
+        query.off('child_changed', changeListener);
+    };
+}
+
 
 // --- Data Fetching ---
 export const getStore = async <T>(storeName: string): Promise<T[]> => {

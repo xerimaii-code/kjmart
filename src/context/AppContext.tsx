@@ -18,6 +18,7 @@ import 'firebase/compat/database';
 export interface AddItemModalPayload {
     product: Product;
     existingItem: OrderItem | null;
+    // FIX: Corrected syntax from 'from => void' to '=> void'
     onAdd: (details: { quantity: number; unit: '개' | '박스'; memo?: string }) => void;
     onNextScan?: () => void;
     trigger: 'scan' | 'search';
@@ -241,7 +242,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSyncStatusText(message);
             };
 
-            const diffResult = await processExcelFileInWorker(file, dataType, existingData, user?.email || 'unknown', onProgress);
+            const workerDataType = dataType.slice(0, -1) as 'customer' | 'product';
+            const diffResult = await processExcelFileInWorker(file, workerDataType, existingData, user?.email || 'unknown', onProgress);
             
             const toAddOrUpdate = diffResult.toAddOrUpdate as (Customer[] | Product[]);
             const toDelete = diffResult.toDelete;
@@ -312,60 +314,101 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setInitialSyncCompleted(!user);
             return;
         }
-
-        let customerUnsubscribe: (() => void) | null = null;
-        let productUnsubscribe: (() => void) | null = null;
-
-        const performInitialSync = async () => {
+    
+        const findLastTimestamp = (items: (Customer[] | Product[])): string | null => {
+            if (!items || items.length === 0) return null;
+            return items.reduce((latest, item) => {
+                if (!item.lastModified) return latest;
+                return !latest || item.lastModified > latest ? item.lastModified : latest;
+            }, null as string | null);
+        };
+    
+        const loadFromCacheAndSync = async () => {
             setIsSyncing(true);
             setSyncDataType('full');
+            setSyncStatusText("로컬 캐시 로딩 중...");
+    
+            const cachedCustomers = await cache.getCachedData<Customer>('customers');
+            const cachedProducts = await cache.getCachedData<Product>('products');
+    
+            const customerMap = new Map(cachedCustomers.map(c => [c.comcode, c]));
+            const productMap = new Map(cachedProducts.map(p => [p.barcode, p]));
+    
+            setCustomers(Array.from(customerMap.values()));
+            setProducts(Array.from(productMap.values()));
             
-            try {
-                // Step 1: Load from cache
-                setSyncStatusText("로컬 캐시 로딩 중...");
-                const cachedCustomers = await cache.getCachedData<Customer>('customers');
-                const cachedProducts = await cache.getCachedData<Product>('products');
-                if (cachedCustomers.length > 0) setCustomers(cachedCustomers);
-                if (cachedProducts.length > 0) setProducts(cachedProducts);
-                
-                // Step 2: Full sync from remote
-                setSyncStatusText("서버 데이터 동기화 중 (거래처)...");
-                const remoteCustomers = await db.getStore<Customer>('customers');
-                await cache.setCachedData('customers', remoteCustomers);
-                setCustomers(remoteCustomers);
-                
-                setSyncStatusText("서버 데이터 동기화 중 (상품)...");
-                const remoteProducts = await db.getStore<Product>('products');
-                await cache.setCachedData('products', remoteProducts);
-                setProducts(remoteProducts);
-
-                // Step 3: Listen for changes
-                customerUnsubscribe = db.listenToValue<Record<string, Customer>>('customers', (data) => {
-                    if (data) setCustomers(Object.values(data));
-                });
-                productUnsubscribe = db.listenToValue<Record<string, Product>>('products', (data) => {
-                    if (data) setProducts(Object.values(data));
-                });
-                
+            if (cachedCustomers.length > 0 || cachedProducts.length > 0) {
                 setInitialSyncCompleted(true);
-            } catch (error) {
-                console.error("Initial sync failed:", error);
-                showAlert("초기 데이터 동기화에 실패했습니다. 캐시된 데이터로 앱을 사용합니다.");
-                setInitialSyncCompleted(true); // Allow app usage with cached data
-            } finally {
-                setIsSyncing(false);
-                setSyncDataType(null);
-                setSyncStatusText("");
             }
+    
+            setSyncStatusText("서버 변경사항 확인 중...");
+            
+            const lastCustomerTimestamp = findLastTimestamp(cachedCustomers);
+            const lastProductTimestamp = findLastTimestamp(cachedProducts);
+            
+            const customerUpdates = await db.fetchUpdatesSince<Customer>('customers', lastCustomerTimestamp);
+            const productUpdates = await db.fetchUpdatesSince<Product>('products', lastProductTimestamp);
+    
+            let finalCustomerTimestamp = lastCustomerTimestamp;
+            if (customerUpdates.length > 0) {
+                customerUpdates.forEach(c => customerMap.set(c.comcode, c));
+                setCustomers(Array.from(customerMap.values()));
+                await cache.appendCachedData('customers', customerUpdates);
+                finalCustomerTimestamp = findLastTimestamp(customerUpdates) || lastCustomerTimestamp;
+            }
+    
+            let finalProductTimestamp = lastProductTimestamp;
+            if (productUpdates.length > 0) {
+                productUpdates.forEach(p => productMap.set(p.barcode, p));
+                setProducts(Array.from(productMap.values()));
+                await cache.appendCachedData('products', productUpdates);
+                finalProductTimestamp = findLastTimestamp(productUpdates) || lastProductTimestamp;
+            }
+            
+            setSyncStatusText("실시간 동기화 시작...");
+            setInitialSyncCompleted(true);
+            setIsSyncing(false);
+            setSyncDataType(null);
+            setSyncStatusText("");
+
+            const customerUnsubscribe = db.listenForNewChanges<Customer>('customers', finalCustomerTimestamp, {
+                onAdd: (customer) => {
+                    customerMap.set(customer.comcode, customer);
+                    setCustomers(prev => [...prev.filter(c => c.comcode !== customer.comcode), customer]);
+                    cache.addOrUpdateCachedItem('customers', customer);
+                },
+                onChange: (customer) => {
+                    customerMap.set(customer.comcode, customer);
+                    setCustomers(prev => prev.map(c => c.comcode === customer.comcode ? customer : c));
+                    cache.addOrUpdateCachedItem('customers', customer);
+                }
+            });
+
+            const productUnsubscribe = db.listenForNewChanges<Product>('products', finalProductTimestamp, {
+                 onAdd: (product) => {
+                    productMap.set(product.barcode, product);
+                    setProducts(prev => [...prev.filter(p => p.barcode !== product.barcode), product]);
+                    cache.addOrUpdateCachedItem('products', product);
+                },
+                onChange: (product) => {
+                    productMap.set(product.barcode, product);
+                    setProducts(prev => prev.map(p => p.barcode === product.barcode ? product : p));
+                    cache.addOrUpdateCachedItem('products', product);
+                }
+            });
+    
+            return () => {
+                customerUnsubscribe();
+                productUnsubscribe();
+            };
         };
-
-        performInitialSync();
-
+    
+        const unsubscribePromise = loadFromCacheAndSync();
+        
         return () => {
-            if (customerUnsubscribe) customerUnsubscribe();
-            if (productUnsubscribe) productUnsubscribe();
+            unsubscribePromise.then(unsub => unsub && unsub());
         };
-    }, [user, showAlert]);
+    }, [user]);
 
     // --- Modal Actions ---
     const modalsActions = useMemo<ModalsActions>(() => ({
