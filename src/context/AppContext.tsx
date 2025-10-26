@@ -447,7 +447,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 // FIX: This block is refactored for type safety to address the error.
                 if (dataType === 'customers') {
                     const existingData = dataState.customers;
-                    const dataMap = new Map(existingData.map(item => [item.comcode, item]));
+                    // FIX: Explicitly type the Map to aid TypeScript's type inference.
+                    const dataMap = new Map<string, Customer>(existingData.map(item => [item.comcode, item]));
                     (diffResult.toAddOrUpdate as Customer[]).forEach(item => {
                         const itemWithMeta = { ...item, lastModified: nowISO };
                         dataMap.set(item.comcode, itemWithMeta);
@@ -460,7 +461,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     await cache.setCachedData('customers', updatedData);
                 } else {
                     const existingData = dataState.products;
-                    const dataMap = new Map(existingData.map(item => [item.barcode, item]));
+                    // FIX: Explicitly type the Map to aid TypeScript's type inference.
+                    const dataMap = new Map<string, Product>(existingData.map(item => [item.barcode, item]));
                     (diffResult.toAddOrUpdate as Product[]).forEach(item => {
                         const itemWithMeta = { ...item, lastModified: nowISO };
                         dataMap.set(item.barcode, itemWithMeta);

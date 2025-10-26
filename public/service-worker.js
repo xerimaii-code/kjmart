@@ -1,20 +1,112 @@
-// A minimal, no-op service worker that exists only to satisfy PWA criteria.
-// It allows the app to be installed ("Add to Home Screen") and run in standalone mode.
-// It performs no caching and will not interfere with network requests.
+// public/service-worker.js
 
-self.addEventListener('install', (event) => {
-  // Using skipWaiting() ensures the new service worker activates immediately.
-  self.skipWaiting(); 
-  console.log('Service Worker: Installed (No-Op)');
+// Define cache names for better management and versioning
+const CACHE_VERSION = 'v3';
+const APP_SHELL_CACHE_NAME = `kjmart-app-shell-${CACHE_VERSION}`; // For core app files
+const STATIC_ASSETS_CACHE_NAME = `kjmart-static-assets-${CACHE_VERSION}`; // For fonts, styles from CDNs
+
+// Core app files to be cached on install
+const APP_SHELL_URLS = [
+  '/',
+  '/index.html',
+  '/metadata.json',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/icons/apple-touch-icon.png',
+];
+
+const ALL_CACHE_NAMES = [
+  APP_SHELL_CACHE_NAME,
+  STATIC_ASSETS_CACHE_NAME
+];
+
+// Install: Cache the app shell
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(APP_SHELL_CACHE_NAME)
+      .then(cache => {
+        console.log('Service Worker: Caching app shell');
+        return cache.addAll(APP_SHELL_URLS);
+      })
+      .then(() => self.skipWaiting())
+      .catch(err => console.error("App shell caching failed:", err))
+  );
 });
 
-self.addEventListener('activate', (event) => {
-  // Take control of the page immediately.
-  event.waitUntil(self.clients.claim());
-  console.log('Service Worker: Activated (No-Op)');
+// Activate: Clean up old caches
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.map(cacheName => {
+          // If the cache name is not in our current list of caches, delete it.
+          if (!ALL_CACHE_NAMES.includes(cacheName)) {
+            console.log('Service Worker: Deleting old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
-self.addEventListener('fetch', (event) => {
-  // Do nothing. The browser will handle the request as if there were no service worker.
-  // This is the default behavior when event.respondWith() is not called.
+// A helper function to implement the Stale-While-Revalidate strategy
+const staleWhileRevalidate = (request, cacheName) => {
+  return caches.open(cacheName).then(cache => {
+    return cache.match(request).then(cachedResponse => {
+      const fetchPromise = fetch(request).then(networkResponse => {
+        // Check for a valid response to cache (e.g., status 200)
+        // Opaque responses (type: 'opaque') from cross-origin requests have status 0, cache them too.
+        if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
+            cache.put(request, networkResponse.clone());
+        }
+        return networkResponse;
+      }).catch(err => {
+          console.warn(`Service Worker: Fetch failed for ${request.url}. Serving from cache if available.`, err);
+          // If network fails, and we have a cached response, we already returned it.
+          // If not, the promise rejects and the browser shows its offline page.
+      });
+
+      // Return cached response immediately if available, otherwise wait for the network.
+      return cachedResponse || fetchPromise;
+    });
+  });
+};
+
+// Fetch: Apply caching strategies based on request type
+self.addEventListener('fetch', event => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  // Ignore non-GET requests and browser extension requests
+  if (request.method !== 'GET' || !request.url.startsWith('http')) {
+    return;
+  }
+
+  // Ignore Firebase/Google Auth requests to let the SDKs handle them.
+  if (url.hostname.includes('firebaseio.com') || url.hostname.includes('googleapis.com')) {
+    return;
+  }
+  
+  // Strategy for Google Fonts, Tailwind, and other CDNs: Stale-While-Revalidate
+  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com' || url.hostname === 'cdn.tailwindcss.com' || url.hostname === 'aistudiocdn.com') {
+    event.respondWith(staleWhileRevalidate(request, STATIC_ASSETS_CACHE_NAME));
+    return;
+  }
+
+  // Strategy for navigation requests: Network first, falling back to cache.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .catch(() => {
+            console.log('Service Worker: Serving navigation request from cache.');
+            return caches.match('/'); // Serve the main entry point from cache
+        })
+    );
+    return;
+  }
+
+  // Default Strategy for app's own assets (JS, CSS, etc.): Stale-While-Revalidate
+  // This ensures even pre-cached assets get updated in the background.
+  event.respondWith(staleWhileRevalidate(request, APP_SHELL_CACHE_NAME));
 });
