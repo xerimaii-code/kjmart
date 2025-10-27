@@ -9,10 +9,7 @@ const STATIC_ASSETS_CACHE_NAME = `kjmart-static-assets-${CACHE_VERSION}`; // For
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
-  '/metadata.json',
-  '/icons/icon192.png',
-  '/icons/icon512.png',
-  
+  '/metadata.json'
 ];
 
 const ALL_CACHE_NAMES = [
