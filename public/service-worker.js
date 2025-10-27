@@ -12,7 +12,7 @@ const APP_SHELL_URLS = [
   '/metadata.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
-  '/icons/apple-touch-icon.png',
+  
 ];
 
 const ALL_CACHE_NAMES = [
