@@ -186,6 +186,11 @@ const OrderDetailModal: React.FC = () => {
     useEffect(() => { itemsRef.current = items; }, [items]);
 
     const isCompleted = useMemo(() => !!originalOrder?.completedAt || !!originalOrder?.completionDetails, [originalOrder]);
+    const isUpdated = useMemo(() => {
+        if (!originalOrder?.createdAt || !originalOrder?.updatedAt) return false;
+        // Add a small buffer to avoid flagging changes made within seconds of creation
+        return new Date(originalOrder.updatedAt).getTime() > new Date(originalOrder.createdAt).getTime() + 1000;
+    }, [originalOrder]);
     
     // --- Draft Logic ---
     useEffect(() => {
@@ -374,7 +379,12 @@ const OrderDetailModal: React.FC = () => {
                 <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">
                     <div className="text-center">
                         <h2 className="text-lg font-bold text-gray-800 truncate" title={originalOrder.customer.name}>{originalOrder.customer.name}</h2>
-                        <p className="text-sm text-gray-500">{new Date(originalOrder.date).toLocaleString('ko-KR')}</p>
+                        <p className="text-sm text-gray-500">{new Date(originalOrder.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                        {isUpdated && (
+                            <p className="text-xs text-gray-400 mt-0.5">
+                                최초 발주일: {new Date(originalOrder.createdAt).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </p>
+                        )}
                     </div>
                     <button onClick={handleClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
                         <RemoveIcon className="w-6 h-6"/>
