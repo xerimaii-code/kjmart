@@ -352,11 +352,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
     const handleAddProductFromSearch = useCallback((product: Product) => {
-        // Prevent the onBlur timeout from firing and hiding the modal before it can open.
-        if (productSearchBlurTimeout.current) {
-            clearTimeout(productSearchBlurTimeout.current);
-        }
-
         const existingItem = items.find(item => item.barcode === product.barcode);
         openAddItemModal({
             product,
@@ -367,6 +362,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         });
         setProductSearch('');
         setShowProductDropdown(false);
+        productSearchInputRef.current?.blur();
     }, [items, openAddItemModal, addOrUpdateItem, isBoxUnitDefault]);
 
 

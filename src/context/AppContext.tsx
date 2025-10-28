@@ -338,52 +338,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const unsubscribers: (() => void)[] = [];
     
         const runInitialLoadAndSync = async () => {
-             // Only show the full-screen loader on the very first load sequence.
+            // Only show full-screen loader on the very first load.
+            // On subsequent syncs (e.g. reconnection), the header spinner is shown via isSyncing.
             if (!initialSyncCompleted) {
                 setIsSyncing(true);
                 setSyncStatusText("로컬 캐시 로딩 중...");
                 setSyncProgress(10);
             } else {
-                // For subsequent syncs (e.g., reconnection), show the header spinner.
-                setIsSyncing(true);
-            }
-
-            // --- OFFLINE STARTUP PATH ---
-            // Direct check of navigator.onLine is more reliable at startup than state.
-            if (!navigator.onLine) {
-                const [cachedCustomers, cachedProducts] = await Promise.all([
-                    cache.getCachedData<Customer>('customers'),
-                    cache.getCachedData<Product>('products'),
-                ]);
-                setCustomers(cachedCustomers);
-                setProducts(cachedProducts);
-
-                setSyncStatusText("오프라인 모드");
-                if (!initialSyncCompleted) {
-                    setSyncProgress(100);
-                    setTimeout(() => {
-                        setInitialSyncCompleted(true);
-                        setIsSyncing(false);
-                    }, 500);
-                } else {
-                    setIsSyncing(false); // Just stop the header spinner
-                }
-                
-                if (cachedCustomers.length === 0 && cachedProducts.length === 0 && !initialSyncCompleted) {
-                     showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
-                }
-                return; // Stop execution, do not attempt online sync.
+                 setIsSyncing(true);
             }
     
-            // Always load local cache first.
+            // --- STEP 1: ALWAYS load from local cache first for a fast, offline-ready startup.
             const [cachedCustomers, cachedProducts] = await Promise.all([
                 cache.getCachedData<Customer>('customers'),
                 cache.getCachedData<Product>('products'),
             ]);
             setCustomers(cachedCustomers);
             setProducts(cachedProducts);
-            
-            // --- ONLINE SYNC PATH ---
+    
+            // --- STEP 2: Check network status AFTER loading cache.
+            if (!navigator.onLine) {
+                setSyncStatusText("오프라인 모드");
+                if (!initialSyncCompleted) {
+                    setSyncProgress(100);
+                    // Defer completion to allow UI to render "Offline Mode" message.
+                    setTimeout(() => {
+                        setInitialSyncCompleted(true);
+                        setIsSyncing(false);
+                    }, 500);
+                } else {
+                    setIsSyncing(false); // Just turn off header spinner.
+                }
+                
+                // Show an alert if this is the very first run and there's no data.
+                if (cachedCustomers.length === 0 && cachedProducts.length === 0 && !initialSyncCompleted) {
+                     showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
+                }
+                return; // Stop execution to prevent online sync attempts.
+            }
+    
+            // --- STEP 3: If online, proceed with background sync.
             setSyncDataType('full');
             if (!initialSyncCompleted) {
                 setSyncStatusText("서버와 동기화 중...");
