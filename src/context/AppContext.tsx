@@ -347,18 +347,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 // For subsequent syncs (e.g., reconnection), show the header spinner.
                 setIsSyncing(true);
             }
-    
-            // Always load local cache first.
-            const [cachedCustomers, cachedProducts] = await Promise.all([
-                cache.getCachedData<Customer>('customers'),
-                cache.getCachedData<Product>('products'),
-            ]);
-            setCustomers(cachedCustomers);
-            setProducts(cachedProducts);
-    
+
             // --- OFFLINE STARTUP PATH ---
             // Direct check of navigator.onLine is more reliable at startup than state.
             if (!navigator.onLine) {
+                const [cachedCustomers, cachedProducts] = await Promise.all([
+                    cache.getCachedData<Customer>('customers'),
+                    cache.getCachedData<Product>('products'),
+                ]);
+                setCustomers(cachedCustomers);
+                setProducts(cachedProducts);
+
                 setSyncStatusText("오프라인 모드");
                 if (!initialSyncCompleted) {
                     setSyncProgress(100);
@@ -375,6 +374,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
                 return; // Stop execution, do not attempt online sync.
             }
+    
+            // Always load local cache first.
+            const [cachedCustomers, cachedProducts] = await Promise.all([
+                cache.getCachedData<Customer>('customers'),
+                cache.getCachedData<Product>('products'),
+            ]);
+            setCustomers(cachedCustomers);
+            setProducts(cachedProducts);
             
             // --- ONLINE SYNC PATH ---
             setSyncDataType('full');
