@@ -404,8 +404,29 @@ const AppRouter: React.FC = () => {
 const App: React.FC = () => {
     useEffect(() => {
         // Preload scanner library for faster modal opening.
-        // The script is loaded once and cached by the browser and our loadScript utility.
         loadScript(ZXING_CDN).catch(err => console.warn("Failed to preload scanner library:", err));
+
+        // Register the service worker.
+        const registerServiceWorker = () => {
+            const swUrl = `${location.origin}/service-worker.js`;
+            navigator.serviceWorker.register(swUrl)
+              .then(registration => {
+                console.log('Service Worker registered successfully with scope:', registration.scope);
+              })
+              .catch(err => {
+                console.error('Service Worker registration failed:', err);
+              });
+        };
+        
+        if ('serviceWorker' in navigator) {
+            // The 'load' event may have already fired. We check the document.readyState.
+            // Since this useEffect runs after the app is mounted, it's very likely to be 'complete'.
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+              registerServiceWorker();
+            } else {
+              window.addEventListener('load', registerServiceWorker);
+            }
+        }
     }, []);
 
     return (

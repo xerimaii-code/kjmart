@@ -7,6 +7,7 @@ import { useOrderManager, isSaleActive } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from '../components/SearchDropdown';
+import ProductSearchResultItem from '../components/ProductSearchResultItem';
 
 const DRAFT_KEY = 'new-order-draft';
 const MAX_SEARCH_RESULTS = 50;
@@ -86,62 +87,6 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove }: { item: OrderIte
     );
 });
 OrderItemRow.displayName = 'OrderItemRow';
-
-const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: Product) => void }> = ({ product, onClick }) => {
-    const saleIsActive = isSaleActive(product.saleEndDate);
-    const hasSalePrice = !!product.salePrice;
-
-    return (
-        <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
-            <div className="flex flex-col items-start w-full gap-y-1">
-                {/* Line 1: Product Name, Sale Badge */}
-                <div className="flex items-center gap-2 flex-wrap w-full">
-                    <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
-                    {saleIsActive && hasSalePrice && (
-                        <span className="text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5 leading-none">SALE</span>
-                    )}
-                </div>
-
-                {/* Line 2: Barcode */}
-                <p className="text-sm text-gray-500">{product.barcode}</p>
-
-                {/* Line 3: Prices */}
-                <div className="text-sm flex items-baseline gap-x-1.5 flex-wrap">
-                    <span className="text-gray-600 font-semibold">{product.costPrice?.toLocaleString()}원</span>
-                    <span className="text-gray-400">/</span>
-                    <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                        {product.sellingPrice?.toLocaleString()}원
-                    </span>
-                    {hasSalePrice && (
-                        <span 
-                            className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
-                            style={!saleIsActive ? { fontSize: '80%' } : {}}
-                        >
-                            {product.salePrice}원
-                        </span>
-                    )}
-                </div>
-
-                {/* Line 4: Event Info */}
-                {(product.saleEndDate || product.supplierName) && (
-                    <div className="text-xs text-gray-500">
-                        <div className="flex items-center gap-x-3">
-                            {product.saleEndDate && (
-                                <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
-                                    ~{product.saleEndDate}
-                                </span>
-                            )}
-                            {product.supplierName && (
-                                <span>{product.supplierName}</span>
-                            )}
-                        </div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
 
 const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const { customers, products } = useDataState();
@@ -287,7 +232,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         resetItems();
         setMemo('');
         setIsBoxUnitDefault(false);
-        setIsSaving(false);
 
         if (options?.preventFocus) {
              if (document.activeElement instanceof HTMLElement) {
@@ -330,12 +274,15 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 memo: memo.trim(),
             });
             setLastModifiedOrderId(newOrderId);
-            await deleteDraft(DRAFT_KEY).catch(err => console.warn("Could not delete draft after saving order:", err));
+            
+            deleteDraft(DRAFT_KEY).catch(err => {
+                console.warn("Background draft deletion failed, but order was saved.", err);
+            });
+            
             resetOrder({ preventFocus: true });
         } catch (error) {
             console.error("Failed to save order:", error);
-            showAlert("발주 저장에 실패했습니다.");
-            setIsSaving(false);
+            showAlert("발주 저장에 실패했습니다. 작성 중인 내용은 임시 저장되어 다음에 다시 시도할 수 있습니다.");
         } finally {
             setIsSaving(false);
         }

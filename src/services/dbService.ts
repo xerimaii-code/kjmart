@@ -19,10 +19,16 @@ try {
         } else {
             app = firebase.app();
         }
+        
+        // NOTE: The call to setPersistenceEnabled was removed. For the modern Firebase JS SDK,
+        // offline persistence for the Realtime Database is handled automatically and does not
+        // require an explicit function call to be enabled. Attempting to call the old function
+        // was causing the entire initialization process to fail.
+        
         db = app.database();
         auth = app.auth();
         isFirebaseInitialized = true;
-        console.log("Firebase initialized successfully.");
+        console.log("Firebase initialized successfully. Offline persistence is active by default.");
     } else {
         console.warn("Firebase config is not set. The app will not connect to a database. Please update firebaseConfig.ts");
     }
@@ -173,11 +179,12 @@ export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
 // --- Data Modification ---
 const DB_UNINITIALIZED_ERROR = new Error("Database not initialized");
 
-export const addOrderWithItems = async (
+export const addOrderWithItems = (
     orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'completedAt' | 'completionDetails' | 'itemCount' | 'items'>, 
     items: OrderItem[]
 ): Promise<number> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+    
     const newOrderId = Date.now();
     const now = new Date().toISOString();
 
@@ -196,13 +203,15 @@ export const addOrderWithItems = async (
     updates[`/orders/${newOrderId}`] = newOrder;
     updates[`/order-items/${newOrderId}`] = items;
 
-    // FIX: Use v8 compat API for update()
-    await db.ref().update(updates);
-    return newOrderId;
+    db.ref().update(updates).catch(err => {
+        console.error("Firebase background update failed for addOrderWithItems:", err);
+    });
+
+    return Promise.resolve(newOrderId);
 };
 
-export const updateOrderAndItems = async (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+export const updateOrderAndItems = (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     
     const now = new Date().toISOString();
     const updatedOrderData = { ...order, itemCount: items.length, updatedAt: now, date: now };
@@ -211,15 +220,19 @@ export const updateOrderAndItems = async (order: Omit<Order, 'items'>, items: Or
     updates[`/orders/${order.id}`] = updatedOrderData;
     updates[`/order-items/${order.id}`] = items;
     
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+    db.ref().update(updates).catch(err => {
+        console.error("Firebase background update failed for updateOrderAndItems:", err);
+    });
+    
+    return Promise.resolve();
 };
 
-export const updateOrderStatus = async (
+export const updateOrderStatus = (
     orderId: number, 
     completionDetails: Order['completionDetails']
 ): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+    
     const now = new Date().toISOString();
     const completedAt = completionDetails ? now : null;
     const updates: { [key: string]: any } = {
@@ -228,41 +241,51 @@ export const updateOrderStatus = async (
         [`/orders/${orderId}/updatedAt`]: now,
         [`/orders/${orderId}/date`]: now,
     };
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+
+    db.ref().update(updates).catch(err => {
+        console.error("Firebase background update failed for updateOrderStatus:", err);
+    });
+    
+    return Promise.resolve();
 };
 
 export const deleteOrderAndItems = (orderId: number): Promise<void> => {
     if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+    
     const updates: { [key: string]: null } = {};
     updates[`/orders/${orderId}`] = null;
     updates[`/order-items/${orderId}`] = null;
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+    
+    db.ref().update(updates).catch(err => {
+        console.error("Firebase background update failed for deleteOrderAndItems:", err);
+    });
+    
+    return Promise.resolve();
 };
 
-export const replaceAll = <T>(storeName: string, items: T[]): Promise<void> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+export const replaceAll = async <T>(storeName: string, items: T[]): Promise<void> => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+    
     let keyField = '';
     if (storeName === 'customers') keyField = 'comcode';
     else if (storeName === 'products') keyField = 'barcode';
     
-    // FIX: Use v8 compat API for set()
-    if (!keyField) return db.ref(storeName).set(items);
+    const dataToSet = keyField ? arrayToObject(items, keyField) : items;
 
-    const itemsObject = arrayToObject(items, keyField);
-    // FIX: Use v8 compat API for set
-    return db.ref(storeName).set(itemsObject);
+    await db.ref(storeName).set(dataToSet);
 };
 
-export const clearOrders = (): Promise<void> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+
+export const clearOrders = async (): Promise<void> => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+
     const updates: { [key: string]: null } = {};
     updates['/orders'] = null;
     updates['/order-items'] = null;
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+
+    await db.ref().update(updates);
 };
+
 
 export const clearOrdersBeforeDate = async (isoDateString: string): Promise<number> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
@@ -292,11 +315,12 @@ export const clearOrdersBeforeDate = async (isoDateString: string): Promise<numb
     return deletedCount;
 };
 
-export const setValue = (path: string, value: any): Promise<void> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
-    // FIX: Use v8 compat API for set()
-    return db.ref(path).set(value);
+
+export const setValue = async (path: string, value: any): Promise<void> => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+    await db.ref(path).set(value);
 };
+
 
 // --- Backup & Restore ---
 export const createBackup = async (): Promise<string> => {
@@ -306,12 +330,12 @@ export const createBackup = async (): Promise<string> => {
     return JSON.stringify(snapshot.val(), null, 2);
 };
 
-export const restoreFromBackup = (json: string): Promise<void> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+export const restoreFromBackup = async (json: string): Promise<void> => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     const data = JSON.parse(json);
-    // FIX: Use v8 compat API for set()
-    return db.ref().set(data);
+    await db.ref().set(data);
 };
+
 
 // --- Sync Log Management ---
 

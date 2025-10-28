@@ -152,21 +152,5 @@
         </div>
     </div>
     <script type="module" src="/index.tsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          // Construct an absolute URL for the service worker to avoid cross-origin issues
-          // in certain hosting environments like AI Studio's preview.
-          const swUrl = `${location.origin}/service-worker.js`;
-          navigator.serviceWorker.register(swUrl)
-            .then(registration => {
-              console.log('Service Worker registered successfully with scope:', registration.scope);
-            })
-            .catch(err => {
-              console.error('Service Worker registration failed:', err);
-            });
-        });
-      }
-    </script>
 </body>
 </html>

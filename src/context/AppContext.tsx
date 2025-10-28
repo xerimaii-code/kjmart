@@ -197,9 +197,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Data Actions ---
     const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'itemCount' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
         const newOrderId = await db.addOrderWithItems(orderData, orderData.items);
-        showToast('신규 발주가 저장되었습니다.', 'success');
         return newOrderId;
-    }, [showToast]);
+    }, []);
 
     const updateOrder = useCallback(async (order: Order) => {
         if (!order.items) throw new Error("Order items are missing for update.");
@@ -208,8 +207,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const deleteOrder = useCallback(async (orderId: number) => {
         await db.deleteOrderAndItems(orderId);
-        showToast('발주 내역이 삭제되었습니다.', 'success');
-    }, [showToast]);
+    }, []);
 
     const updateOrderStatus = useCallback(async (orderId: number, completionDetails: Order['completionDetails']) => {
         await db.updateOrderStatus(orderId, completionDetails);

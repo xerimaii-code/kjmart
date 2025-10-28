@@ -1,5 +1,7 @@
 
 
+
+
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
 import { OrderItem, Product, EditedOrderDraft } from '../types';
@@ -9,6 +11,7 @@ import { isSaleActive, useOrderManager } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from './SearchDropdown';
+import ProductSearchResultItem from './ProductSearchResultItem';
 
 const MAX_SEARCH_RESULTS = 50;
 
@@ -100,66 +103,12 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
 }));
 EditedItemRow.displayName = 'EditedItemRow';
 
-const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: Product) => void }> = ({ product, onClick }) => {
-    const saleIsActive = isSaleActive(product.saleEndDate);
-    const hasSalePrice = !!product.salePrice;
-
-    return (
-        <div onClick={() => onClick(product)} className="relative overflow-hidden p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
-            {saleIsActive && hasSalePrice && (
-                <div className="sale-ribbon">SALE</div>
-            )}
-            <div className="flex flex-col items-start w-full gap-y-1">
-                {/* Line 1: Product Name, Sale Badge */}
-                <div className="flex items-center gap-2 flex-wrap w-full">
-                    <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
-                </div>
-
-                {/* Line 2: Barcode */}
-                <p className="text-sm text-gray-500">{product.barcode}</p>
-
-                {/* Line 3: Prices */}
-                <div className="text-sm text-gray-700 font-medium flex items-baseline gap-x-2 flex-wrap">
-                    <span className={`${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'font-bold'}`}>
-                        {product.sellingPrice?.toLocaleString()}원
-                    </span>
-                    {hasSalePrice && (
-                        <span 
-                            className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
-                            style={!saleIsActive ? { fontSize: '70%' } : {}}
-                        >
-                            {product.salePrice}원
-                        </span>
-                    )}
-                    <span className="text-gray-500 text-xs">({product.costPrice?.toLocaleString()}원)</span>
-                </div>
-
-                {/* Line 4: Event Info */}
-                {(product.saleEndDate || product.supplierName) && (
-                    <div className="text-xs text-gray-500">
-                        <div className="flex items-center gap-x-3">
-                            {product.saleEndDate && (
-                                <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
-                                    ~{product.saleEndDate}
-                                </span>
-                            )}
-                            {product.supplierName && (
-                                <span>{product.supplierName}</span>
-                            )}
-                        </div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
 // --- Main Modal Component ---
 
 const OrderDetailModal: React.FC = () => {
     const { products } = useDataState();
     const { updateOrder } = useDataActions();
-    const { showAlert, showToast } = useAlert();
+    const { showAlert } = useAlert();
     const { editingOrder: originalOrder, closeDetailModal, openAddItemModal, openEditItemModal, openMemoModal } = useModals();
     const { openScanner } = useScanner();
     const { setLastModifiedOrderId } = useMiscUI();
@@ -274,7 +223,6 @@ const OrderDetailModal: React.FC = () => {
             await updateOrder(updatedOrderData);
             await deleteDraft(originalOrder.id);
             setLastModifiedOrderId(originalOrder.id);
-            showToast('발주 내역이 성공적으로 수정되었습니다.', 'success');
             closeDetailModal();
         } catch (err) {
             showAlert('저장에 실패했습니다.');
