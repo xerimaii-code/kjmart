@@ -186,20 +186,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [isInstallPromptAvailable, setInstallPromptAvailable] = useState(false);
     const deferredInstallPrompt = useRef<any>(null);
 
-    // --- Online/Offline Listener Effect ---
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
-
     // --- Alert & Toast Actions ---
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
         setAlertState({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
@@ -319,84 +305,131 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setScanSettingsState(prev => ({ ...prev, ...settings }));
     }, [setScanSettingsState]);
 
-    // --- Initial Data Load and Sync Effect ---
+    // --- Initial Data Load and Sync Effect (Offline-First with reliable connection status) ---
     useEffect(() => {
-        if (!user || !db.isInitialized()) {
-            setInitialSyncCompleted(!user); // Let login screen show if no user
+        if (!user) {
+            setInitialSyncCompleted(false);
             return;
         }
-
-        let customerListener: any = null;
-        let productListener: any = null;
-
-        const initializeAndSync = async () => {
-            // --- STEP 1: OFFLINE FIRST LOAD ---
-            // Load from cache to make the app interactive immediately.
-            // Only show full-screen loader on the very first app launch.
-            if (!initialSyncCompleted) {
-                setIsSyncing(true);
-                setSyncStatusText("로컬 캐시 로딩 중...");
-                setSyncProgress(10);
+    
+        let isMounted = true;
+        let customerListener: firebase.database.ValueCallback | null = null;
+        let productListener: firebase.database.ValueCallback | null = null;
+        let connectionListener: firebase.database.ValueCallback | null = null;
+    
+        const detachListeners = () => {
+            if (db.db && typeof db.db.ref === 'function') {
+                if (customerListener) db.db.ref('customers').off('value', customerListener);
+                if (productListener) db.db.ref('products').off('value', productListener);
+                if (connectionListener) db.db.ref('.info/connected').off('value', connectionListener);
             }
-
-            const [cachedCustomers, cachedProducts] = await Promise.all([
-                cache.getCachedData<Customer>('customers'),
-                cache.getCachedData<Product>('products'),
-            ]);
-            
-            setCustomers(cachedCustomers);
-            setProducts(cachedProducts);
-            
-            // On first launch, if offline and no data exists, inform the user.
-            if (!navigator.onLine && cachedCustomers.length === 0 && cachedProducts.length === 0 && !initialSyncCompleted) {
-                 showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
+            customerListener = null;
+            productListener = null;
+            connectionListener = null;
+        };
+    
+        const attachDataListeners = () => {
+            if (!db.db || !isMounted || customerListener || productListener || !db.isInitialized()) {
+                return;
             }
-
-            if (!initialSyncCompleted) {
-                setSyncProgress(100);
-                setSyncStatusText("앱 준비 완료");
-                // Defer completion slightly to allow UI to render before unblocking the app
-                setTimeout(() => {
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }, 300);
-            }
-            
-            // --- STEP 2: BACKGROUND SYNC & REALTIME LISTENERS ---
-            // Firebase handles reconnecting and syncing automatically. This will run in the background.
-            // FIX: Use db.db.ref to access the ref method on the database instance.
-            // The `db` from `import * as db` is a module namespace. The database instance is `db.db`.
-            // The `isInitialized()` check ensures `db.db` is not null at runtime.
-            if (!db.db) return;
+    
             const customersRef = db.db.ref('customers');
-            const productsRef = db.db.ref('products');
-
             customerListener = customersRef.on('value', (snapshot) => {
                 const data = snapshot.val();
                 const arrayData = data ? Object.values(data).filter(Boolean) as Customer[] : [];
-                setCustomers(arrayData);
-                cache.setCachedData('customers', arrayData);
-            }, (error) => console.error("Firebase customer listener error:", error));
-
+                if (isMounted) {
+                    setCustomers(arrayData);
+                    cache.setCachedData('customers', arrayData);
+                }
+            }, (err) => console.error("Customer listener error", err));
+    
+            const productsRef = db.db.ref('products');
             productListener = productsRef.on('value', (snapshot) => {
                 const data = snapshot.val();
                 const arrayData = data ? Object.values(data).filter(Boolean) as Product[] : [];
-                setProducts(arrayData);
-                cache.setCachedData('products', arrayData);
-            }, (error) => console.error("Firebase product listener error:", error));
+                if (isMounted) {
+                    setProducts(arrayData);
+                    cache.setCachedData('products', arrayData);
+                }
+            }, (err) => console.error("Product listener error", err));
         };
-
-        initializeAndSync();
-
-        // Cleanup function to detach listeners when the component unmounts or the user changes
-        return () => {
-            // FIX: Use db.db.ref to get the reference for detaching the listener.
-            // Add a null check for `db.db` for type safety.
-            if (customerListener && db.db) db.db.ref('customers').off('value', customerListener);
-            if (productListener && db.db) db.db.ref('products').off('value', productListener);
-        };
-    }, [user]); // Only re-run the entire initialization when the user logs in/out.
     
+        const runInitialLoadAndSync = async () => {
+            // Step 1: Always load from local cache first.
+            if (!initialSyncCompleted && isMounted) {
+                setIsSyncing(true);
+                setSyncStatusText("로컬 데이터 로딩...");
+                setSyncProgress(10);
+            }
+            
+            try {
+                const [cachedCustomers, cachedProducts] = await Promise.all([
+                    cache.getCachedData<Customer>('customers'),
+                    cache.getCachedData<Product>('products'),
+                ]);
+    
+                if (isMounted) {
+                    setCustomers(cachedCustomers);
+                    setProducts(cachedProducts);
+                    setSyncProgress(50);
+                    setSyncStatusText("로컬 데이터 로딩 완료");
+                }
+            } catch(e) {
+                 console.error("Failed to load from local cache", e);
+                 if (isMounted) setSyncStatusText("로컬 캐시 로딩 실패");
+            }
+    
+            // Step 2: Mark initial load as complete so the UI can render.
+            if (!initialSyncCompleted && isMounted) {
+                setSyncProgress(100);
+                setSyncStatusText("앱 준비 완료");
+                setTimeout(() => {
+                    if (isMounted) {
+                        setInitialSyncCompleted(true);
+                        setIsSyncing(isOnline); // Reflect current online status after initial load
+                    }
+                }, 500);
+            }
+
+            // Step 3: Let Firebase handle the connection. Attach data listeners immediately.
+            attachDataListeners();
+
+            // Step 4: Use Firebase's '.info/connected' for reliable online status detection.
+            if (db.db && typeof db.db.ref === 'function') {
+                const connectedRef = db.db.ref('.info/connected');
+                connectionListener = connectedRef.on('value', (snapshot) => {
+                    const isConnected = snapshot.val() === true;
+                    if (isMounted) {
+                        setIsOnline(isConnected);
+                        
+                        // After initial load, only show spinner when reconnecting
+                        if (initialSyncCompleted) {
+                            if (isConnected) {
+                                setIsSyncing(true);
+                                // Hide spinner after a delay, assuming sync completes.
+                                setTimeout(() => { if (isMounted) setIsSyncing(false); }, 2000);
+                            } else {
+                                setIsSyncing(false);
+                            }
+                        }
+                    }
+                }, (err) => {
+                    console.error("Firebase connection listener error", err);
+                    if (isMounted) {
+                        setIsOnline(false);
+                        setIsSyncing(false);
+                    }
+                });
+            }
+        };
+    
+        runInitialLoadAndSync();
+    
+        return () => {
+            isMounted = false;
+            detachListeners();
+        };
+    }, [user]);
 
     // --- Modal Actions ---
     const modalsActions = useMemo<ModalsActions>(() => ({
