@@ -94,7 +94,6 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
     return (
         <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
             <div className="flex flex-col items-start w-full gap-y-1">
-                {/* Line 1: Product Name, Sale Badge */}
                 <div className="flex items-center gap-2 flex-wrap w-full">
                     <p className="font-semibold text-gray-800 whitespace-pre-wrap">{product.name}</p>
                     {saleIsActive && hasSalePrice && (
@@ -102,10 +101,8 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
                     )}
                 </div>
 
-                {/* Line 2: Barcode */}
                 <p className="text-sm text-gray-500">{product.barcode}</p>
 
-                {/* Line 3: Prices */}
                 <div className="text-sm flex items-baseline gap-x-1.5 flex-wrap">
                     <span className="text-gray-600 font-semibold">{product.costPrice?.toLocaleString()}원</span>
                     <span className="text-gray-400">/</span>
@@ -122,7 +119,6 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
                     )}
                 </div>
 
-                {/* Line 4: Event Info */}
                 {(product.saleEndDate || product.supplierName) && (
                     <div className="text-xs text-gray-500">
                         <div className="flex items-center gap-x-3">
@@ -194,7 +190,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         itemsRef.current = items;
     }, [items]);
 
-    // --- Draft Logic ---
     const draftDataToSave = useMemo(() => ({
         selectedCustomer,
         items,
@@ -330,12 +325,11 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 memo: memo.trim(),
             });
             setLastModifiedOrderId(newOrderId);
-            await deleteDraft(DRAFT_KEY).catch(err => console.warn("Could not delete draft after saving order:", err));
+            await deleteDraft(DRAFT_KEY);
             resetOrder({ preventFocus: true });
         } catch (error) {
             console.error("Failed to save order:", error);
             showAlert("발주 저장에 실패했습니다.");
-            setIsSaving(false);
         } finally {
             setIsSaving(false);
         }
