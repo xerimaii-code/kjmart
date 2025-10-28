@@ -73,6 +73,7 @@ interface SyncState {
     syncStatusText: string;
     syncDataType: 'customers' | 'products' | 'full' | null;
     initialSyncCompleted: boolean;
+    isOnline: boolean;
 }
 
 const SyncStateContext = createContext<SyncState | undefined>(undefined);
@@ -175,6 +176,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [syncStatusText, setSyncStatusText] = useState('');
     const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
 
     // --- UI State ---
     const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '' });
@@ -184,6 +186,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [scannerState, setScannerState] = useState<ScannerState>({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false });
     const [isInstallPromptAvailable, setInstallPromptAvailable] = useState(false);
     const deferredInstallPrompt = useRef<any>(null);
+
+    // --- Online/Offline Listener Effect ---
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
     // --- Alert & Toast Actions ---
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
@@ -197,9 +213,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Data Actions ---
     const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'itemCount' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
         const newOrderId = await db.addOrderWithItems(orderData, orderData.items);
-        showToast('신규 발주가 저장되었습니다.', 'success');
+        if (isOnline) {
+            showToast('신규 발주가 저장되었습니다.', 'success');
+        } else {
+            showToast('오프라인 상태입니다. 발주가 로컬에 저장되었습니다.', 'success');
+        }
         return newOrderId;
-    }, [showToast]);
+    }, [showToast, isOnline]);
 
     const updateOrder = useCallback(async (order: Order) => {
         if (!order.items) throw new Error("Order items are missing for update.");
@@ -352,6 +372,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     
         const runInitialSync = async () => {
+            if (!navigator.onLine) {
+                setIsSyncing(true);
+                setSyncStatusText("오프라인 상태입니다...");
+                setSyncProgress(10);
+
+                const [cachedCustomers, cachedProducts] = await Promise.all([
+                    cache.getCachedData<Customer>('customers'),
+                    cache.getCachedData<Product>('products'),
+                ]);
+    
+                setCustomers(cachedCustomers);
+                setProducts(cachedProducts);
+                setSyncProgress(100);
+                setSyncStatusText("캐시된 데이터로 시작합니다.");
+
+                setTimeout(() => {
+                    setInitialSyncCompleted(true);
+                    setIsSyncing(false);
+                }, 500);
+                return;
+            }
+
             setIsSyncing(true);
             setSyncDataType('full');
             setSyncProgress(0);
@@ -495,7 +537,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Context Values ---
     const dataStateValue = useMemo(() => ({ customers, products, selectedCameraId, scanSettings: scanSettings! }), [customers, products, selectedCameraId, scanSettings]);
     const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings]);
-    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted]);
+    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted, isOnline }), [isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted, isOnline]);
     const modalsValue = useMemo(() => ({ ...modalsState, ...modalsActions }), [modalsState, modalsActions]);
     const scannerValue = useMemo(() => ({ ...scannerState, ...scannerActions }), [scannerState, scannerActions]);
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
