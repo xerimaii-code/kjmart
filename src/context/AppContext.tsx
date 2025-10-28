@@ -168,8 +168,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [products, setProducts] = useState<Product[]>([]);
     const [selectedCameraId, setSelectedCameraIdState] = useLocalStorage<string>('selectedCameraId', null, { deviceSpecific: true });
     const [scanSettings, setScanSettingsState] = useLocalStorage('scanSettings', { vibrateOnScan: true, soundOnScan: true });
-    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage('lastSyncKeys', { customers: null, products: null });
-
+    
     // --- Sync State ---
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState(0);
@@ -266,18 +265,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const diffResult = await processExcelFileInWorker(file, workerDataType, existingData, user?.email || 'unknown', onProgress);
             
             const toAddOrUpdate = diffResult.toAddOrUpdate as (Customer[] | Product[]);
-            const toDelete = diffResult.toDelete;
-
-            if (toAddOrUpdate.length > 0 || toDelete.length > 0) {
+            
+            if (toAddOrUpdate.length > 0) {
                  setSyncStatusText("데이터베이스 업데이트 중...");
-                 const updates: Partial<Record<'customers' | 'products', (Customer|Product)[]>> = {};
-                 updates[dataType] = toAddOrUpdate as any;
-                 
                  await db.replaceAll(dataType, toAddOrUpdate as any);
-
-                 // This part is simplified; in a real app, you'd handle deletes too.
-                 if (dataType === 'customers') setCustomers(toAddOrUpdate as Customer[]);
-                 else setProducts(toAddOrUpdate as Product[]);
             }
 
             return diffResult;
@@ -331,143 +322,80 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Initial Data Load and Sync Effect ---
     useEffect(() => {
         if (!user || !db.isInitialized()) {
-            setInitialSyncCompleted(!user);
+            setInitialSyncCompleted(!user); // Let login screen show if no user
             return;
         }
-    
-        const unsubscribers: (() => void)[] = [];
-    
-        const runInitialLoadAndSync = async () => {
-            // Only show full-screen loader on the very first load.
-            // On subsequent syncs (e.g. reconnection), the header spinner is shown via isSyncing.
+
+        let customerListener: any = null;
+        let productListener: any = null;
+
+        const initializeAndSync = async () => {
+            // --- STEP 1: OFFLINE FIRST LOAD ---
+            // Load from cache to make the app interactive immediately.
+            // Only show full-screen loader on the very first app launch.
             if (!initialSyncCompleted) {
                 setIsSyncing(true);
                 setSyncStatusText("로컬 캐시 로딩 중...");
                 setSyncProgress(10);
-            } else {
-                 setIsSyncing(true);
             }
-    
-            // --- STEP 1: ALWAYS load from local cache first for a fast, offline-ready startup.
+
             const [cachedCustomers, cachedProducts] = await Promise.all([
                 cache.getCachedData<Customer>('customers'),
                 cache.getCachedData<Product>('products'),
             ]);
+            
             setCustomers(cachedCustomers);
             setProducts(cachedProducts);
-    
-            // --- STEP 2: Check network status AFTER loading cache.
-            if (!navigator.onLine) {
-                setSyncStatusText("오프라인 모드");
-                if (!initialSyncCompleted) {
-                    setSyncProgress(100);
-                    // Defer completion to allow UI to render "Offline Mode" message.
-                    setTimeout(() => {
-                        setInitialSyncCompleted(true);
-                        setIsSyncing(false);
-                    }, 500);
-                } else {
-                    setIsSyncing(false); // Just turn off header spinner.
-                }
-                
-                // Show an alert if this is the very first run and there's no data.
-                if (cachedCustomers.length === 0 && cachedProducts.length === 0 && !initialSyncCompleted) {
-                     showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
-                }
-                return; // Stop execution to prevent online sync attempts.
+            
+            // On first launch, if offline and no data exists, inform the user.
+            if (!navigator.onLine && cachedCustomers.length === 0 && cachedProducts.length === 0 && !initialSyncCompleted) {
+                 showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
             }
-    
-            // --- STEP 3: If online, proceed with background sync.
-            setSyncDataType('full');
+
             if (!initialSyncCompleted) {
-                setSyncStatusText("서버와 동기화 중...");
+                setSyncProgress(100);
+                setSyncStatusText("앱 준비 완료");
+                // Defer completion slightly to allow UI to render before unblocking the app
+                setTimeout(() => {
+                    setInitialSyncCompleted(true);
+                    setIsSyncing(false);
+                }, 300);
             }
-    
-            const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
-                if (changes.length === 0) return;
-                const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
-                const setData = dataType === 'customers' ? setCustomers : setProducts;
-    
-                for (const change of changes) {
-                    const key = (change as any)[keyField];
-                    if (change._deleted) {
-                        await cache.removeCachedItem(dataType, key);
-                    } else {
-                        const { _key, timestamp, user, ...itemData } = change;
-                        await cache.addOrUpdateCachedItem(dataType, itemData as any);
-                    }
-                }
-                setData(prevData => {
-                    const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
-                    changes.forEach(change => {
-                        const key = (change as any)[keyField];
-                        if (change._deleted) {
-                            dataMap.delete(key);
-                        } else {
-                            const { _key, timestamp, user, ...itemData } = change;
-                            dataMap.set(key, itemData);
-                        }
-                    });
-                    return Array.from(dataMap.values()) as any;
-                });
-            };
-    
-            const syncDataTypeOnline = async (dataType: 'customers' | 'products', lastKey: string | null) => {
-                const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
-    
-                if (!lastKey || !hasCache) {
-                    const remoteData = await db.getStore<Customer | Product>(dataType);
-                    if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
-                    await cache.setCachedData(dataType, remoteData as any);
-                    return db.getLastSyncLogKey(dataType);
-                } else {
-                    const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
-                    if (changes.length > 0) {
-                        await applyChanges(dataType, changes);
-                    }
-                    return newLastKey;
-                }
-            };
-    
-            try {
-                const finalCustomerKey = await syncDataTypeOnline('customers', lastSyncKeys.customers);
-                if (!initialSyncCompleted) setSyncProgress(55);
-                setLastSyncKeys(prev => ({ ...prev, customers: finalCustomerKey }));
-                unsubscribers.push(db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
-                    await applyChanges('customers', [newItem]);
-                    setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
-                }));
-    
-                const finalProductKey = await syncDataTypeOnline('products', lastSyncKeys.products);
-                if (!initialSyncCompleted) setSyncProgress(100);
-                setLastSyncKeys(prev => ({ ...prev, products: finalProductKey }));
-                unsubscribers.push(db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
-                    await applyChanges('products', [newItem]);
-                    setLastSyncKeys(prev => ({ ...prev, products: newKey }));
-                }));
-    
-                if (!initialSyncCompleted) {
-                    setSyncStatusText("동기화 완료");
-                    setTimeout(() => setInitialSyncCompleted(true), 300);
-                }
-    
-            } catch (error) {
-                console.error("Sync failed:", error);
-                showToast("데이터 동기화에 실패했습니다.", 'error');
-                if (!initialSyncCompleted) {
-                    setInitialSyncCompleted(true); // Unblock UI even on failure
-                }
-            } finally {
-                setIsSyncing(false);
-            }
+            
+            // --- STEP 2: BACKGROUND SYNC & REALTIME LISTENERS ---
+            // Firebase handles reconnecting and syncing automatically. This will run in the background.
+            // FIX: Use db.db.ref to access the ref method on the database instance.
+            // The `db` from `import * as db` is a module namespace. The database instance is `db.db`.
+            // The `isInitialized()` check ensures `db.db` is not null at runtime.
+            if (!db.db) return;
+            const customersRef = db.db.ref('customers');
+            const productsRef = db.db.ref('products');
+
+            customerListener = customersRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                const arrayData = data ? Object.values(data).filter(Boolean) as Customer[] : [];
+                setCustomers(arrayData);
+                cache.setCachedData('customers', arrayData);
+            }, (error) => console.error("Firebase customer listener error:", error));
+
+            productListener = productsRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                const arrayData = data ? Object.values(data).filter(Boolean) as Product[] : [];
+                setProducts(arrayData);
+                cache.setCachedData('products', arrayData);
+            }, (error) => console.error("Firebase product listener error:", error));
         };
-    
-        runInitialLoadAndSync();
-    
+
+        initializeAndSync();
+
+        // Cleanup function to detach listeners when the component unmounts or the user changes
         return () => {
-            unsubscribers.forEach(unsub => unsub());
+            // FIX: Use db.db.ref to get the reference for detaching the listener.
+            // Add a null check for `db.db` for type safety.
+            if (customerListener && db.db) db.db.ref('customers').off('value', customerListener);
+            if (productListener && db.db) db.db.ref('products').off('value', productListener);
         };
-    }, [user, isOnline]);
+    }, [user]); // Only re-run the entire initialization when the user logs in/out.
     
 
     // --- Modal Actions ---
