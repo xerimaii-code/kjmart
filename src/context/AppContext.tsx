@@ -336,47 +336,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
     
         const unsubscribers: (() => void)[] = [];
-        let syncTimeout: number;
     
-        const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
-            if (changes.length === 0) return;
-    
-            const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
-            const setData = dataType === 'customers' ? setCustomers : setProducts;
-    
-            // Batch cache updates
-            for (const change of changes) {
-                const key = (change as any)[keyField];
-                if (change._deleted) {
-                    await cache.removeCachedItem(dataType, key);
-                } else {
-                    const { _key, timestamp, user, ...itemData } = change;
-                    await cache.addOrUpdateCachedItem(dataType, itemData as any);
-                }
-            }
-    
-            // Batch state updates
-            setData(prevData => {
-                const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
-                changes.forEach(change => {
-                    const key = (change as any)[keyField];
-                    if (change._deleted) {
-                        dataMap.delete(key);
-                    } else {
-                        const { _key, timestamp, user, ...itemData } = change;
-                        dataMap.set(key, itemData);
-                    }
-                });
-                return Array.from(dataMap.values()) as any;
-            });
-        };
-    
-        const runInitialSync = async () => {
-            if (!navigator.onLine) {
+        const runInitialLoadAndSync = async () => {
+            // --- Part 1: Initial Load from Cache (Fast Path) ---
+            if (!initialSyncCompleted) {
                 setIsSyncing(true);
-                setSyncStatusText("오프라인 상태입니다...");
+                setSyncStatusText("로컬 캐시 로딩 중...");
                 setSyncProgress(10);
-
+    
                 const [cachedCustomers, cachedProducts] = await Promise.all([
                     cache.getCachedData<Customer>('customers'),
                     cache.getCachedData<Product>('products'),
@@ -384,60 +351,73 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
                 setCustomers(cachedCustomers);
                 setProducts(cachedProducts);
-                setSyncProgress(100);
-                setSyncStatusText("캐시된 데이터로 시작합니다.");
-
-                setTimeout(() => {
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }, 500);
-                return;
-            }
-
-            setIsSyncing(true);
-            setSyncDataType('full');
-            setSyncProgress(0);
-            setSyncStatusText("로컬 캐시 로딩 중...");
-    
-            const [cachedCustomers, cachedProducts] = await Promise.all([
-                cache.getCachedData<Customer>('customers'),
-                cache.getCachedData<Product>('products'),
-            ]);
-    
-            setCustomers(cachedCustomers);
-            setProducts(cachedProducts);
-            setSyncProgress(10);
-    
-            syncTimeout = window.setTimeout(() => {
-                if (!initialSyncCompleted) {
-                    console.warn("Sync timed out. Using cached data.");
-                    showAlert("서버 동기화에 시간이 초과되었습니다. 오프라인 데이터로 시작합니다.");
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
+                
+                // Unblock UI immediately if we have cached data, or if we are offline (can't do more anyway)
+                if (cachedCustomers.length > 0 || cachedProducts.length > 0 || !isOnline) {
+                    setSyncProgress(100);
+                    setSyncStatusText(isOnline ? "캐시 데이터 적용 완료" : "오프라인 모드");
+                    setTimeout(() => {
+                        setInitialSyncCompleted(true);
+                        setIsSyncing(false);
+                    }, 500);
                 }
-            }, 20000);
+            }
+            
+            // --- Part 2: Background Sync if Online ---
+            if (!isOnline) {
+                if (!initialSyncCompleted) { // No cache and offline case
+                     showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
+                     setIsSyncing(false);
+                }
+                return; // Stop here if offline
+            }
+    
+            setIsSyncing(true); // Show header spinner for background sync
+            setSyncDataType('full');
+            if (!initialSyncCompleted) setSyncStatusText("서버와 동기화 중...");
+    
+            const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
+                if (changes.length === 0) return;
+                const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
+                const setData = dataType === 'customers' ? setCustomers : setProducts;
+    
+                for (const change of changes) {
+                    const key = (change as any)[keyField];
+                    if (change._deleted) {
+                        await cache.removeCachedItem(dataType, key);
+                    } else {
+                        const { _key, timestamp, user, ...itemData } = change;
+                        await cache.addOrUpdateCachedItem(dataType, itemData as any);
+                    }
+                }
+                setData(prevData => {
+                    const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
+                    changes.forEach(change => {
+                        const key = (change as any)[keyField];
+                        if (change._deleted) {
+                            dataMap.delete(key);
+                        } else {
+                            const { _key, timestamp, user, ...itemData } = change;
+                            dataMap.set(key, itemData);
+                        }
+                    });
+                    return Array.from(dataMap.values()) as any;
+                });
+            };
     
             const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null) => {
                 const typeName = dataType === 'customers' ? '거래처' : '상품';
-                const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
+                const hasCache = dataType === 'customers' ? customers.length > 0 : products.length > 0;
     
-                if (!lastKey || !hasCache) { // Full Sync
-                    setSyncStatusText(`${typeName} 전체 데이터 동기화 중...`);
+                if (!lastKey || !hasCache) {
                     const remoteData = await db.getStore<Customer | Product>(dataType);
                     if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
                     await cache.setCachedData(dataType, remoteData as any);
-                    const newLastKey = await db.getLastSyncLogKey(dataType);
-                    setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
-                    return newLastKey;
-                } else { // Incremental Sync
-                    setSyncStatusText(`${typeName} 변경사항 확인 중...`);
+                    return db.getLastSyncLogKey(dataType);
+                } else {
                     const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
                     if (changes.length > 0) {
-                        setSyncStatusText(`${typeName} ${changes.length}건 업데이트 중...`);
                         await applyChanges(dataType, changes);
-                    }
-                    if (newLastKey !== lastKey) {
-                        setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
                     }
                     return newLastKey;
                 }
@@ -445,46 +425,44 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
             try {
                 const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers);
-                setSyncProgress(55);
-                unsubscribers.push(
-                    db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
-                        await applyChanges('customers', [newItem]);
-                        setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
-                    })
-                );
+                if (!initialSyncCompleted) setSyncProgress(55);
+                setLastSyncKeys(prev => ({ ...prev, customers: finalCustomerKey }));
+                unsubscribers.push(db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
+                    await applyChanges('customers', [newItem]);
+                    setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
+                }));
     
                 const finalProductKey = await syncDataType('products', lastSyncKeys.products);
-                setSyncProgress(100);
-                unsubscribers.push(
-                    db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
-                        await applyChanges('products', [newItem]);
-                        setLastSyncKeys(prev => ({ ...prev, products: newKey }));
-                    })
-                );
+                if (!initialSyncCompleted) setSyncProgress(100);
+                setLastSyncKeys(prev => ({ ...prev, products: finalProductKey }));
+                unsubscribers.push(db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
+                    await applyChanges('products', [newItem]);
+                    setLastSyncKeys(prev => ({ ...prev, products: newKey }));
+                }));
     
-                clearTimeout(syncTimeout);
-                setSyncStatusText("동기화 완료");
-                setTimeout(() => {
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }, 300);
+                if (!initialSyncCompleted) {
+                    setSyncStatusText("동기화 완료");
+                    setTimeout(() => setInitialSyncCompleted(true), 300);
+                }
     
             } catch (error) {
                 console.error("Sync failed:", error);
-                showAlert("데이터 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
-                clearTimeout(syncTimeout);
-                setInitialSyncCompleted(true);
+                showToast("데이터 동기화에 실패했습니다.", 'error');
+                if (!initialSyncCompleted) {
+                    setInitialSyncCompleted(true); // Unblock UI even on failure
+                }
+            } finally {
                 setIsSyncing(false);
             }
         };
     
-        runInitialSync();
+        runInitialLoadAndSync();
     
         return () => {
-            clearTimeout(syncTimeout);
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
+    }, [user, isOnline]);
+    
 
     // --- Modal Actions ---
     const modalsActions = useMemo<ModalsActions>(() => ({
