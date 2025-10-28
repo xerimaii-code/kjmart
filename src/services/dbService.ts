@@ -4,7 +4,6 @@ import 'firebase/compat/auth';
 import 'firebase/compat/database';
 import { firebaseConfig } from '../firebaseConfig';
 import { Order, OrderItem, Customer, Product, SyncLog } from '../types';
-import * as queue from './writeQueueService';
 
 let app: firebase.app.App | null = null;
 let db: firebase.database.Database | null = null;
@@ -197,15 +196,8 @@ export const addOrderWithItems = async (
     updates[`/orders/${newOrderId}`] = newOrder;
     updates[`/order-items/${newOrderId}`] = items;
 
-    const op = { id: `add_${newOrderId}`, payload: updates, timestamp: Date.now() };
-    await queue.add(op);
-    
-    try {
-        await db.ref().update(updates);
-        await queue.remove(op.id);
-    } catch (error) {
-        console.warn('Firebase write failed, operation queued:', error);
-    }
+    // Directly update Firebase. It will handle offline queuing automatically.
+    await db.ref().update(updates);
 
     return newOrderId;
 };
@@ -220,15 +212,8 @@ export const updateOrderAndItems = async (order: Omit<Order, 'items'>, items: Or
     updates[`/orders/${order.id}`] = updatedOrderData;
     updates[`/order-items/${order.id}`] = items;
     
-    const op = { id: `update_${order.id}`, payload: updates, timestamp: Date.now() };
-    await queue.add(op);
-
-    try {
-        await db.ref().update(updates);
-        await queue.remove(op.id);
-    } catch (error) {
-        console.warn('Firebase update failed, operation queued:', error);
-    }
+    // Directly update Firebase. It will handle offline queuing automatically.
+    await db.ref().update(updates);
 };
 
 export const updateOrderStatus = async (
@@ -245,15 +230,8 @@ export const updateOrderStatus = async (
         [`/orders/${orderId}/date`]: now,
     };
 
-    const op = { id: `status_${orderId}`, payload: updates, timestamp: Date.now() };
-    await queue.add(op);
-
-    try {
-        await db.ref().update(updates);
-        await queue.remove(op.id);
-    } catch (error) {
-        console.warn('Firebase status update failed, operation queued:', error);
-    }
+    // Directly update Firebase. It will handle offline queuing automatically.
+    await db.ref().update(updates);
 };
 
 export const deleteOrderAndItems = async (orderId: number): Promise<void> => {
@@ -262,15 +240,8 @@ export const deleteOrderAndItems = async (orderId: number): Promise<void> => {
     updates[`/orders/${orderId}`] = null;
     updates[`/order-items/${orderId}`] = null;
     
-    const op = { id: `delete_${orderId}`, payload: updates, timestamp: Date.now() };
-    await queue.add(op);
-
-    try {
-        await db.ref().update(updates);
-        await queue.remove(op.id);
-    } catch (error) {
-        console.warn('Firebase delete failed, operation queued:', error);
-    }
+    // Directly update Firebase. It will handle offline queuing automatically.
+    await db.ref().update(updates);
 };
 
 export const replaceAll = <T>(storeName: string, items: T[]): Promise<void> => {

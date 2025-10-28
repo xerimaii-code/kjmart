@@ -308,65 +308,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setScanSettingsState(prev => ({ ...prev, ...settings }));
     }, [setScanSettingsState]);
     
-    // --- Offline Write Queue Processing ---
-    const isProcessingQueue = useRef(false);
-
-    const processWriteQueue = useCallback(async () => {
-        if (isProcessingQueue.current || !db.isInitialized()) return;
-
-        const queue = await import('../services/writeQueueService');
-        const queuedOperations = await queue.getAll();
-        
-        if (queuedOperations.length === 0) {
-            isProcessingQueue.current = false;
-            return;
-        }
-
-        isProcessingQueue.current = true;
-        console.log(`Processing ${queuedOperations.length} queued writes...`);
-        showToast(`오프라인 변경사항 ${queuedOperations.length}건을 동기화합니다...`, 'success');
-        
-        for (const op of queuedOperations) {
-            try {
-                if(db.isInitialized() && db.db) {
-                    await db.db.ref().update(op.payload);
-                    await queue.remove(op.id);
-                } else {
-                    throw new Error("DB not available");
-                }
-            } catch (e) {
-                console.error(`Failed to sync operation ${op.id}, will retry later.`, e);
-                break; 
-            }
-        }
-        
-        const remainingOps = await queue.getAll();
-        if (remainingOps.length === 0) {
-            console.log('Write queue cleared.');
-            showToast('오프라인 변경사항 동기화 완료.', 'success');
-        } else {
-            console.log(`${remainingOps.length} operations remain in queue.`);
-        }
-
-        isProcessingQueue.current = false;
-    }, [showToast]);
-
-    useEffect(() => {
-        if (!user || !db.isInitialized() || !db.db) return;
-
-        processWriteQueue();
-
-        const connectedRef = db.db.ref('.info/connected');
-        const listener = connectedRef.on('value', (snap) => {
-            if (snap.val() === true) {
-                console.log('Connection established, processing write queue.');
-                processWriteQueue();
-            }
-        });
-        
-        return () => connectedRef.off('value', listener);
-    }, [user, processWriteQueue]);
-
     // --- Initial Data Load and Sync Effect ---
     useEffect(() => {
         if (!user || !db.isInitialized()) {
