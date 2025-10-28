@@ -5,9 +5,9 @@ import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon
 import { exportToSMS } from '../services/dataService';
 import { getAllDraftKeys } from '../services/draftDbService';
 import * as db from '../services/dbService';
-import * as cache from './cacheDbService';
 
-const PAGE_SIZE = 30;
+// Constants for infinite scroll
+const PAGE_SIZE = 30; // Number of items to load per "page"
 
 interface ActionMenuItem {
     id: string;
@@ -134,7 +134,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
     const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
-    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE); // State for infinite scroll
     
     const getLocalDateString = (date: Date) => {
         const year = date.getFullYear();
@@ -155,7 +155,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [customEndDate, setCustomEndDate] = useState(getTodayString);
     
     const listRef = useRef<HTMLDivElement>(null);
-    const observerRef = useRef<HTMLDivElement>(null);
+    const observerRef = useRef<HTMLDivElement>(null); // Ref for the infinite scroll sentinel
 
     const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setCustomStartDate(e.target.value);
@@ -165,8 +165,6 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         setCustomEndDate(e.target.value);
     };
 
-    const sortOrders = (orderArray: Order[]) => orderArray.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
     useEffect(() => {
         if (!isActive) {
             setActiveMenuOrderId(null);
@@ -175,60 +173,57 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     
         const calculateDates = () => {
             const start = customStartDate ? new Date(customStartDate) : undefined;
-            if (start && !isNaN(start.getTime())) start.setHours(0, 0, 0, 0);
+            if (start && !isNaN(start.getTime())) {
+                start.setHours(0, 0, 0, 0);
+            }
             const end = customEndDate ? new Date(customEndDate) : new Date();
             end.setHours(23, 59, 59, 999);
             return { startDate: start, endDate: end };
         };
     
         setIsLoading(true);
+        setOrders([]);
         setVisibleCount(PAGE_SIZE);
     
         const { startDate, endDate } = calculateDates();
-        
-        cache.getCachedData<Order>('orders').then(cachedOrders => {
-            const filtered = cachedOrders.filter(o => {
-                const orderDate = new Date(o.date);
-                return orderDate <= endDate && (!startDate || orderDate >= startDate);
-            });
-            setOrders(sortOrders(filtered));
-            setIsLoading(false);
-        });
-
+    
         const unsubscribe = db.listenToOrderChangesByDateRange(
             endDate,
             {
                 onAdd: (newOrder) => {
                     setOrders(prevOrders => {
-                        const map = new Map(prevOrders.map(o => [o.id, o]));
-                        map.set(newOrder.id, newOrder);
-                        // FIX: Use Array.from for robust type inference, as spread syntax was failing.
-                        return sortOrders(Array.from(map.values()));
+                        if (prevOrders.some(o => o.id === newOrder.id)) return prevOrders;
+                        const newArr = [...prevOrders, newOrder];
+                        newArr.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                        return newArr;
                     });
-                    db.getOrderItems(newOrder.id).then(items => cache.addOrUpdateCachedOrder({ ...newOrder, items }));
+                    setIsLoading(false);
                 },
                 onChange: (changedOrder) => {
-                    setOrders(prevOrders => {
-                        const map = new Map(prevOrders.map(o => [o.id, o]));
-                        map.set(changedOrder.id, changedOrder);
-                        // FIX: Use Array.from for robust type inference, as spread syntax was failing.
-                        return sortOrders(Array.from(map.values()));
-                    });
-                    db.getOrderItems(changedOrder.id).then(items => cache.addOrUpdateCachedOrder({ ...changedOrder, items }));
+                    setOrders(prevOrders => 
+                        prevOrders
+                            .map(o => o.id === changedOrder.id ? changedOrder : o)
+                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    );
                 },
                 onRemove: (removedOrder) => {
                     setOrders(prevOrders => prevOrders.filter(o => o.id !== removedOrder.id));
-                    cache.removeCachedOrder(removedOrder.id);
                 }
             },
             startDate
         );
     
+        const timer = setTimeout(() => setIsLoading(false), 2000); // Failsafe to hide spinner if no data arrives
+    
         getAllDraftKeys().then(keys => setDraftKeys(new Set(keys)));
     
-        return () => unsubscribe();
+        return () => {
+            unsubscribe();
+            clearTimeout(timer);
+        };
     }, [isActive, customStartDate, customEndDate]);
 
+    // --- Infinite Scroll Logic ---
     const visibleOrders = useMemo(() => orders.slice(0, visibleCount), [orders, visibleCount]);
 
     useEffect(() => {
@@ -236,16 +231,27 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
 
         const observer = new IntersectionObserver(
             (entries) => {
+                // When the sentinel comes into view and there are more items to load
                 if (entries[0].isIntersecting && orders.length > visibleCount) {
                     setVisibleCount(prev => prev + PAGE_SIZE);
                 }
             },
-            { root: listRef.current, rootMargin: '200px' }
+            { 
+                root: listRef.current, // Use the scrollable container
+                rootMargin: '200px', // Load next items when sentinel is 200px away from viewport
+            }
         );
 
         const currentObserverRef = observerRef.current;
-        if (currentObserverRef) observer.observe(currentObserverRef);
-        return () => { if (currentObserverRef) observer.unobserve(currentObserverRef); };
+        if (currentObserverRef) {
+            observer.observe(currentObserverRef);
+        }
+
+        return () => {
+            if (currentObserverRef) {
+                observer.unobserve(currentObserverRef);
+            }
+        };
     }, [isActive, isLoading, orders.length, visibleCount]);
 
     const groupedOrders = useMemo(() => {
@@ -253,15 +259,21 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
 
         visibleOrders.forEach(order => {
             const d = new Date(order.date);
+            // Use local date components to form the key, avoiding timezone issues with toISOString()
             const dateKey = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
-            if (!groups[dateKey]) groups[dateKey] = { orders: [], total: 0 };
+            if (!groups[dateKey]) {
+                groups[dateKey] = { orders: [], total: 0 };
+            }
             groups[dateKey].orders.push(order);
             groups[dateKey].total += order.total;
         });
 
         return Object.keys(groups)
             .sort((a, b) => b.localeCompare(a))
-            .map(dateKey => ({ date: dateKey, ...groups[dateKey] }));
+            .map(dateKey => ({
+                date: dateKey,
+                ...groups[dateKey]
+            }));
     }, [visibleOrders]);
 
     useEffect(() => {
@@ -285,7 +297,9 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         if (activeMenuOrderId !== null) {
             document.addEventListener('click', handleClickOutside, true);
         }
-        return () => document.removeEventListener('click', handleClickOutside, true);
+        return () => {
+            document.removeEventListener('click', handleClickOutside, true);
+        };
     }, [activeMenuOrderId]);
 
     const handleMenuToggle = (e: React.MouseEvent, orderId: number) => {
@@ -318,12 +332,11 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         });
         
         const handleSms = closeMenuAnd(async () => {
-            const items = order.items || await db.getOrderItems(order.id);
-            if(items.length === 0){
+            const orderWithItems = { ...order, items: await db.getOrderItems(order.id) };
+            if(orderWithItems.items.length === 0){
                 showAlert("품목이 없어 내보낼 수 없습니다.");
                 return;
             }
-            const orderWithItems = { ...order, items };
             const smsBody = exportToSMS(orderWithItems);
             const encodedSmsBody = encodeURIComponent(smsBody);
             window.location.href = `sms:?body=${encodedSmsBody}`;
@@ -332,13 +345,18 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         });
 
         const handleXls = closeMenuAnd(async () => {
-            const items = order.items || await db.getOrderItems(order.id);
-            if (items.length === 0) {
-                showAlert("품목이 없어 내보낼 수 없습니다.");
-                return;
+            try {
+                const items = await db.getOrderItems(order.id);
+                if (items.length === 0) {
+                    showAlert("품목이 없어 내보낼 수 없습니다.");
+                    return;
+                }
+                const orderWithItems = { ...order, items };
+                openDeliveryModal(orderWithItems);
+            } catch (error) {
+                console.error("Failed to fetch order items for XLS export:", error);
+                showAlert("XLS로 내보내기 위해 주문 품목을 불러오는 데 실패했습니다.");
             }
-            const orderWithItems = { ...order, items };
-            openDeliveryModal(orderWithItems);
         });
         
         const menuItems: ActionMenuItem[] = [];
@@ -356,9 +374,14 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     }, [showAlert, deleteOrder, updateOrderStatus, openDeliveryModal]);
     
     const handleCardClick = useCallback(async (order: Order) => {
-        const items = order.items || await db.getOrderItems(order.id);
-        openDetailModal({ ...order, items });
-    }, [openDetailModal]);
+        try {
+            const items = await db.getOrderItems(order.id);
+            openDetailModal({ ...order, items });
+        } catch (error) {
+            console.error("Failed to fetch order items:", error);
+            showAlert("주문 상세 정보를 불러오는 데 실패했습니다.");
+        }
+    }, [openDetailModal, showAlert]);
 
     return (
         <div className="h-full flex flex-col bg-white">
@@ -402,7 +425,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                             <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
                                         </div>
                                         <div className="divide-y divide-gray-200">
-                                            {group.orders.map((order, index) => (
+                                            {group.orders.map(order => (
                                                 <OrderRow
                                                     key={order.id}
                                                     order={order}
@@ -412,7 +435,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                                     onCardClick={() => handleCardClick(order)}
                                                     onMenuToggle={(e) => handleMenuToggle(e, order.id)}
                                                     actionMenuItems={getActionMenuItems(order)}
-                                                    index={index}
+                                                    index={visibleOrders.findIndex(o => o.id === order.id)}
                                                 />
                                             ))}
                                         </div>
@@ -421,8 +444,10 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                             })}
                         </div>
                         
+                        {/* Sentinel for infinite scroll */}
                         <div ref={observerRef} style={{ height: '1px' }} />
 
+                        {/* Loading indicator at the bottom */}
                         {isActive && !isLoading && orders.length > 0 && visibleCount < orders.length && (
                             <div className="flex justify-center items-center p-4">
                                 <SpinnerIcon className="w-8 h-8 text-blue-500" />
