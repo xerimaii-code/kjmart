@@ -105,7 +105,7 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
     const hasSalePrice = !!product.salePrice;
 
     return (
-        <div onMouseDown={(e) => e.preventDefault()} onClick={() => onClick(product)} className="relative overflow-hidden p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
+        <div onClick={() => onClick(product)} className="relative overflow-hidden p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
             {saleIsActive && hasSalePrice && (
                 <div className="sale-ribbon">SALE</div>
             )}

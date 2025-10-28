@@ -112,31 +112,6 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 
 const InitialSyncLoader: React.FC = () => {
     const { syncProgress, syncStatusText } = useSyncState();
-    const [displayedProgress, setDisplayedProgress] = useState(0);
-    const radius = 42;
-    const strokeWidth = 10;
-    const circumference = 2 * Math.PI * radius;
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setDisplayedProgress(prev => {
-                if (prev < syncProgress) {
-                    const diff = syncProgress - prev;
-                    // Move faster for larger gaps, but ensure at least 1% increment
-                    const step = Math.max(1, Math.floor(diff / 10)); 
-                    return Math.min(prev + step, syncProgress);
-                }
-                if (prev > syncProgress) {
-                    return syncProgress; // Snap back if progress goes down
-                }
-                // At this point, prev === syncProgress, so we can stop.
-                clearInterval(interval);
-                return prev;
-            });
-        }, 30); // ~33fps animation feels smooth
-
-        return () => clearInterval(interval);
-    }, [syncProgress]);
     
     const syncSteps = [
         { name: '로컬 캐시 로딩', progressThreshold: 0 },
@@ -167,49 +142,14 @@ const InitialSyncLoader: React.FC = () => {
 
     return (
         <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-4">
-            <div className="relative w-36 h-36 mb-4">
-                <svg className="w-full h-full" viewBox="0 0 100 100">
-                     <defs>
-                        <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="rgb(96 165 250)" /> {/* blue-400 */}
-                            <stop offset="100%" stopColor="rgb(59 130 246)" /> {/* blue-500 */}
-                        </linearGradient>
-                    </defs>
-                    {/* Background circle */}
-                    <circle
-                        className="text-gray-200"
-                        strokeWidth={strokeWidth}
-                        stroke="currentColor"
-                        fill="transparent"
-                        r={radius}
-                        cx="50"
-                        cy="50"
-                    />
-                    {/* Progress circle */}
-                    <circle
-                        strokeWidth={strokeWidth}
-                        strokeDasharray={circumference}
-                        strokeDashoffset={circumference * (1 - displayedProgress / 100)}
-                        strokeLinecap="round"
-                        stroke="url(#progressGradient)"
-                        fill="transparent"
-                        r={radius}
-                        cx="50"
-                        cy="50"
-                        style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 0.2s linear' }}
-                    />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <span className="text-4xl font-bold text-gray-800 tabular-nums">
-                        {Math.round(displayedProgress)}%
-                    </span>
-                    <p className="mt-1 text-sm font-medium text-gray-500 h-5" key={syncStatusText}>
-                        {syncStatusText}
-                    </p>
-                </div>
+            <div className="flex flex-col items-center text-center mb-8 animate-fade-in-down">
+                <SpinnerIcon className="w-16 h-16 text-blue-500" />
+                <p className="mt-6 text-lg font-semibold text-gray-700 h-6" key={syncStatusText}>
+                    {syncStatusText}
+                </p>
             </div>
             
-            <div className="mt-4 w-full max-w-xs bg-white/50 backdrop-blur-sm p-5 rounded-xl shadow-lg border border-gray-200/60 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
+            <div className="w-full max-w-xs bg-white/50 backdrop-blur-sm p-5 rounded-xl shadow-lg border border-gray-200/60 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
                 <ul className="space-y-3">
                     {syncSteps.map((step, index) => {
                         const nextStep = syncSteps[index + 1];

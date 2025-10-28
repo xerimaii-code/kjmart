@@ -1,11 +1,25 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
 import { ExitFullscreenIcon, SpinnerIcon } from './Icons';
 import { useSyncState } from '../context/AppContext';
 
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
-    const { isSyncing, isOnline } = useSyncState();
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+    const { isSyncing } = useSyncState();
+
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
     const handleExitFullscreen = async () => {
         const exitFullscreen =

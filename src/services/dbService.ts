@@ -4,6 +4,7 @@ import 'firebase/compat/auth';
 import 'firebase/compat/database';
 import { firebaseConfig } from '../firebaseConfig';
 import { Order, OrderItem, Customer, Product, SyncLog } from '../types';
+import * as queue from './writeQueueService';
 
 let app: firebase.app.App | null = null;
 let db: firebase.database.Database | null = null;
@@ -196,8 +197,16 @@ export const addOrderWithItems = async (
     updates[`/orders/${newOrderId}`] = newOrder;
     updates[`/order-items/${newOrderId}`] = items;
 
-    // FIX: Use v8 compat API for update()
-    await db.ref().update(updates);
+    const op = { id: `add_${newOrderId}`, payload: updates, timestamp: Date.now() };
+    await queue.add(op);
+    
+    try {
+        await db.ref().update(updates);
+        await queue.remove(op.id);
+    } catch (error) {
+        console.warn('Firebase write failed, operation queued:', error);
+    }
+
     return newOrderId;
 };
 
@@ -211,8 +220,15 @@ export const updateOrderAndItems = async (order: Omit<Order, 'items'>, items: Or
     updates[`/orders/${order.id}`] = updatedOrderData;
     updates[`/order-items/${order.id}`] = items;
     
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+    const op = { id: `update_${order.id}`, payload: updates, timestamp: Date.now() };
+    await queue.add(op);
+
+    try {
+        await db.ref().update(updates);
+        await queue.remove(op.id);
+    } catch (error) {
+        console.warn('Firebase update failed, operation queued:', error);
+    }
 };
 
 export const updateOrderStatus = async (
@@ -228,17 +244,33 @@ export const updateOrderStatus = async (
         [`/orders/${orderId}/updatedAt`]: now,
         [`/orders/${orderId}/date`]: now,
     };
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+
+    const op = { id: `status_${orderId}`, payload: updates, timestamp: Date.now() };
+    await queue.add(op);
+
+    try {
+        await db.ref().update(updates);
+        await queue.remove(op.id);
+    } catch (error) {
+        console.warn('Firebase status update failed, operation queued:', error);
+    }
 };
 
-export const deleteOrderAndItems = (orderId: number): Promise<void> => {
+export const deleteOrderAndItems = async (orderId: number): Promise<void> => {
     if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     const updates: { [key: string]: null } = {};
     updates[`/orders/${orderId}`] = null;
     updates[`/order-items/${orderId}`] = null;
-    // FIX: Use v8 compat API for update()
-    return db.ref().update(updates);
+    
+    const op = { id: `delete_${orderId}`, payload: updates, timestamp: Date.now() };
+    await queue.add(op);
+
+    try {
+        await db.ref().update(updates);
+        await queue.remove(op.id);
+    } catch (error) {
+        console.warn('Firebase delete failed, operation queued:', error);
+    }
 };
 
 export const replaceAll = <T>(storeName: string, items: T[]): Promise<void> => {

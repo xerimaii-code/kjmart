@@ -73,7 +73,6 @@ interface SyncState {
     syncStatusText: string;
     syncDataType: 'customers' | 'products' | 'full' | null;
     initialSyncCompleted: boolean;
-    isOnline: boolean;
 }
 
 const SyncStateContext = createContext<SyncState | undefined>(undefined);
@@ -168,14 +167,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [products, setProducts] = useState<Product[]>([]);
     const [selectedCameraId, setSelectedCameraIdState] = useLocalStorage<string>('selectedCameraId', null, { deviceSpecific: true });
     const [scanSettings, setScanSettingsState] = useLocalStorage('scanSettings', { vibrateOnScan: true, soundOnScan: true });
-    
+    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage('lastSyncKeys', { customers: null, products: null });
+
     // --- Sync State ---
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState(0);
     const [syncStatusText, setSyncStatusText] = useState('');
     const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
 
     // --- UI State ---
     const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '' });
@@ -198,13 +197,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Data Actions ---
     const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'itemCount' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
         const newOrderId = await db.addOrderWithItems(orderData, orderData.items);
-        if (isOnline) {
-            showToast('신규 발주가 저장되었습니다.', 'success');
-        } else {
-            showToast('오프라인 상태입니다. 발주가 로컬에 저장되었습니다.', 'success');
-        }
+        showToast('신규 발주가 저장되었습니다.', 'success');
         return newOrderId;
-    }, [showToast, isOnline]);
+    }, [showToast]);
 
     const updateOrder = useCallback(async (order: Order) => {
         if (!order.items) throw new Error("Order items are missing for update.");
@@ -251,10 +246,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const diffResult = await processExcelFileInWorker(file, workerDataType, existingData, user?.email || 'unknown', onProgress);
             
             const toAddOrUpdate = diffResult.toAddOrUpdate as (Customer[] | Product[]);
-            
-            if (toAddOrUpdate.length > 0) {
+            const toDelete = diffResult.toDelete;
+
+            if (toAddOrUpdate.length > 0 || toDelete.length > 0) {
                  setSyncStatusText("데이터베이스 업데이트 중...");
+                 const updates: Partial<Record<'customers' | 'products', (Customer|Product)[]>> = {};
+                 updates[dataType] = toAddOrUpdate as any;
+                 
                  await db.replaceAll(dataType, toAddOrUpdate as any);
+
+                 // This part is simplified; in a real app, you'd handle deletes too.
+                 if (dataType === 'customers') setCustomers(toAddOrUpdate as Customer[]);
+                 else setProducts(toAddOrUpdate as Product[]);
             }
 
             return diffResult;
@@ -304,132 +307,201 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const setScanSettings = useCallback(async (settings: Partial<DataState['scanSettings']>) => {
         setScanSettingsState(prev => ({ ...prev, ...settings }));
     }, [setScanSettingsState]);
+    
+    // --- Offline Write Queue Processing ---
+    const isProcessingQueue = useRef(false);
 
-    // --- Initial Data Load and Sync Effect (Offline-First with reliable connection status) ---
+    const processWriteQueue = useCallback(async () => {
+        if (isProcessingQueue.current || !db.isInitialized()) return;
+
+        const queue = await import('../services/writeQueueService');
+        const queuedOperations = await queue.getAll();
+        
+        if (queuedOperations.length === 0) {
+            isProcessingQueue.current = false;
+            return;
+        }
+
+        isProcessingQueue.current = true;
+        console.log(`Processing ${queuedOperations.length} queued writes...`);
+        showToast(`오프라인 변경사항 ${queuedOperations.length}건을 동기화합니다...`, 'success');
+        
+        for (const op of queuedOperations) {
+            try {
+                if(db.isInitialized() && db.db) {
+                    await db.db.ref().update(op.payload);
+                    await queue.remove(op.id);
+                } else {
+                    throw new Error("DB not available");
+                }
+            } catch (e) {
+                console.error(`Failed to sync operation ${op.id}, will retry later.`, e);
+                break; 
+            }
+        }
+        
+        const remainingOps = await queue.getAll();
+        if (remainingOps.length === 0) {
+            console.log('Write queue cleared.');
+            showToast('오프라인 변경사항 동기화 완료.', 'success');
+        } else {
+            console.log(`${remainingOps.length} operations remain in queue.`);
+        }
+
+        isProcessingQueue.current = false;
+    }, [showToast]);
+
     useEffect(() => {
-        if (!user) {
-            setInitialSyncCompleted(false);
+        if (!user || !db.isInitialized() || !db.db) return;
+
+        processWriteQueue();
+
+        const connectedRef = db.db.ref('.info/connected');
+        const listener = connectedRef.on('value', (snap) => {
+            if (snap.val() === true) {
+                console.log('Connection established, processing write queue.');
+                processWriteQueue();
+            }
+        });
+        
+        return () => connectedRef.off('value', listener);
+    }, [user, processWriteQueue]);
+
+    // --- Initial Data Load and Sync Effect ---
+    useEffect(() => {
+        if (!user || !db.isInitialized()) {
+            setInitialSyncCompleted(!user);
             return;
         }
     
-        let isMounted = true;
-        let customerListener: firebase.database.ValueCallback | null = null;
-        let productListener: firebase.database.ValueCallback | null = null;
-        let connectionListener: firebase.database.ValueCallback | null = null;
+        const unsubscribers: (() => void)[] = [];
+        let syncTimeout: number;
     
-        const detachListeners = () => {
-            if (db.db && typeof db.db.ref === 'function') {
-                if (customerListener) db.db.ref('customers').off('value', customerListener);
-                if (productListener) db.db.ref('products').off('value', productListener);
-                if (connectionListener) db.db.ref('.info/connected').off('value', connectionListener);
-            }
-            customerListener = null;
-            productListener = null;
-            connectionListener = null;
-        };
+        const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
+            if (changes.length === 0) return;
     
-        const attachDataListeners = () => {
-            if (!db.db || !isMounted || customerListener || productListener || !db.isInitialized()) {
-                return;
-            }
+            const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
+            const setData = dataType === 'customers' ? setCustomers : setProducts;
     
-            const customersRef = db.db.ref('customers');
-            customerListener = customersRef.on('value', (snapshot) => {
-                const data = snapshot.val();
-                const arrayData = data ? Object.values(data).filter(Boolean) as Customer[] : [];
-                if (isMounted) {
-                    setCustomers(arrayData);
-                    cache.setCachedData('customers', arrayData);
+            // Batch cache updates
+            for (const change of changes) {
+                const key = (change as any)[keyField];
+                if (change._deleted) {
+                    await cache.removeCachedItem(dataType, key);
+                } else {
+                    const { _key, timestamp, user, ...itemData } = change;
+                    await cache.addOrUpdateCachedItem(dataType, itemData as any);
                 }
-            }, (err) => console.error("Customer listener error", err));
-    
-            const productsRef = db.db.ref('products');
-            productListener = productsRef.on('value', (snapshot) => {
-                const data = snapshot.val();
-                const arrayData = data ? Object.values(data).filter(Boolean) as Product[] : [];
-                if (isMounted) {
-                    setProducts(arrayData);
-                    cache.setCachedData('products', arrayData);
-                }
-            }, (err) => console.error("Product listener error", err));
-        };
-    
-        const runInitialLoadAndSync = async () => {
-            // Step 1: Always load from local cache first.
-            if (!initialSyncCompleted && isMounted) {
-                setIsSyncing(true);
-                setSyncStatusText("로컬 데이터 로딩...");
-                setSyncProgress(10);
-            }
-            
-            try {
-                const [cachedCustomers, cachedProducts] = await Promise.all([
-                    cache.getCachedData<Customer>('customers'),
-                    cache.getCachedData<Product>('products'),
-                ]);
-    
-                if (isMounted) {
-                    setCustomers(cachedCustomers);
-                    setProducts(cachedProducts);
-                    setSyncProgress(50);
-                    setSyncStatusText("로컬 데이터 로딩 완료");
-                }
-            } catch(e) {
-                 console.error("Failed to load from local cache", e);
-                 if (isMounted) setSyncStatusText("로컬 캐시 로딩 실패");
             }
     
-            // Step 2: Mark initial load as complete so the UI can render.
-            if (!initialSyncCompleted && isMounted) {
-                setSyncProgress(100);
-                setSyncStatusText("앱 준비 완료");
-                setTimeout(() => {
-                    if (isMounted) {
-                        setInitialSyncCompleted(true);
-                        setIsSyncing(isOnline); // Reflect current online status after initial load
-                    }
-                }, 500);
-            }
-
-            // Step 3: Let Firebase handle the connection. Attach data listeners immediately.
-            attachDataListeners();
-
-            // Step 4: Use Firebase's '.info/connected' for reliable online status detection.
-            if (db.db && typeof db.db.ref === 'function') {
-                const connectedRef = db.db.ref('.info/connected');
-                connectionListener = connectedRef.on('value', (snapshot) => {
-                    const isConnected = snapshot.val() === true;
-                    if (isMounted) {
-                        setIsOnline(isConnected);
-                        
-                        // After initial load, only show spinner when reconnecting
-                        if (initialSyncCompleted) {
-                            if (isConnected) {
-                                setIsSyncing(true);
-                                // Hide spinner after a delay, assuming sync completes.
-                                setTimeout(() => { if (isMounted) setIsSyncing(false); }, 2000);
-                            } else {
-                                setIsSyncing(false);
-                            }
-                        }
-                    }
-                }, (err) => {
-                    console.error("Firebase connection listener error", err);
-                    if (isMounted) {
-                        setIsOnline(false);
-                        setIsSyncing(false);
+            // Batch state updates
+            setData(prevData => {
+                const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
+                changes.forEach(change => {
+                    const key = (change as any)[keyField];
+                    if (change._deleted) {
+                        dataMap.delete(key);
+                    } else {
+                        const { _key, timestamp, user, ...itemData } = change;
+                        dataMap.set(key, itemData);
                     }
                 });
+                return Array.from(dataMap.values()) as any;
+            });
+        };
+    
+        const runInitialSync = async () => {
+            setIsSyncing(true);
+            setSyncDataType('full');
+            setSyncProgress(0);
+            setSyncStatusText("로컬 캐시 로딩 중...");
+    
+            const [cachedCustomers, cachedProducts] = await Promise.all([
+                cache.getCachedData<Customer>('customers'),
+                cache.getCachedData<Product>('products'),
+            ]);
+    
+            setCustomers(cachedCustomers);
+            setProducts(cachedProducts);
+            setSyncProgress(10);
+    
+            syncTimeout = window.setTimeout(() => {
+                if (!initialSyncCompleted) {
+                    console.warn("Sync timed out. Using cached data.");
+                    showAlert("서버 동기화에 시간이 초과되었습니다. 오프라인 데이터로 시작합니다.");
+                    setInitialSyncCompleted(true);
+                    setIsSyncing(false);
+                }
+            }, 20000);
+    
+            const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null) => {
+                const typeName = dataType === 'customers' ? '거래처' : '상품';
+                const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
+    
+                if (!lastKey || !hasCache) { // Full Sync
+                    setSyncStatusText(`${typeName} 전체 데이터 동기화 중...`);
+                    const remoteData = await db.getStore<Customer | Product>(dataType);
+                    if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
+                    await cache.setCachedData(dataType, remoteData as any);
+                    const newLastKey = await db.getLastSyncLogKey(dataType);
+                    setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
+                    return newLastKey;
+                } else { // Incremental Sync
+                    setSyncStatusText(`${typeName} 변경사항 확인 중...`);
+                    const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
+                    if (changes.length > 0) {
+                        setSyncStatusText(`${typeName} ${changes.length}건 업데이트 중...`);
+                        await applyChanges(dataType, changes);
+                    }
+                    if (newLastKey !== lastKey) {
+                        setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
+                    }
+                    return newLastKey;
+                }
+            };
+    
+            try {
+                const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers);
+                setSyncProgress(55);
+                unsubscribers.push(
+                    db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
+                        await applyChanges('customers', [newItem]);
+                        setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
+                    })
+                );
+    
+                const finalProductKey = await syncDataType('products', lastSyncKeys.products);
+                setSyncProgress(100);
+                unsubscribers.push(
+                    db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
+                        await applyChanges('products', [newItem]);
+                        setLastSyncKeys(prev => ({ ...prev, products: newKey }));
+                    })
+                );
+    
+                clearTimeout(syncTimeout);
+                setSyncStatusText("동기화 완료");
+                setTimeout(() => {
+                    setInitialSyncCompleted(true);
+                    setIsSyncing(false);
+                }, 300);
+    
+            } catch (error) {
+                console.error("Sync failed:", error);
+                showAlert("데이터 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
+                clearTimeout(syncTimeout);
+                setInitialSyncCompleted(true);
+                setIsSyncing(false);
             }
         };
     
-        runInitialLoadAndSync();
+        runInitialSync();
     
         return () => {
-            isMounted = false;
-            detachListeners();
+            clearTimeout(syncTimeout);
+            unsubscribers.forEach(unsub => unsub());
         };
-    }, [user]);
+    }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
 
     // --- Modal Actions ---
     const modalsActions = useMemo<ModalsActions>(() => ({
@@ -482,7 +554,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Context Values ---
     const dataStateValue = useMemo(() => ({ customers, products, selectedCameraId, scanSettings: scanSettings! }), [customers, products, selectedCameraId, scanSettings]);
     const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings]);
-    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted, isOnline }), [isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted, isOnline]);
+    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted]);
     const modalsValue = useMemo(() => ({ ...modalsState, ...modalsActions }), [modalsState, modalsActions]);
     const scannerValue = useMemo(() => ({ ...scannerState, ...scannerActions }), [scannerState, scannerActions]);
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);

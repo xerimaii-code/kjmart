@@ -92,11 +92,7 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
     const hasSalePrice = !!product.salePrice;
 
     return (
-        <div
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onClick(product)}
-            className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0"
-        >
+        <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
             <div className="flex flex-col items-start w-full gap-y-1">
                 {/* Line 1: Product Name, Sale Badge */}
                 <div className="flex items-center gap-2 flex-wrap w-full">
@@ -315,7 +311,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         );
     }, [showAlert, resetOrder]);
     
-    const handleSaveOrder = useCallback(() => {
+    const handleSaveOrder = useCallback(async () => {
         if (!selectedCustomer) {
             showAlert("거래처를 선택해주세요.");
             return;
@@ -324,31 +320,25 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             showAlert("발주할 품목이 없습니다.");
             return;
         }
-    
+
         setIsSaving(true);
-    
-        // Fire-and-forget the save operation from the UI's perspective.
-        // The promise chain will handle the results in the background.
-        addOrder({
-            customer: selectedCustomer,
-            items,
-            total: totalAmount,
-            memo: memo.trim(),
-        }).then(newOrderId => {
+        try {
+            const newOrderId = await addOrder({
+                customer: selectedCustomer,
+                items,
+                total: totalAmount,
+                memo: memo.trim(),
+            });
             setLastModifiedOrderId(newOrderId);
-            deleteDraft(DRAFT_KEY).catch(err => console.warn("Could not delete draft after saving order:", err));
-        }).catch(error => {
-            console.error("Failed to save order:", error);
-            showAlert("발주 저장 중 오류가 발생했습니다. 데이터는 오프라인으로 저장되었으나 서버 동기화에 실패할 수 있습니다.");
-        });
-        
-        // To ensure the user sees the loading state for feedback,
-        // we reset the UI after a short delay. This makes the action feel more tangible.
-        setTimeout(() => {
+            await deleteDraft(DRAFT_KEY).catch(err => console.warn("Could not delete draft after saving order:", err));
             resetOrder({ preventFocus: true });
+        } catch (error) {
+            console.error("Failed to save order:", error);
+            showAlert("발주 저장에 실패했습니다.");
             setIsSaving(false);
-        }, 400);
-    
+        } finally {
+            setIsSaving(false);
+        }
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
     const handleAddProductFromSearch = useCallback((product: Product) => {
@@ -364,7 +354,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         setShowProductDropdown(false);
         productSearchInputRef.current?.blur();
     }, [items, openAddItemModal, addOrUpdateItem, isBoxUnitDefault]);
-
 
     const handleOpenScanner: () => void = useCallback(() => {
         if (!isCustomerSelected) {
@@ -461,11 +450,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             <SearchDropdown<Customer>
                                 items={filteredCustomers}
                                 renderItem={(c) => (
-                                    <div
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => handleSelectCustomer(c)}
-                                        className="p-3 hover:bg-gray-100 cursor-pointer"
-                                    >
+                                    <div onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer">
                                         <p className="font-semibold text-gray-800">{c.name}</p>
                                         <p className="text-sm text-gray-500">{c.comcode}</p>
                                     </div>
