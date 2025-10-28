@@ -175,6 +175,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [syncStatusText, setSyncStatusText] = useState('');
     const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
+    const isSyncingRef = useRef(false);
 
     // --- UI State ---
     const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '' });
@@ -184,6 +185,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [scannerState, setScannerState] = useState<ScannerState>({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false });
     const [isInstallPromptAvailable, setInstallPromptAvailable] = useState(false);
     const deferredInstallPrompt = useRef<any>(null);
+    
+    // Sync isSyncing state to a ref to prevent stale closures in async functions
+    useEffect(() => {
+        isSyncingRef.current = isSyncing;
+    }, [isSyncing]);
 
     // --- Alert & Toast Actions ---
     const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
@@ -308,23 +314,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setScanSettingsState(prev => ({ ...prev, ...settings }));
     }, [setScanSettingsState]);
     
-    // --- Initial Data Load and Sync Effect ---
+    // --- Initial Data Load and Sync Effect (Offline-First Approach) ---
     useEffect(() => {
         if (!user || !db.isInitialized()) {
             setInitialSyncCompleted(!user);
             return;
         }
-    
-        const unsubscribers: (() => void)[] = [];
-        let syncTimeout: number;
-    
+
+        const unsubscribers = { ref: [] as (() => void)[] };
+
         const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
             if (changes.length === 0) return;
     
             const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
             const setData = dataType === 'customers' ? setCustomers : setProducts;
     
-            // Batch cache updates
             for (const change of changes) {
                 const key = (change as any)[keyField];
                 if (change._deleted) {
@@ -335,7 +339,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
             }
     
-            // Batch state updates
             setData(prevData => {
                 const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
                 changes.forEach(change => {
@@ -350,61 +353,44 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 return Array.from(dataMap.values()) as any;
             });
         };
-    
-        const runInitialSync = async () => {
+        
+        const backgroundSyncWithFirebase = async () => {
+            if (isSyncingRef.current || !navigator.onLine) {
+                return;
+            }
+
             setIsSyncing(true);
             setSyncDataType('full');
-            setSyncProgress(0);
-            setSyncStatusText("로컬 캐시 로딩 중...");
-    
-            const [cachedCustomers, cachedProducts] = await Promise.all([
-                cache.getCachedData<Customer>('customers'),
-                cache.getCachedData<Product>('products'),
-            ]);
-    
-            setCustomers(cachedCustomers);
-            setProducts(cachedProducts);
-            setSyncProgress(10);
-    
-            syncTimeout = window.setTimeout(() => {
-                if (!initialSyncCompleted) {
-                    console.warn("Sync timed out. Using cached data.");
-                    showAlert("서버 동기화에 시간이 초과되었습니다. 오프라인 데이터로 시작합니다.");
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }
-            }, 20000);
-    
-            const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null) => {
-                const typeName = dataType === 'customers' ? '거래처' : '상품';
-                const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
-    
-                if (!lastKey || !hasCache) { // Full Sync
-                    setSyncStatusText(`${typeName} 전체 데이터 동기화 중...`);
-                    const remoteData = await db.getStore<Customer | Product>(dataType);
-                    if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
-                    await cache.setCachedData(dataType, remoteData as any);
-                    const newLastKey = await db.getLastSyncLogKey(dataType);
-                    setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
-                    return newLastKey;
-                } else { // Incremental Sync
-                    setSyncStatusText(`${typeName} 변경사항 확인 중...`);
-                    const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
-                    if (changes.length > 0) {
-                        setSyncStatusText(`${typeName} ${changes.length}건 업데이트 중...`);
-                        await applyChanges(dataType, changes);
-                    }
-                    if (newLastKey !== lastKey) {
-                        setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
-                    }
-                    return newLastKey;
-                }
-            };
-    
+            
+            unsubscribers.ref.forEach(unsub => unsub());
+            unsubscribers.ref = [];
+
             try {
+                const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null) => {
+                    const typeName = dataType === 'customers' ? '거래처' : '상품';
+                    const hasCache = (dataType === 'customers' ? customers.length > 0 : products.length > 0);
+    
+                    if (!lastKey || !hasCache) {
+                        const remoteData = await db.getStore<Customer | Product>(dataType);
+                        if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
+                        await cache.setCachedData(dataType, remoteData as any);
+                        const newLastKey = await db.getLastSyncLogKey(dataType);
+                        setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
+                        return newLastKey;
+                    } else {
+                        const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
+                        if (changes.length > 0) {
+                            await applyChanges(dataType, changes);
+                        }
+                        if (newLastKey !== lastKey) {
+                            setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
+                        }
+                        return newLastKey;
+                    }
+                };
+    
                 const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers);
-                setSyncProgress(55);
-                unsubscribers.push(
+                unsubscribers.ref.push(
                     db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
                         await applyChanges('customers', [newItem]);
                         setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
@@ -412,37 +398,67 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 );
     
                 const finalProductKey = await syncDataType('products', lastSyncKeys.products);
-                setSyncProgress(100);
-                unsubscribers.push(
+                unsubscribers.ref.push(
                     db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
                         await applyChanges('products', [newItem]);
                         setLastSyncKeys(prev => ({ ...prev, products: newKey }));
                     })
                 );
-    
-                clearTimeout(syncTimeout);
-                setSyncStatusText("동기화 완료");
-                setTimeout(() => {
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }, 300);
-    
+                
+                showToast("데이터가 서버와 동기화되었습니다.", "success");
             } catch (error) {
-                console.error("Sync failed:", error);
-                showAlert("데이터 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
-                clearTimeout(syncTimeout);
-                setInitialSyncCompleted(true);
+                console.error("Background sync failed:", error);
+                showToast("백그라운드 동기화에 실패했습니다.", "error");
+            } finally {
                 setIsSyncing(false);
+                setSyncDataType(null);
             }
         };
-    
-        runInitialSync();
-    
-        return () => {
-            clearTimeout(syncTimeout);
-            unsubscribers.forEach(unsub => unsub());
+        
+        const runInitialLoad = async () => {
+            setSyncStatusText("로컬 캐시 로딩 중...");
+            setSyncProgress(0);
+
+            try {
+                const [cachedCustomers, cachedProducts] = await Promise.all([
+                    cache.getCachedData<Customer>('customers'),
+                    cache.getCachedData<Product>('products'),
+                ]);
+
+                setCustomers(cachedCustomers);
+                setProducts(cachedProducts);
+                setSyncProgress(100);
+                setSyncStatusText(navigator.onLine ? "앱 준비 완료" : "앱 준비 완료 (오프라인)");
+
+                setTimeout(() => {
+                    setInitialSyncCompleted(true);
+                }, 300);
+
+                if (navigator.onLine) {
+                    await backgroundSyncWithFirebase();
+                }
+            } catch (err) {
+                console.error("Failed to load initial data from cache:", err);
+                showAlert("로컬 데이터를 불러올 수 없습니다. 앱을 재시작해주세요.");
+            }
         };
-    }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
+
+        runInitialLoad();
+
+        const handleOnline = () => {
+            console.log("Network status changed to online. Starting sync.");
+            showToast("온라인 상태입니다. 데이터 동기화를 시작합니다.", "success");
+            backgroundSyncWithFirebase();
+        };
+
+        window.addEventListener('online', handleOnline);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            unsubscribers.ref.forEach(unsub => unsub());
+            unsubscribers.ref = [];
+        };
+    }, [user, showToast, showAlert, lastSyncKeys, setLastSyncKeys, customers.length, products.length]);
 
     // --- Modal Actions ---
     const modalsActions = useMemo<ModalsActions>(() => ({

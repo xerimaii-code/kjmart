@@ -5,7 +5,7 @@ import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon
 import { exportToSMS } from '../services/dataService';
 import { getAllDraftKeys } from '../services/draftDbService';
 import * as db from '../services/dbService';
-import * as cache from '../services/cacheDbService';
+import * as cache from './cacheDbService';
 
 const PAGE_SIZE = 30;
 
@@ -202,8 +202,8 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                     setOrders(prevOrders => {
                         const map = new Map(prevOrders.map(o => [o.id, o]));
                         map.set(newOrder.id, newOrder);
-                        // FIX: Use spread syntax to ensure correct type inference for sortOrders.
-                        return sortOrders([...map.values()]);
+                        // FIX: Use Array.from for robust type inference, as spread syntax was failing.
+                        return sortOrders(Array.from(map.values()));
                     });
                     db.getOrderItems(newOrder.id).then(items => cache.addOrUpdateCachedOrder({ ...newOrder, items }));
                 },
@@ -211,8 +211,8 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                     setOrders(prevOrders => {
                         const map = new Map(prevOrders.map(o => [o.id, o]));
                         map.set(changedOrder.id, changedOrder);
-                        // FIX: Use spread syntax to ensure correct type inference for sortOrders.
-                        return sortOrders([...map.values()]);
+                        // FIX: Use Array.from for robust type inference, as spread syntax was failing.
+                        return sortOrders(Array.from(map.values()));
                     });
                     db.getOrderItems(changedOrder.id).then(items => cache.addOrUpdateCachedOrder({ ...changedOrder, items }));
                 },
