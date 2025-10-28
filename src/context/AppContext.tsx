@@ -338,43 +338,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const unsubscribers: (() => void)[] = [];
     
         const runInitialLoadAndSync = async () => {
-            // --- Part 1: Initial Load from Cache (Fast Path) ---
+             // Only show the full-screen loader on the very first load sequence.
             if (!initialSyncCompleted) {
                 setIsSyncing(true);
                 setSyncStatusText("로컬 캐시 로딩 중...");
                 setSyncProgress(10);
+            } else {
+                // For subsequent syncs (e.g., reconnection), show the header spinner.
+                setIsSyncing(true);
+            }
     
-                const [cachedCustomers, cachedProducts] = await Promise.all([
-                    cache.getCachedData<Customer>('customers'),
-                    cache.getCachedData<Product>('products'),
-                ]);
+            // Always load local cache first.
+            const [cachedCustomers, cachedProducts] = await Promise.all([
+                cache.getCachedData<Customer>('customers'),
+                cache.getCachedData<Product>('products'),
+            ]);
+            setCustomers(cachedCustomers);
+            setProducts(cachedProducts);
     
-                setCustomers(cachedCustomers);
-                setProducts(cachedProducts);
-                
-                // Unblock UI immediately if we have cached data, or if we are offline (can't do more anyway)
-                if (cachedCustomers.length > 0 || cachedProducts.length > 0 || !isOnline) {
+            // --- OFFLINE STARTUP PATH ---
+            if (!isOnline) {
+                setSyncStatusText("오프라인 모드");
+                if (!initialSyncCompleted) {
                     setSyncProgress(100);
-                    setSyncStatusText(isOnline ? "캐시 데이터 적용 완료" : "오프라인 모드");
                     setTimeout(() => {
                         setInitialSyncCompleted(true);
                         setIsSyncing(false);
                     }, 500);
+                } else {
+                    setIsSyncing(false); // Just stop the header spinner
                 }
+                
+                if (cachedCustomers.length === 0 && cachedProducts.length === 0 && !initialSyncCompleted) {
+                     showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
+                }
+                return; // Stop execution, do not attempt online sync.
             }
             
-            // --- Part 2: Background Sync if Online ---
-            if (!isOnline) {
-                if (!initialSyncCompleted) { // No cache and offline case
-                     showAlert("오프라인 상태이며, 로컬에 저장된 데이터가 없습니다. 인터넷에 연결 후 다시 시도해주세요.");
-                     setIsSyncing(false);
-                }
-                return; // Stop here if offline
-            }
-    
-            setIsSyncing(true); // Show header spinner for background sync
+            // --- ONLINE SYNC PATH ---
             setSyncDataType('full');
-            if (!initialSyncCompleted) setSyncStatusText("서버와 동기화 중...");
+            if (!initialSyncCompleted) {
+                setSyncStatusText("서버와 동기화 중...");
+            }
     
             const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
                 if (changes.length === 0) return;
@@ -405,9 +410,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 });
             };
     
-            const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null) => {
-                const typeName = dataType === 'customers' ? '거래처' : '상품';
-                const hasCache = dataType === 'customers' ? customers.length > 0 : products.length > 0;
+            const syncDataTypeOnline = async (dataType: 'customers' | 'products', lastKey: string | null) => {
+                const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
     
                 if (!lastKey || !hasCache) {
                     const remoteData = await db.getStore<Customer | Product>(dataType);
@@ -424,7 +428,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             };
     
             try {
-                const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers);
+                const finalCustomerKey = await syncDataTypeOnline('customers', lastSyncKeys.customers);
                 if (!initialSyncCompleted) setSyncProgress(55);
                 setLastSyncKeys(prev => ({ ...prev, customers: finalCustomerKey }));
                 unsubscribers.push(db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
@@ -432,7 +436,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
                 }));
     
-                const finalProductKey = await syncDataType('products', lastSyncKeys.products);
+                const finalProductKey = await syncDataTypeOnline('products', lastSyncKeys.products);
                 if (!initialSyncCompleted) setSyncProgress(100);
                 setLastSyncKeys(prev => ({ ...prev, products: finalProductKey }));
                 unsubscribers.push(db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
