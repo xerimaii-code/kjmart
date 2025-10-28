@@ -311,7 +311,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         );
     }, [showAlert, resetOrder]);
     
-    const handleSaveOrder = useCallback(async () => {
+    const handleSaveOrder = useCallback(() => {
         if (!selectedCustomer) {
             showAlert("거래처를 선택해주세요.");
             return;
@@ -320,25 +320,31 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             showAlert("발주할 품목이 없습니다.");
             return;
         }
-
+    
         setIsSaving(true);
-        try {
-            const newOrderId = await addOrder({
-                customer: selectedCustomer,
-                items,
-                total: totalAmount,
-                memo: memo.trim(),
-            });
+    
+        // Fire-and-forget the save operation from the UI's perspective.
+        // The promise chain will handle the results in the background.
+        addOrder({
+            customer: selectedCustomer,
+            items,
+            total: totalAmount,
+            memo: memo.trim(),
+        }).then(newOrderId => {
             setLastModifiedOrderId(newOrderId);
-            await deleteDraft(DRAFT_KEY).catch(err => console.warn("Could not delete draft after saving order:", err));
-            resetOrder({ preventFocus: true });
-        } catch (error) {
+            deleteDraft(DRAFT_KEY).catch(err => console.warn("Could not delete draft after saving order:", err));
+        }).catch(error => {
             console.error("Failed to save order:", error);
-            showAlert("발주 저장에 실패했습니다.");
+            showAlert("발주 저장 중 오류가 발생했습니다. 데이터는 오프라인으로 저장되었으나 서버 동기화에 실패할 수 있습니다.");
+        });
+        
+        // To ensure the user sees the loading state for feedback,
+        // we reset the UI after a short delay. This makes the action feel more tangible.
+        setTimeout(() => {
+            resetOrder({ preventFocus: true });
             setIsSaving(false);
-        } finally {
-            setIsSaving(false);
-        }
+        }, 400);
+    
     }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
     const handleAddProductFromSearch = useCallback((product: Product) => {
