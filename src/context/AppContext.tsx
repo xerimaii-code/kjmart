@@ -357,7 +357,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setProducts(cachedProducts);
     
             // --- OFFLINE STARTUP PATH ---
-            if (!isOnline) {
+            // Direct check of navigator.onLine is more reliable at startup than state.
+            if (!navigator.onLine) {
                 setSyncStatusText("오프라인 모드");
                 if (!initialSyncCompleted) {
                     setSyncProgress(100);

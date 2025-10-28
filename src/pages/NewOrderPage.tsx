@@ -92,7 +92,11 @@ const ProductSearchResultItem: React.FC<{ product: Product, onClick: (product: P
     const hasSalePrice = !!product.salePrice;
 
     return (
-        <div onClick={() => onClick(product)} className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
+        <div
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onClick(product)}
+            className="p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0"
+        >
             <div className="flex flex-col items-start w-full gap-y-1">
                 {/* Line 1: Product Name, Sale Badge */}
                 <div className="flex items-center gap-2 flex-wrap w-full">
