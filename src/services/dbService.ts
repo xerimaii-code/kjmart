@@ -263,14 +263,16 @@ export const deleteOrderAndItems = (orderId: number): Promise<void> => {
     return Promise.resolve();
 };
 
-export const replaceAll = async <T>(storeName: string, items: T[]): Promise<void> => {
+export const replaceAll = async <T>(storeName: string, items: T[] | null): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     
-    let keyField = '';
-    if (storeName === 'customers') keyField = 'comcode';
-    else if (storeName === 'products') keyField = 'barcode';
-    
-    const dataToSet = keyField ? arrayToObject(items, keyField) : items;
+    let dataToSet: any = items;
+    if (items) {
+        let keyField = '';
+        if (storeName === 'customers') keyField = 'comcode';
+        else if (storeName === 'products') keyField = 'barcode';
+        dataToSet = keyField ? arrayToObject(items, keyField) : items;
+    }
 
     await db.ref(storeName).set(dataToSet);
 };
@@ -321,39 +323,40 @@ export const setValue = async (path: string, value: any): Promise<void> => {
     await db.ref(path).set(value);
 };
 
-
-// --- Backup & Restore ---
-export const createBackup = async (): Promise<string> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    // FIX: Use v8 compat API for get()
-    const snapshot = await db.ref().get();
-    return JSON.stringify(snapshot.val(), null, 2);
-};
-
-export const restoreFromBackup = async (json: string): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    const data = JSON.parse(json);
-    await db.ref().set(data);
-};
-
-
 // --- Sync Log Management ---
+
+const areObjectsEqual = (newItem: any, existingItem: any, type: 'customers' | 'products'): boolean => {
+    if (!newItem || !existingItem) return false;
+    // Normalize and remove lastModified for comparison
+    const normalize = (item: any) => {
+        const { lastModified, ...rest } = item;
+        if (type === 'products') {
+            rest.salePrice = rest.salePrice == null ? '' : String(rest.salePrice).trim();
+            rest.saleEndDate = rest.saleEndDate || '';
+            rest.supplierName = (rest.supplierName || '').trim();
+        }
+        rest.name = (rest.name || '').trim();
+        return rest;
+    };
+    return JSON.stringify(normalize(newItem)) === JSON.stringify(normalize(existingItem));
+};
+
 
 export const smartSyncData = async (
     storeName: 'customers' | 'products',
     newData: (Customer | Product)[],
     userEmail: string,
-    onProgress?: (message: string) => void,
+    onProgress: (message: string) => void,
+    existingDataArray: (Customer | Product)[],
     options?: { bypassMassDeleteCheck?: boolean }
 ): Promise<void> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
 
     const keyField = storeName === 'customers' ? 'comcode' : 'barcode';
     
-    onProgress?.('기존 데이터 로딩 중...');
+    onProgress(`기존 데이터(${existingDataArray.length}건)와 비교 시작...`);
     await new Promise(resolve => setTimeout(resolve, 0)); // Yield to main thread
 
-    const existingDataArray = await getStore<Customer | Product>(storeName);
     const existingDataMap = new Map(existingDataArray.map(item => [(item as any)[keyField], item]));
     const newDataMap = new Map(newData.map(item => [(item as any)[keyField], item]));
     
@@ -365,7 +368,8 @@ export const smartSyncData = async (
     // Safeguard against accidental mass deletion
     if (!options?.bypassMassDeleteCheck && numExisting > 100 && numDeletions > numExisting * 0.5) {
         const error = new Error("MASS_DELETION_DETECTED");
-        (error as any).details = { numExisting, numNew, numDeletions };
+        const parsedResult = { valid: newData }; // Create a minimal structure for the proceed function
+        (error as any).details = { numExisting, numNew, numDeletions, parsedResult };
         throw error;
     }
 
@@ -381,10 +385,7 @@ export const smartSyncData = async (
     for (const [key, newItem] of newDataMap.entries()) {
         const existingItem = existingDataMap.get(key);
         
-        const { lastModified: _e, ...restExisting } = existingItem || {};
-        const { lastModified: _n, ...restNew } = newItem as any;
-        
-        if (!existingItem || JSON.stringify(restExisting) !== JSON.stringify(restNew)) {
+        if (!existingItem || !areObjectsEqual(newItem, existingItem, storeName)) {
             const itemWithMeta = { ...newItem, lastModified: nowISO };
             const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
 
@@ -396,7 +397,7 @@ export const smartSyncData = async (
 
         processedNew++;
         if (processedNew % 100 === 0) { // Yield to main thread every 100 items
-            onProgress?.(`변경/추가 확인 중... (${processedNew}/${totalNew})`);
+            onProgress(`변경/추가 확인 중... (${processedNew}/${totalNew})`);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
     }
@@ -419,13 +420,13 @@ export const smartSyncData = async (
         }
         processedExisting++;
         if (processedExisting % 100 === 0) {
-            onProgress?.(`삭제 항목 확인 중... (${processedExisting}/${totalExisting})`);
+            onProgress(`삭제 항목 확인 중... (${processedExisting}/${totalExisting})`);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
     }
 
     if (Object.keys(updates).length > 0) {
-        onProgress?.('데이터베이스에 업로드 중...');
+        onProgress('데이터베이스에 업로드 중...');
         await db.ref().update(updates);
     }
 };

@@ -8,7 +8,7 @@ import * as googleDrive from '../services/googleDriveService';
 import { getDeviceId } from '../services/deviceService';
 import Toast, { ToastState } from '../components/Toast';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { processExcelFileInWorker, DiffResult } from '../services/dataService';
+import { processExcelFileInWorker } from '../services/dataService';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/database';
 
@@ -57,8 +57,9 @@ interface DataActions {
     updateOrderStatus: (orderId: number, completionDetails: Order['completionDetails']) => Promise<void>;
     clearOrders: () => Promise<void>;
     clearOrdersBeforeDate: (date: Date) => Promise<number>;
-    syncFromFile: (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<DiffResult<Customer | Product>>;
+    syncWithFile: (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<void>;
     forceFullSync: () => Promise<void>;
+    resetData: (dataType: 'customers' | 'products') => Promise<void>;
     setSelectedCameraId: (id: string | null) => Promise<void>;
     setScanSettings: (settings: Partial<DataState['scanSettings']>) => Promise<void>;
 }
@@ -72,6 +73,8 @@ interface SyncState {
     syncProgress: number;
     syncStatusText: string;
     syncDataType: 'customers' | 'products' | 'full' | null;
+    // FIX: Add syncSource to track the source of the sync operation.
+    syncSource: 'local' | 'drive' | null;
     initialSyncCompleted: boolean;
 }
 
@@ -174,6 +177,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [syncProgress, setSyncProgress] = useState(0);
     const [syncStatusText, setSyncStatusText] = useState('');
     const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | null>(null);
+    // FIX: Add state for sync source
+    const [syncSource, setSyncSource] = useState<'local' | 'drive' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
 
     // --- UI State ---
@@ -222,7 +227,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return await db.clearOrdersBeforeDate(isoString);
     }, []);
 
-    const syncFromFile = useCallback(async (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => {
+    const syncWithFile = useCallback(async (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => {
         if (isSyncing) {
             showToast("이미 다른 동기화가 진행 중입니다.", 'error');
             throw new Error("Sync already in progress");
@@ -230,6 +235,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         setIsSyncing(true);
         setSyncDataType(dataType);
+        // FIX: Set sync source
+        setSyncSource(source);
         setSyncProgress(0);
         setSyncStatusText("기존 데이터 로딩 중...");
 
@@ -240,32 +247,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSyncStatusText(message);
             };
 
-            const workerDataType = dataType.slice(0, -1) as 'customer' | 'product';
-            const diffResult = await processExcelFileInWorker(file, workerDataType, existingData, user?.email || 'unknown', onProgress);
-            
-            const toAddOrUpdate = diffResult.toAddOrUpdate as (Customer[] | Product[]);
-            const toDelete = diffResult.toDelete;
+            const parsedResult = await processExcelFileInWorker(file, dataType.slice(0, -1) as 'customer' | 'product', onProgress);
+            const newData = parsedResult.valid as (Customer[] | Product[]);
 
-            if (toAddOrUpdate.length > 0 || toDelete.length > 0) {
-                 setSyncStatusText("데이터베이스 업데이트 중...");
-                 const updates: Partial<Record<'customers' | 'products', (Customer|Product)[]>> = {};
-                 updates[dataType] = toAddOrUpdate as any;
-                 
-                 await db.replaceAll(dataType, toAddOrUpdate as any);
+            await db.smartSyncData(dataType, newData, user?.email || 'unknown', onProgress, existingData);
 
-                 // This part is simplified; in a real app, you'd handle deletes too.
-                 if (dataType === 'customers') setCustomers(toAddOrUpdate as Customer[]);
-                 else setProducts(toAddOrUpdate as Product[]);
+            // After successful sync, update local state and cache
+            if (dataType === 'customers') {
+                setCustomers(newData as Customer[]);
+                await cache.setCachedData('customers', newData as Customer[]);
+            } else {
+                setProducts(newData as Product[]);
+                await cache.setCachedData('products', newData as Product[]);
             }
-
-            return diffResult;
-        } catch (error) {
+            
+        } catch (error: any) {
             console.error(`Sync from ${source} failed:`, error);
-            showToast(`${dataType === 'customers' ? '거래처' : '상품'} 동기화 실패.`, 'error');
+            // This re-throws the error to be handled by the UI component, which will show the alert.
+            // The special `proceed` function is attached here.
+             if (error.message === 'MASS_DELETION_DETECTED') {
+                const proceed = async () => {
+                    const parsedResult = error.details.parsedResult;
+                    const newData = parsedResult.valid as (Customer[] | Product[]);
+                    await db.smartSyncData(dataType, newData, user?.email || 'unknown', (msg) => setSyncStatusText(msg), existingData, { bypassMassDeleteCheck: true });
+                    
+                    // After successful sync, update local state and cache
+                    if (dataType === 'customers') {
+                        setCustomers(newData as Customer[]);
+                        await cache.setCachedData('customers', newData as Customer[]);
+                    } else {
+                        setProducts(newData as Product[]);
+                        await cache.setCachedData('products', newData as Product[]);
+                    }
+                };
+                error.details.proceed = proceed;
+            } else {
+                showToast(`${dataType === 'customers' ? '거래처' : '상품'} 동기화 실패.`, 'error');
+            }
             throw error;
         } finally {
             setIsSyncing(false);
             setSyncDataType(null);
+            // FIX: Reset sync source
+            setSyncSource(null);
             setSyncStatusText("");
         }
     }, [isSyncing, customers, products, user, showToast]);
@@ -294,9 +318,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         } finally {
             setIsSyncing(false);
             setSyncDataType(null);
+            // FIX: Reset sync source
+            setSyncSource(null);
             setSyncStatusText("");
         }
     }, [showAlert, showToast]);
+
+    const resetData = useCallback(async (dataType: 'customers' | 'products') => {
+        const typeKorean = dataType === 'customers' ? '거래처' : '상품';
+        try {
+            // Clear RTDB
+            await db.replaceAll(dataType, null);
+            await db.setValue(`sync-logs/${dataType}`, null);
+            // Clear local cache
+            await cache.setCachedData(dataType, []);
+            // Clear component state
+            if (dataType === 'customers') {
+                setCustomers([]);
+            } else {
+                setProducts([]);
+            }
+            showToast(`${typeKorean} 데이터가 성공적으로 초기화되었습니다.`, 'success');
+        } catch (err) {
+            console.error(`Failed to reset ${dataType} data:`, err);
+            showToast(`${typeKorean} 데이터 초기화에 실패했습니다.`, 'error');
+            throw err;
+        }
+    }, [showToast]);
 
     const setSelectedCameraId = useCallback(async (id: string | null) => {
         setSelectedCameraIdState(id);
@@ -492,8 +540,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // --- Context Values ---
     const dataStateValue = useMemo(() => ({ customers, products, selectedCameraId, scanSettings: scanSettings! }), [customers, products, selectedCameraId, scanSettings]);
-    const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncFromFile, forceFullSync, setSelectedCameraId, setScanSettings]);
-    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, initialSyncCompleted]);
+    const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData, setSelectedCameraId, setScanSettings }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData, setSelectedCameraId, setScanSettings]);
+    // FIX: Include syncSource in context value
+    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);
     const modalsValue = useMemo(() => ({ ...modalsState, ...modalsActions }), [modalsState, modalsActions]);
     const scannerValue = useMemo(() => ({ ...scannerState, ...scannerActions }), [scannerState, scannerActions]);
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);

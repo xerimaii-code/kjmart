@@ -36,9 +36,8 @@ export const loadScript = (src: string): Promise<void> => {
 const XLSX_CDN = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
 
 
-export interface DiffResult<T> {
-    toAddOrUpdate: T[];
-    toDelete: { [key: string]: any }[]; // e.g., { comcode: '...', name: '...' }
+export interface ParsedResult<T> {
+    valid: T[];
     invalidCount: number;
     errors: string[];
 }
@@ -147,27 +146,8 @@ const workerCode = `
         return { valid, invalidCount: errors.length, errors };
     };
 
-    const areObjectsEqual = (newItem, existingItem, type) => {
-        if (!newItem || !existingItem) return false;
-        if (type === 'customer') {
-            return (newItem.name || '').trim() === (existingItem.name || '').trim();
-        }
-        if (type === 'product') {
-            const salePriceNew = newItem.salePrice == null ? '' : String(newItem.salePrice).trim();
-            const salePriceExisting = existingItem.salePrice == null ? '' : String(existingItem.salePrice).trim();
-    
-            return (newItem.name || '').trim() === (existingItem.name || '').trim() &&
-                   (newItem.costPrice || 0) === (existingItem.costPrice || 0) &&
-                   (newItem.sellingPrice || 0) === (existingItem.sellingPrice || 0) &&
-                   salePriceNew === salePriceExisting &&
-                   (newItem.saleEndDate || '') === (existingItem.saleEndDate || '') &&
-                   (newItem.supplierName || '').trim() === (existingItem.supplierName || '').trim();
-        }
-        return false;
-    };
-
     self.onmessage = (e) => {
-        const { file, type, existingData } = e.data;
+        const { file, type } = e.data;
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
@@ -195,62 +175,7 @@ const workerCode = `
                 self.postMessage({ status: 'progress', message: \`파일 분석 완료. \${trimmedData.length}개 행 처리합니다.\` });
                 const parsedResult = type === 'customer' ? processCustomerData(trimmedData) : processProductData(trimmedData);
 
-                self.postMessage({ status: 'progress', message: \`기존 데이터(\${existingData.length}건)와 비교 시작...\` });
-                await new Promise(r => setTimeout(r, 0));
-
-                const keyField = type === 'customer' ? 'comcode' : 'barcode';
-
-                const existingDataMap = new Map(existingData.map(item => [item[keyField], item]));
-                
-                const newData = parsedResult.valid;
-                const newDataKeys = new Set(newData.map(item => item[keyField]));
-                const deletions = Array.from(existingDataMap.keys()).filter(key => !newDataKeys.has(key));
-
-                // Mass deletion check
-                if (existingDataMap.size > 100 && deletions.length > existingDataMap.size * 0.5) {
-                    const diffResultForRetry = { 
-                        toAddOrUpdate: newData, 
-                        toDelete: deletions.map(key => ({ [keyField]: key, name: existingDataMap.get(key)?.name })), 
-                        ...parsedResult 
-                    };
-                    self.postMessage({ 
-                        status: 'error', 
-                        error: 'MASS_DELETION_DETECTED', 
-                        details: { 
-                            numExisting: existingDataMap.size,
-                            numDeletions: deletions.length,
-                            diffResult: diffResultForRetry
-                        } 
-                    });
-                    return;
-                }
-
-                const toAddOrUpdate = [];
-                const totalNew = newData.length;
-                let processedNew = 0;
-                for (const newItem of newData) {
-                    const key = newItem[keyField];
-                    if (!key) continue;
-
-                    const existingItem = existingDataMap.get(key);
-
-                    if (!existingItem || !areObjectsEqual(newItem, existingItem, type)) {
-                        toAddOrUpdate.push(newItem);
-                    }
-                    
-                    processedNew++;
-                    if (processedNew % 1000 === 0 || processedNew === totalNew) {
-                        self.postMessage({ status: 'progress', message: \`항목 비교 중... (\${processedNew}/\${totalNew})\` });
-                        await new Promise(r => setTimeout(r, 0));
-                    }
-                }
-
-                const toDelete = deletions.map(key => {
-                    const existingItem = existingDataMap.get(key);
-                    return { [keyField]: key, name: existingItem?.name || '' };
-                });
-
-                self.postMessage({ status: 'complete', data: { ...parsedResult, toAddOrUpdate, toDelete } });
+                self.postMessage({ status: 'complete', data: parsedResult });
 
             } catch (error) {
                 self.postMessage({ status: 'error', error: error.message });
@@ -264,31 +189,26 @@ const workerCode = `
 export const processExcelFileInWorker = <T extends Customer | Product>(
     file: File | Blob, 
     type: 'customer' | 'product',
-    existingData: T[],
-    userEmail: string,
     onProgress: (message: string) => void
-): Promise<DiffResult<T>> => {
+): Promise<ParsedResult<T>> => {
     return new Promise((resolve, reject) => {
         const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
         const workerUrl = URL.createObjectURL(workerBlob);
         const worker = new Worker(workerUrl);
 
         worker.onmessage = (e) => {
-            const { status, message, data, error, details } = e.data;
+            const { status, message, data, error } = e.data;
             
             if (status === 'progress') {
                 onProgress(message);
             } else if (status === 'complete') {
                 URL.revokeObjectURL(workerUrl);
                 worker.terminate();
-                resolve(data as DiffResult<T>);
+                resolve(data as ParsedResult<T>);
             } else if (status === 'error') {
                 URL.revokeObjectURL(workerUrl);
                 worker.terminate();
                 const err = new Error(error);
-                if (details) {
-                    (err as any).details = details;
-                }
                 reject(err);
             }
         };
@@ -299,7 +219,7 @@ export const processExcelFileInWorker = <T extends Customer | Product>(
             reject(new Error(`Worker error: ${e.message}`));
         };
 
-        worker.postMessage({ file, type, existingData, userEmail });
+        worker.postMessage({ file, type });
     });
 };
 

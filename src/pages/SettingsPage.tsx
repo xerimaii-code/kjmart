@@ -2,15 +2,11 @@ import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 
 import { useDataState, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
-import { DiffResult } from '../services/dataService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, BellIcon, DocumentIcon, GoogleDriveIcon, DownloadIcon, UploadIcon, LogoutIcon, TrashIcon, ArrowLongRightIcon, DatabaseIcon, HistoryIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon } from '../components/Icons';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
 import CollapsibleCard from '../components/CollapsibleCard';
-import { Customer, Product } from '../types';
-
-const SyncHistoryModal = lazy(() => import('../components/SyncHistoryModal'));
 
 // --- Types ---
 interface SyncSettings {
@@ -29,14 +25,15 @@ const SyncSection: React.FC<{
     dataType: 'customers' | 'products';
 }> = ({ dataType }) => {
     const { showToast, showAlert } = useAlert();
-    const { syncFromFile } = useDataActions();
-    const { isSyncing, syncStatusText, syncDataType } = useSyncState();
+    const { syncWithFile } = useDataActions();
+    const { isSyncing, syncStatusText, syncDataType, syncSource } = useSyncState();
     const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isPicking, setIsPicking] = useState(false);
     const [isApiReady, setIsApiReady] = useState(false);
 
     const dataTypeKorean = dataType === 'customers' ? '거래처' : '상품';
     const isCurrentSyncForThisType = isSyncing && syncDataType === dataType;
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const initializeApi = useCallback(async () => {
         if (isApiReady) return true;
@@ -75,7 +72,7 @@ const SyncSection: React.FC<{
         }
     };
 
-    const handleSync = async () => {
+    const handleSyncFromDrive = async () => {
         if (!settings?.fileId) {
             showToast("먼저 동기화할 파일을 선택해주세요.", 'error');
             return;
@@ -86,38 +83,61 @@ const SyncSection: React.FC<{
             const metadata = await googleDrive.getFileMetadata(settings.fileId);
             const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
 
-            const diffResult = await syncFromFile(fileBlob, dataType, 'drive');
-            const totalItems = diffResult.toAddOrUpdate.length + diffResult.toDelete.length;
-            const sourceText = 'Google Drive';
-            if (totalItems > 0) {
-                 showToast(`${dataTypeKorean} ${sourceText} 동기화가 완료되었습니다. (${totalItems.toLocaleString()}개 변경)`, 'success');
-            } else {
-                 showToast(`${dataTypeKorean} 데이터가 이미 최신 상태입니다.`, 'success');
-            }
+            await syncWithFile(fileBlob, dataType, 'drive');
+            
+            showToast(`${dataTypeKorean} Google Drive 동기화가 완료되었습니다.`, 'success');
             setSettings({ ...settings, lastSyncTime: metadata.modifiedTime });
 
-        } catch (err) {
-             if (err instanceof Error && err.message === 'MASS_DELETION_DETECTED') {
-                const { numExisting, numDeletions, proceed } = (err as any).details;
+        } catch (err: any) {
+             if (err.message === 'MASS_DELETION_DETECTED') {
+                const { numExisting, numDeletions, proceed } = err.details;
                 showAlert(
                     `경고: 대량 삭제가 감지되었습니다.\n\n기존 데이터: ${numExisting.toLocaleString()}건\n결과적으로 ${numDeletions.toLocaleString()}건의 데이터가 삭제됩니다. 계속하시겠습니까?`,
                     async () => {
                         try {
-                            const diffResult = await proceed();
-                            const totalItems = diffResult.toAddOrUpdate.length + diffResult.toDelete.length;
-                            showToast(`${dataTypeKorean} 동기화가 완료되었습니다. (${totalItems.toLocaleString()}개 변경)`, 'success');
+                            await proceed();
+                            showToast(`${dataTypeKorean} 동기화가 완료되었습니다.`, 'success');
                             if (settings?.fileId) {
                                 const metadata = await googleDrive.getFileMetadata(settings.fileId);
                                 setSettings({ ...settings, lastSyncTime: metadata.modifiedTime });
                             }
                         } catch (proceedError) {
-                            // Error is handled by the syncFromFile action
+                             // Error is handled by the syncWithFile action
                         }
                     },
                     '삭제 진행',
                     'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500',
                     () => showToast('동기화 작업이 취소되었습니다.', 'error')
                 );
+            }
+        }
+    };
+    
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (event.target.files && event.target.files.length > 0) {
+            const file = event.target.files[0];
+            try {
+                await syncWithFile(file, dataType, 'local');
+                showToast(`${dataTypeKorean} 로컬 파일 동기화가 완료되었습니다.`, 'success');
+            } catch (err: any) {
+                 if (err.message === 'MASS_DELETION_DETECTED') {
+                    const { numExisting, numDeletions, proceed } = err.details;
+                    showAlert(
+                        `경고: 대량 삭제가 감지되었습니다.\n\n기존 데이터: ${numExisting.toLocaleString()}건\n결과적으로 ${numDeletions.toLocaleString()}건의 데이터가 삭제됩니다. 계속하시겠습니까?`,
+                        async () => {
+                            try {
+                                await proceed();
+                                showToast(`${dataTypeKorean} 동기화가 완료되었습니다.`, 'success');
+                            } catch (proceedError) {
+                               // Error is handled by the syncWithFile action
+                            }
+                        },
+                        '삭제 진행', 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500',
+                        () => showToast('동기화 작업이 취소되었습니다.', 'error')
+                    );
+                }
+            } finally {
+                if (fileInputRef.current) fileInputRef.current.value = "";
             }
         }
     };
@@ -141,13 +161,18 @@ const SyncSection: React.FC<{
 
     return (
         <div className="space-y-4">
-            <h3 className="text-base font-bold text-gray-700 flex items-center gap-2">
-                <GoogleDriveIcon className="w-6 h-6 text-gray-600" />
-                <span>Google Drive {dataTypeKorean} 데이터 동기화</span>
-            </h3>
-
-            <div className="relative p-4 border-2 border-gray-200 rounded-xl bg-gray-50/50">
-                <div className="space-y-4">
+            <input
+                type="file"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+                accept=".xlsx, .xls"
+            />
+            <h4 className="text-base font-bold text-gray-700">{dataTypeKorean} 데이터</h4>
+            {/* Google Drive Sync UI */}
+            <div className="p-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+                <div className="space-y-3">
+                     <p className="text-xs text-center text-gray-500 -mt-1">Google Drive의 엑셀 파일과 동기화합니다.</p>
                     {settings?.fileId ? (
                         <>
                             <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-gray-200">
@@ -165,15 +190,16 @@ const SyncSection: React.FC<{
                             <div className="p-2.5 bg-white rounded-lg border border-gray-200 flex justify-center">
                                 <ToggleSwitch
                                     id={`autosync-${dataType}`}
-                                    label="자동 동기화"
+                                    label="자동 동기화 (미구현)"
                                     checked={settings.autoSync}
                                     onChange={handleAutoSyncToggle}
                                     color="blue"
+                                    disabled
                                 />
                             </div>
                         </>
                     ) : (
-                        <p className="text-sm text-gray-500 text-center py-4">Google Drive에 있는 엑셀 파일을 선택하여 데이터를 동기화하세요.</p>
+                        <p className="text-sm text-gray-500 text-center py-2">연결된 Google Drive 파일이 없습니다.</p>
                     )}
                     
                     <div className="grid grid-cols-2 gap-3">
@@ -182,32 +208,21 @@ const SyncSection: React.FC<{
                             disabled={isOperationInProgress}
                             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
                         >
-                            {isPicking ? (
-                                <SpinnerIcon className="w-5 h-5" />
-                            ) : (
-                                <GoogleDriveIcon className="w-5 h-5" />
-                            )}
-                            <span className="truncate">
-                                {isPicking
-                                    ? '인증/선택...'
-                                    : settings?.fileId
-                                    ? '파일 변경'
-                                    : '파일 선택'}
-                            </span>
+                            {isPicking ? <SpinnerIcon className="w-5 h-5" /> : <GoogleDriveIcon className="w-5 h-5" />}
+                            <span>파일 선택</span>
                         </button>
                         <button
-                            onClick={handleSync}
-                            disabled={!settings?.fileId || isOperationInProgress}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-sky-600 text-white font-semibold rounded-lg hover:bg-sky-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            onClick={handleSyncFromDrive}
+                            disabled={isOperationInProgress || !settings?.fileId}
+                            className="relative w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
                         >
-                            {isCurrentSyncForThisType ? (
-                                <div className="flex items-center justify-center gap-2">
+                            {isCurrentSyncForThisType && syncSource === 'drive' ? (
+                                <div className="absolute inset-0 flex items-center justify-center">
                                     <SpinnerIcon className="w-5 h-5" />
-                                    <span className="truncate text-sm font-semibold">{syncStatusText}</span>
                                 </div>
                             ) : (
                                 <>
-                                    <UploadIcon className="w-5 h-5" />
+                                    <GoogleDriveIcon className="w-5 h-5" />
                                     <span>동기화</span>
                                 </>
                             )}
@@ -215,370 +230,231 @@ const SyncSection: React.FC<{
                     </div>
                 </div>
             </div>
+             {/* Local File Sync UI */}
+             <div className="p-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+                <div className="space-y-3">
+                    <p className="text-xs text-center text-gray-500">기기에 저장된 엑셀 파일로 1회성 동기화를 합니다.</p>
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isOperationInProgress}
+                        className="relative w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
+                    >
+                        {isCurrentSyncForThisType && syncSource === 'local' ? (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <SpinnerIcon className="w-5 h-5" />
+                            </div>
+                        ) : (
+                           <>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                </svg>
+                                <span>로컬 파일로 동기화</span>
+                           </>
+                        )}
+                    </button>
+                </div>
+                {isCurrentSyncForThisType && (
+                    <div className="mt-3 text-center text-sm text-blue-600 font-medium">
+                        <p>{syncStatusText}</p>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
 
+// --- Settings Action Button ---
+const ActionButton: React.FC<{
+    onClick: () => void;
+    icon: React.ReactNode;
+    label: string;
+    description: string;
+    isDestructive?: boolean;
+    disabled?: boolean;
+}> = ({ onClick, icon, label, description, isDestructive = false, disabled = false }) => (
+    <button
+        onClick={onClick}
+        disabled={disabled}
+        className={`w-full text-left p-3 rounded-lg flex items-center gap-4 transition-colors ${
+            isDestructive 
+                ? 'hover:bg-red-50' 
+                : 'hover:bg-gray-100'
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
+    >
+        <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center ${
+            isDestructive ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'
+        }`}>
+            {icon}
+        </div>
+        <div className="flex-grow">
+            <p className={`font-semibold ${isDestructive ? 'text-red-700' : 'text-gray-800'}`}>{label}</p>
+            <p className="text-xs text-gray-500">{description}</p>
+        </div>
+    </button>
+);
+
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { selectedCameraId, scanSettings } = useDataState();
-    const { setSelectedCameraId, setScanSettings, forceFullSync, syncFromFile } = useDataActions();
-    const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
+    const { setSelectedCameraId, setScanSettings, resetData } = useDataActions();
     const { showAlert, showToast } = useAlert();
-    const { openHistoryModal, openClearHistoryModal } = useModals();
     const { logout, user } = useAuth();
-    const { isSyncing, syncStatusText, syncDataType } = useSyncState();
-
+    const { openHistoryModal, openClearHistoryModal } = useModals();
+    const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
-    const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'prompt' | 'granted' | 'denied'>('prompt');
-    const [logRetentionDays, setLogRetentionDays] = useState<number>(30);
-
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const [fileImportType, setFileImportType] = useState<'customers' | 'products' | null>(null);
-
-    // --- Log Management ---
+    
     useEffect(() => {
+        const getCameras = async () => {
+            try {
+                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    console.warn("Camera API is not supported in this browser.");
+                    return;
+                }
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                setCameras(videoDevices);
+            } catch (err) {
+                console.warn("Could not enumerate cameras:", err);
+            }
+        };
         if (isActive) {
-            db.getValue<number>('settings/sync-logs/retentionDays', 30).then(days => setLogRetentionDays(days));
+            getCameras();
         }
     }, [isActive]);
 
-    const handleLogRetentionChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const days = Number(e.target.value);
-        setLogRetentionDays(days);
-        try {
-            await db.setValue('settings/sync-logs/retentionDays', days);
-            showToast("동기화 로그 보관 기간이 저장되었습니다.", 'success');
-        } catch (err) {
-            showToast("설정 저장에 실패했습니다.", 'error');
-        }
-    };
-
-    const fetchCameras = useCallback(async () => {
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(device => device.kind === 'videoinput');
-            setCameras(videoDevices);
-        } catch (err) {
-            console.error("Could not enumerate devices: ", err);
-        }
-    }, []);
-
-    const requestCameraPermission = useCallback(async () => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            setCameraPermissionStatus('granted');
-            await fetchCameras();
-            stream.getTracks().forEach(track => track.stop());
-        } catch (err) {
-            console.error("Camera permission denied: ", err);
-            setCameraPermissionStatus('denied');
-            showAlert("카메라 접근 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
-        }
-    }, [fetchCameras, showAlert]);
-
-    useEffect(() => {
-        if (isActive && navigator.mediaDevices) {
-            if (navigator.permissions && navigator.permissions.query) {
-                 navigator.permissions.query({ name: 'camera' as PermissionName }).then((status) => {
-                    setCameraPermissionStatus(status.state);
-                    if (status.state === 'granted') {
-                        fetchCameras();
-                    }
-                    status.onchange = () => {
-                        setCameraPermissionStatus(status.state);
-                        if (status.state === 'granted') {
-                            fetchCameras();
-                        } else {
-                            setCameras([]);
-                        }
-                    };
-                }).catch(err => {
-                    console.warn("Permission query failed.", err)
-                });
-            }
-        }
-    }, [isActive, fetchCameras]);
-
     const handleCameraChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const cameraId = event.target.value || null; // Ensure null for "System Default"
-        try {
-            await setSelectedCameraId(cameraId);
-            showToast("카메라 설정이 저장되었습니다.", 'success');
-        } catch (error) {
-            console.error("Failed to save camera setting:", error);
-            showAlert("카메라 설정 저장에 실패했습니다.");
-        }
+        const cameraId = event.target.value;
+        await setSelectedCameraId(cameraId === 'default' ? null : cameraId);
+        showToast('카메라 설정이 저장되었습니다.', 'success');
     };
     
-    const handleFileImportClick = (type: 'customers' | 'products') => {
-        setFileImportType(type);
-        fileInputRef.current?.click();
-    };
-
-    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        if (event.target.files && event.target.files.length > 0 && fileImportType) {
-            const file = event.target.files[0];
-            const currentType = fileImportType;
-            const typeKorean = currentType === 'customers' ? '거래처' : '상품';
-
-            try {
-                const diffResult = await syncFromFile(file, currentType, 'local');
-                const totalItems = diffResult.toAddOrUpdate.length + diffResult.toDelete.length;
-                if (totalItems > 0) {
-                     showToast(`${typeKorean} 로컬 파일 동기화가 완료되었습니다. (${totalItems.toLocaleString()}개 변경)`, 'success');
-                } else {
-                     showToast(`${typeKorean} 데이터가 이미 최신 상태입니다.`, 'success');
-                }
-            } catch (err) {
-                 if (err instanceof Error && err.message === 'MASS_DELETION_DETECTED') {
-                    const { numExisting, numDeletions, proceed } = (err as any).details;
-                    showAlert(
-                        `경고: 대량 삭제가 감지되었습니다.\n\n기존 데이터: ${numExisting.toLocaleString()}건\n결과적으로 ${numDeletions.toLocaleString()}건의 데이터가 삭제됩니다. 계속하시겠습니까?`,
-                        async () => {
-                            try {
-                                const diffResult = await proceed();
-                                const totalItems = diffResult.toAddOrUpdate.length + diffResult.toDelete.length;
-                                showToast(`${typeKorean} 동기화가 완료되었습니다. (${totalItems.toLocaleString()}개 변경)`, 'success');
-                            } catch (proceedError) {
-                               // Error is handled by the syncFromFile action
-                            }
-                        },
-                        '삭제 진행', 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500',
-                        () => showToast('동기화 작업이 취소되었습니다.', 'error')
-                    );
-                }
-            } finally {
-                setFileImportType(null);
-                if (fileInputRef.current) fileInputRef.current.value = "";
-            }
-        }
-    };
-    
-    const handleBackup = async () => {
-        showAlert("이 기능은 현재 비활성화되어 있습니다.");
-    };
-
-    const handleRestore = () => {
-        showAlert("이 기능은 현재 비활성화되어 있습니다.");
-    };
-    
-    const handleForceSync = () => {
+    const handleLogout = () => {
         showAlert(
-            "이 작업은 서버의 최신 데이터로 로컬 데이터를 덮어씁니다. 계속하시겠습니까?",
+            "로그아웃 하시겠습니까?",
             async () => {
-                await forceFullSync();
+                try {
+                    await logout();
+                } catch (err) {
+                    console.error("Logout failed:", err);
+                    showToast('로그아웃에 실패했습니다.', 'error');
+                }
             },
-            '강제 동기화',
-            'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'
+            '로그아웃',
+            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+        );
+    };
+    
+    const handleReset = (dataType: 'customers' | 'products') => {
+        const typeKorean = dataType === 'customers' ? '거래처' : '상품';
+        showAlert(
+            `모든 ${typeKorean} 데이터를 초기화하시겠습니까?\n이 작업은 되돌릴 수 없으며, 모든 사용자의 데이터가 삭제됩니다.`,
+            () => resetData(dataType),
+            '초기화',
+            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
     };
 
     return (
-        <div className="h-full flex flex-col bg-transparent">
-            <input
-                type="file"
-                ref={fileInputRef}
-                style={{ display: 'none' }}
-                onChange={handleFileChange}
-                accept=".xlsx, .xls"
-            />
-            <div className="fixed-filter p-3 bg-white/60 backdrop-blur-lg border-b border-gray-200/80">
-                <div className="max-w-2xl mx-auto w-full">
-                    <h2 className="text-xl font-bold text-gray-800">설정</h2>
-                </div>
-            </div>
-            <div className="scrollable-content p-3">
-                <div className="space-y-3 max-w-2xl mx-auto w-full">
-                    <CollapsibleCard title="앱 설정" icon={<DevicePhoneMobileIcon className="w-5 h-5 text-gray-500"/>} initiallyOpen={true}>
-                        <div className="flex items-center justify-between">
-                            <label htmlFor="camera-select" className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                                <CameraIcon className="w-5 h-5 text-gray-500"/>
-                                <span>기본 카메라 선택</span>
-                            </label>
-                            {cameraPermissionStatus === 'granted' ? (
-                                <select
-                                    id="camera-select"
-                                    value={selectedCameraId || ''}
+        <div className="h-full flex flex-col bg-gray-50">
+            <div className="scrollable-content">
+                <div className="p-3 space-y-4 max-w-2xl mx-auto w-full">
+
+                    <CollapsibleCard title="앱 설정" icon={<SettingsIcon className="w-6 h-6 text-gray-500" />} initiallyOpen={true}>
+                        <div className="space-y-3">
+                            <h4 className="text-base font-bold text-gray-700">카메라 및 스캔</h4>
+                            <div className="flex items-center gap-3">
+                                <CameraIcon className="w-6 h-6 text-gray-400 flex-shrink-0" />
+                                <select 
+                                    value={selectedCameraId || 'default'} 
                                     onChange={handleCameraChange}
-                                    className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[50%] bg-white"
+                                    className="w-full p-2.5 border-2 border-gray-200 bg-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 >
-                                    <option value="">시스템 기본값</option>
-                                    {cameras.length > 0 ? (
-                                        cameras.map((camera, index) => (
-                                            <option key={camera.deviceId} value={camera.deviceId}>
-                                                {camera.label || `카메라 ${index + 1}`}
-                                            </option>
-                                        ))
-                                    ) : (
-                                        <option disabled>카메라 없음</option>
-                                    )}
+                                    <option value="default">기본 카메라</option>
+                                    {cameras.map((camera, index) => (
+                                        <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `카메라 ${index + 1}`}</option>
+                                    ))}
                                 </select>
-                            ) : (
-                                <button
-                                    onClick={requestCameraPermission}
-                                    className="text-sm font-semibold text-blue-600 bg-blue-100 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition active:scale-95"
-                                >
-                                    {cameraPermissionStatus === 'denied' ? '권한 필요' : '카메라 목록 불러오기'}
-                                </button>
-                            )}
+                            </div>
+                             <div className="flex justify-between items-center p-3 bg-gray-50/80 rounded-lg">
+                                <ToggleSwitch 
+                                    id="vibrate-scan"
+                                    label="스캔 시 진동"
+                                    checked={scanSettings.vibrateOnScan}
+                                    onChange={(checked) => setScanSettings({ vibrateOnScan: checked })}
+                                    color="blue"
+                                />
+                             </div>
+                             <div className="flex justify-between items-center p-3 bg-gray-50/80 rounded-lg">
+                                <ToggleSwitch 
+                                    id="sound-scan"
+                                    label="스캔 시 효과음"
+                                    checked={scanSettings.soundOnScan}
+                                    onChange={(checked) => setScanSettings({ soundOnScan: checked })}
+                                    color="blue"
+                                />
+                            </div>
                         </div>
-                         {isInstallPromptAvailable && (
-                            <button
-                                onClick={triggerInstallPrompt}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition active:scale-95"
-                            >
-                                <DownloadIcon className="w-5 h-5" />
-                                <span>홈 화면에 앱 설치</span>
-                            </button>
+
+                        {isInstallPromptAvailable && (
+                             <div className="mt-4">
+                                <ActionButton
+                                    onClick={triggerInstallPrompt}
+                                    icon={<DevicePhoneMobileIcon className="w-6 h-6" />}
+                                    label="앱 설치"
+                                    description="홈 화면에 앱을 추가하여 더 빠르게 접근하세요."
+                                />
+                            </div>
                         )}
                     </CollapsibleCard>
 
-                    <CollapsibleCard title="스캔 알림" icon={<BellIcon className="w-5 h-5 text-gray-500"/>}>
-                        <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                             <span className="text-sm font-medium text-gray-700">스캔 시 진동</span>
-                             <ToggleSwitch
-                                id="vibrate-scan"
-                                checked={scanSettings.vibrateOnScan}
-                                onChange={(checked) => setScanSettings({ vibrateOnScan: checked })}
-                                label=""
-                             />
-                        </div>
-                        <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                             <span className="text-sm font-medium text-gray-700">스캔 시 효과음</span>
-                             <ToggleSwitch
-                                id="sound-scan"
-                                checked={scanSettings.soundOnScan}
-                                onChange={(checked) => setScanSettings({ soundOnScan: checked })}
-                                label=""
-                             />
-                        </div>
+                    <CollapsibleCard title="데이터 동기화" icon={<DatabaseIcon className="w-6 h-6 text-gray-500" />}>
+                        <SyncSection dataType="customers" />
+                        <div className="border-t border-gray-200/80 my-4" />
+                        <SyncSection dataType="products" />
                     </CollapsibleCard>
+                    
+                    <CollapsibleCard title="데이터 관리" icon={<UserCircleIcon className="w-6 h-6 text-gray-500" />}>
+                        <ActionButton
+                            onClick={openHistoryModal}
+                            icon={<HistoryIcon className="w-6 h-6" />}
+                            label="동기화 이력 보기"
+                            description="최근 데이터 변경 내역을 확인합니다."
+                        />
+                         <ActionButton
+                            onClick={openClearHistoryModal}
+                            icon={<TrashIcon className="w-6 h-6" />}
+                            label="발주 내역 정리"
+                            description="오래된 발주 내역을 삭제하여 앱을 최적화합니다."
+                        />
 
-                    <CollapsibleCard title="데이터 관리" icon={<DocumentIcon className="w-5 h-5 text-gray-500"/>}>
-                        <div className="pt-4 mt-4 border-t border-gray-200">
-                             <div className="flex items-center justify-between">
-                                <label htmlFor="log-retention" className="text-sm font-medium text-gray-700">동기화 로그 보관 기간</label>
-                                <select
-                                    id="log-retention"
-                                    value={logRetentionDays}
-                                    onChange={handleLogRetentionChange}
-                                    className="text-sm border-2 border-gray-200 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                                >
-                                    <option value="7">7일</option>
-                                    <option value="30">30일</option>
-                                    <option value="90">90일</option>
-                                    <option value="-1">영구</option>
-                                </select>
-                            </div>
-                             <button
-                                onClick={openHistoryModal}
-                                className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-800 font-semibold rounded-lg hover:bg-gray-200 transition active:scale-95"
-                            >
-                                <HistoryIcon className="w-5 h-5" />
-                                <span>동기화 이력 보기</span>
-                            </button>
-                        </div>
-                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">강제 동기화</h4>
-                            <p className="text-xs text-gray-500 mb-3">
-                                서버의 <span className="font-bold">거래처 및 상품</span> 데이터를 로컬 기기로 가져와 덮어씁니다. 데이터가 올바르게 표시되지 않을 때 사용하세요.
-                            </p>
-                            <button
-                                onClick={handleForceSync}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-100 text-blue-800 font-semibold rounded-lg hover:bg-blue-200 transition active:scale-95"
-                            >
-                                <UploadIcon className="w-5 h-5" />
-                                <span>전체 데이터 강제 동기화</span>
-                            </button>
-                        </div>
-                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                            <SyncSection dataType="customers" />
-                        </div>
-                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                           <SyncSection dataType="products" />
-                        </div>
-                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">로컬 파일로 데이터 업데이트</h4>
-                             <p className="text-xs text-gray-500 mb-3">
-                                로컬 엑셀 파일을 사용하여 데이터를 동기화합니다. 이 방식은 데이터 변경 로그를 기록합니다.
-                            </p>
-                            <div className="grid grid-cols-2 gap-3">
-                                 <button
-                                    onClick={() => handleFileImportClick('customers')}
-                                    disabled={isSyncing}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                                >
-                                    {(isSyncing && syncDataType === 'customers') ? (
-                                        <div className="flex items-center justify-center gap-2">
-                                            <SpinnerIcon className="w-5 h-5" />
-                                            <span className="text-sm font-semibold truncate">
-                                                {syncStatusText}
-                                            </span>
-                                        </div>
-                                    ) : (
-                                        <span>거래처 가져오기</span>
-                                    )}
-                                </button>
-                                <button
-                                    onClick={() => handleFileImportClick('products')}
-                                    disabled={isSyncing}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                                >
-                                    {(isSyncing && syncDataType === 'products') ? (
-                                        <div className="flex items-center justify-center gap-2">
-                                            <SpinnerIcon className="w-5 h-5" />
-                                            <span className="text-sm font-semibold truncate">
-                                                {syncStatusText}
-                                            </span>
-                                        </div>
-                                    ) : (
-                                        <span>상품 가져오기</span>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">백업 및 복원 (비활성화)</h4>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button
-                                    onClick={handleBackup}
-                                    disabled
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-200 text-gray-500 font-semibold rounded-lg transition cursor-not-allowed"
-                                >
-                                    <DownloadIcon className="w-5 h-5" />
-                                    <span>백업</span>
-                                </button>
-                                <button
-                                    onClick={handleRestore}
-                                    disabled
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-200 text-gray-500 font-semibold rounded-lg transition cursor-not-allowed"
-                                >
-                                    <UploadIcon className="w-5 h-5" />
-                                    <span>복원</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                            <h4 className="text-sm font-bold text-gray-600 mb-2">발주 내역 정리</h4>
-                             <p className="text-xs text-gray-500 mb-3">
-                                오래된 발주 내역을 삭제하여 앱 성능을 최적화할 수 있습니다. 이 작업은 되돌릴 수 없습니다.
-                            </p>
-                            <button
-                                onClick={openClearHistoryModal}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-100 text-red-800 font-semibold rounded-lg hover:bg-red-200 transition active:scale-95"
-                            >
-                                <TrashIcon className="w-5 h-5" />
-                                <span>발주 내역 삭제 관리</span>
-                            </button>
-                        </div>
-                         <div className="pt-4 mt-4 border-t-2 border-dashed border-gray-200">
-                             <h4 className="text-sm font-bold text-gray-600 mb-2">계정</h4>
-                             <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
-                                <span className="text-sm font-medium text-gray-700">{user?.email}</span>
-                                <button onClick={logout} className="text-sm font-semibold text-gray-600 bg-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-300 transition active:scale-95">로그아웃</button>
-                            </div>
-                        </div>
+                        <div className="border-t border-gray-200/80 my-2" />
+                        <p className="text-xs text-red-600 font-semibold px-3 py-1">주의: 아래 작업은 되돌릴 수 없습니다.</p>
+
+                        <ActionButton
+                            onClick={() => handleReset('customers')}
+                            icon={<WarningIcon className="w-6 h-6" />}
+                            label="거래처 데이터 초기화"
+                            description="모든 거래처 데이터를 영구적으로 삭제합니다."
+                            isDestructive={true}
+                        />
+                        <ActionButton
+                            onClick={() => handleReset('products')}
+                            icon={<WarningIcon className="w-6 h-6" />}
+                            label="상품 데이터 초기화"
+                            description="모든 상품 데이터를 영구적으로 삭제합니다."
+                            isDestructive={true}
+                        />
+
+                        <div className="border-t border-gray-200/80 my-2" />
+                        
+                        <ActionButton
+                            onClick={handleLogout}
+                            icon={<LogoutIcon className="w-6 h-6" />}
+                            label="로그아웃"
+                            description={`현재 ${user?.email} 계정으로 로그인되어 있습니다.`}
+                            isDestructive={true}
+                        />
                     </CollapsibleCard>
                 </div>
             </div>
