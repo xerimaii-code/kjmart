@@ -72,7 +72,7 @@ const Header: React.FC = () => {
                         weekday: 'short',
                         hour: '2-digit',
                         minute: '2-digit',
-                        hour12: false
+                        hour12: true
                     })}
                 </div>
                 {isFullscreen && (
