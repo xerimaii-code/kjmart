@@ -7,6 +7,7 @@ const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const { isSyncing } = useSyncState();
+    const [currentTime, setCurrentTime] = useState(new Date());
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -15,9 +16,12 @@ const Header: React.FC = () => {
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
 
+        const timerId = setInterval(() => setCurrentTime(new Date()), 10000); // Update every 10 seconds
+
         return () => {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
+            clearInterval(timerId);
         };
     }, []);
 
@@ -61,6 +65,16 @@ const Header: React.FC = () => {
             </div>
             
             <div className="flex items-center space-x-3">
+                <div className="text-sm font-medium text-gray-600 text-right tabular-nums">
+                    {currentTime.toLocaleString('ko-KR', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        weekday: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    })}
+                </div>
                 {isFullscreen && (
                     <button 
                         onClick={handleExitFullscreen}
