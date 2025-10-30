@@ -295,7 +295,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             existingItem: existingItem || null,
             trigger: 'search',
             onAdd: (details) => addOrUpdateItem(product, details),
-            initialSettings: { unit: isBoxUnitDefault ? '박스' : '개' }
+            initialSettings: { unit: existingItem ? existingItem.unit : (isBoxUnitDefault ? '박스' : '개') }
         });
         setProductSearch('');
         setShowProductDropdown(false);
@@ -317,7 +317,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                     trigger: 'scan',
                     onAdd: (details) => addOrUpdateItem(product, details),
                     onNextScan: handleOpenScanner,
-                    initialSettings: { unit: isBoxUnitDefault ? '박스' : '개' }
+                    initialSettings: { unit: existingItem ? existingItem.unit : (isBoxUnitDefault ? '박스' : '개') }
                 });
             } else {
                 showAlert("등록되지 않은 바코드입니다.");
