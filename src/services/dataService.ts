@@ -258,7 +258,11 @@ export const exportToSMS = (order: Order): string => {
     if (!order.items) return '경진마트\n(품목 정보 없음)';
     const itemsBody = order.items.map(item => {
         const memoText = item.memo ? `(${item.memo})` : '';
-        return `${item.name}/${item.quantity}${item.unit}${memoText}`;
+        // 일부 SMS 앱에서 '&' 문자를 처리하지 못하는 문제를 해결하기 위해
+        // 일반 앰퍼샌드를 전각 앰퍼샌드('＆')로 대체합니다.
+        // 이는 시각적으로 유사하지만 URI에서 특수 문자로 처리되지 않습니다.
+        const safeName = item.name.replace(/&/g, '＆');
+        return `${safeName} ${item.quantity}${item.unit}${memoText}`;
     }).join('\n');
 
     return `경진마트\n${itemsBody}`;
