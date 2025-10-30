@@ -57,28 +57,26 @@ const TabButton: React.FC<{
 }> = ({ page, label, isActive, onClick }) => (
     <button
         onClick={() => onClick(page)}
-        className={`flex-1 py-2 text-sm font-bold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
+        className={`relative flex-1 py-3 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
             isActive 
                 ? 'text-blue-600' 
                 : 'text-gray-500 hover:text-gray-900'
         }`}
         aria-current={isActive ? 'page' : undefined}
     >
-        <div className="relative"> {/* Wrapper for positioning the underline */}
-            <span>{label}</span>
-            {isActive && (
-                <div 
-                    className="absolute -bottom-2 left-0 right-0 h-1 bg-blue-600 rounded-full"
-                />
-            )}
-        </div>
+        <span>{label}</span>
+        {isActive && (
+            <div 
+                className="absolute -bottom-0.5 left-0 right-0 h-1 bg-blue-600 rounded-full"
+            />
+        )}
     </button>
 );
 
 const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
     return (
-        <nav className="w-full bg-white/60 backdrop-blur-lg flex justify-around items-center flex-shrink-0 p-2 border-b border-gray-200/80">
-            <div className="flex w-full justify-around items-center h-full gap-1">
+        <nav className="w-full bg-white flex justify-around items-center flex-shrink-0 p-1 border-b border-gray-200">
+            <div className="flex w-full justify-around items-center h-full">
                 <TabButton
                     page="history"
                     label="발주내역"
@@ -169,12 +167,6 @@ const InitialSyncLoader: React.FC = () => {
         <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-4">
             <div className="relative w-36 h-36 mb-4">
                 <svg className="w-full h-full" viewBox="0 0 100 100">
-                     <defs>
-                        <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="rgb(96 165 250)" /> {/* blue-400 */}
-                            <stop offset="100%" stopColor="rgb(59 130 246)" /> {/* blue-500 */}
-                        </linearGradient>
-                    </defs>
                     {/* Background circle */}
                     <circle
                         className="text-gray-200"
@@ -187,11 +179,12 @@ const InitialSyncLoader: React.FC = () => {
                     />
                     {/* Progress circle */}
                     <circle
+                        className="text-blue-500"
                         strokeWidth={strokeWidth}
                         strokeDasharray={circumference}
                         strokeDashoffset={circumference * (1 - displayedProgress / 100)}
                         strokeLinecap="round"
-                        stroke="url(#progressGradient)"
+                        stroke="currentColor"
                         fill="transparent"
                         r={radius}
                         cx="50"
@@ -209,7 +202,7 @@ const InitialSyncLoader: React.FC = () => {
                 </div>
             </div>
             
-            <div className="mt-4 w-full max-w-xs bg-white/50 backdrop-blur-sm p-5 rounded-xl shadow-lg border border-gray-200/60 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
+            <div className="mt-4 w-full max-w-xs bg-white p-5 rounded-xl shadow-lg border border-gray-200 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
                 <ul className="space-y-3">
                     {syncSteps.map((step, index) => {
                         const nextStep = syncSteps[index + 1];

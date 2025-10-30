@@ -1,7 +1,3 @@
-
-
-
-
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
 import { OrderItem, Product, EditedOrderDraft } from '../types';
@@ -35,13 +31,13 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
     return (
         <div
             ref={ref}
-            className={`relative overflow-hidden flex items-center p-3.5 space-x-3 transition-colors duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
+            className={`relative overflow-hidden flex items-center p-3 space-x-3 transition-colors duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
             onClick={() => !isCompleted && onEdit(item)}
         >
             {saleIsActive && hasSalePrice && (
                 <div className="sale-ribbon">SALE</div>
             )}
-            <div className="flex-grow min-w-0 pr-1 space-y-1.5">
+            <div className="flex-grow min-w-0 pr-1 space-y-1">
                 {/* Product Name */}
                 <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex items-center gap-2">
                     {isNew && <span className="text-xs font-bold text-white bg-green-500 rounded-full px-2 py-0.5 tracking-wide">NEW</span>}
@@ -51,7 +47,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
 
                 {/* Price info */}
                 <>
-                  <p className="text-sm font-bold text-blue-600">발주가: {item.price.toLocaleString()}원</p>
+                  <p className="text-sm font-semibold text-blue-600">발주가: {item.price.toLocaleString()}원</p>
                   {product && (
                       <div className="text-xs flex items-baseline gap-x-1.5 flex-wrap text-gray-500">
                           <span>현재:</span>
@@ -75,7 +71,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
                 {/* Sale Period and Supplier */}
                 {product && product.saleEndDate && (
                      <div className="text-xs text-gray-500">
-                        <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                        <span className={saleIsActive ? 'font-semibold text-blue-600' : 'text-gray-400'}>
                             행사기간: ~{product.saleEndDate}
                         </span>
                      </div>
@@ -83,7 +79,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
                 
                 {/* Memo */}
                 {item.memo && (
-                    <p className="text-xs text-blue-600 flex items-start gap-1.5">
+                    <p className="text-xs text-blue-600 flex items-start gap-1.5 pt-0.5">
                         <ChatBubbleLeftIcon className="w-4 h-4 flex-shrink-0 mt-px" />
                         <span className="break-all">{item.memo}</span>
                     </p>
@@ -314,14 +310,14 @@ const OrderDetailModal: React.FC = () => {
 
     return (
         <div 
-            className={`fixed inset-0 bg-black z-40 transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`}
+            className={`fixed inset-0 bg-black z-40 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}
             onClick={handleClose}
             role="dialog"
             aria-modal="true"
         >
             <div 
                 style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}
-                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-white shadow-2xl transition-transform duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'translate-y-0' : 'translate-y-full'} rounded-t-2xl will-change-transform`}
+                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-white shadow-lg transition-transform duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'translate-y-0' : 'translate-y-full'} rounded-t-2xl will-change-transform`}
                 onClick={e => e.stopPropagation()}
             >
                 <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">
@@ -340,14 +336,14 @@ const OrderDetailModal: React.FC = () => {
                 </header>
                 
                 {isCompleted && (
-                    <div className="p-3 bg-yellow-100 border-b border-yellow-200 flex-shrink-0 z-10 text-center text-yellow-800 shadow-sm" role="alert">
+                    <div className="p-3 bg-yellow-100 border-b border-yellow-200 flex-shrink-0 z-10 text-center text-yellow-800" role="alert">
                         <p className="font-bold">완료된 발주</p>
                         <p className="text-sm">이 발주는 완료 처리되어 수정할 수 없습니다.</p>
                     </div>
                 )}
                 
                 {!isCompleted && (
-                    <div className="p-3 bg-white flex-shrink-0 z-10 border-b border-gray-200 shadow-sm">
+                    <div className="p-3 bg-white flex-shrink-0 z-10 border-b border-gray-200">
                          <div className="flex gap-2 w-full max-w-2xl mx-auto">
                             <div className="relative flex-grow">
                                 <input
@@ -356,7 +352,7 @@ const OrderDetailModal: React.FC = () => {
                                     onFocus={() => { if (productSearchBlurTimeout.current) clearTimeout(productSearchBlurTimeout.current); setShowProductDropdown(true); }}
                                     onBlur={() => { productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200); }}
                                     placeholder="품목명 또는 바코드 검색"
-                                    className="w-full p-3 h-12 border-2 border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 text-base pr-28"
+                                    className="w-full p-3 h-12 border border-gray-300 bg-white rounded-xl focus:ring-1 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400 text-base pr-28"
                                 />
                                 <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center">
                                     <ToggleSwitch id="edit-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
@@ -367,7 +363,7 @@ const OrderDetailModal: React.FC = () => {
                                     show={showProductDropdown}
                                 />
                             </div>
-                            <button onClick={handleOpenScanner} className="h-12 w-20 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30">
+                            <button onClick={handleOpenScanner} className="h-12 w-20 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow shadow-blue-500/30">
                                 <BarcodeScannerIcon className="w-6 h-6" />
                             </button>
                         </div>
@@ -404,13 +400,13 @@ const OrderDetailModal: React.FC = () => {
                         </div>
                         {!isCompleted && (
                              <div className="grid grid-cols-4 gap-2">
-                                <button onClick={handleOpenMemoModal} className="h-14 px-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
+                                <button onClick={handleOpenMemoModal} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
                                     <span>메모</span>
                                 </button>
-                                <button onClick={handleClose} className="h-14 px-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
+                                <button onClick={handleClose} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
                                     닫기
                                 </button>
-                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="h-14 relative bg-blue-600 text-white px-4 rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-2">
+                                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="h-12 relative bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-2">
                                     <span className={isSaving ? 'opacity-0' : 'opacity-100'}>변경사항 저장</span>
                                     {isSaving && (
                                         <div className="absolute inset-0 flex items-center justify-center">

@@ -31,18 +31,18 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove }: { item: OrderIte
 
     return (
         <div
-            className="relative overflow-hidden flex items-center p-3.5 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
+            className="relative overflow-hidden flex items-center p-3 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
             onClick={() => onEdit(item)}
         >
             {saleIsActive && hasSalePrice && (
                 <div className="sale-ribbon">SALE</div>
             )}
-            <div className="flex-grow min-w-0 pr-1 space-y-1.5">
+            <div className="flex-grow min-w-0 pr-1 space-y-1">
                 <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap">
                     <span>{item.name}</span>
                 </p>
 
-                <p className="text-sm font-bold text-blue-600">발주가: {item.price.toLocaleString()}원</p>
+                <p className="text-sm font-semibold text-blue-600">발주가: {item.price.toLocaleString()}원</p>
                 
                 {product && (
                     <div className="text-xs flex items-baseline gap-x-1.5 flex-wrap text-gray-500">
@@ -64,13 +64,13 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove }: { item: OrderIte
                 )}
                  {product && product.saleEndDate && (
                      <div className="text-xs text-gray-500">
-                        <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                        <span className={saleIsActive ? 'font-semibold text-blue-600' : 'text-gray-400'}>
                             행사기간: ~{product.saleEndDate}
                         </span>
                      </div>
                 )}
                 {item.memo && (
-                    <p className="text-xs text-blue-600 flex items-start gap-1.5">
+                    <p className="text-xs text-blue-600 flex items-start gap-1.5 pt-0.5">
                         <ChatBubbleLeftIcon className="w-4 h-4 flex-shrink-0 mt-px" />
                         <span className="break-all">{item.memo}</span>
                     </p>
@@ -361,9 +361,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     return (
         <div className="h-full flex flex-col relative bg-white">
             <DraftLoadedToast show={showDraftLoadedToast} />
-            <div className="w-full py-1.5 px-2 bg-white flex-shrink-0 z-20 border-b border-gray-200 shadow-sm">
+            <div className="w-full py-2 px-3 bg-white flex-shrink-0 z-20 border-b border-gray-200">
                 <div className="grid grid-cols-[1fr_auto] items-stretch gap-2 w-full max-w-2xl mx-auto">
-                    <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col gap-2">
                         <div className="relative">
                             <input
                                 ref={customerSearchInputRef}
@@ -379,13 +379,13 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 }}
                                 placeholder="거래처 검색"
                                 readOnly={isCustomerSelected}
-                                className={`w-full p-3 h-10 border-2 ${isCustomerSelected ? 'border-blue-500 bg-blue-50 pr-28 font-semibold text-blue-800' : 'border-gray-300 bg-white'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition-colors duration-200 text-base`}
+                                className={`w-full px-3 h-11 border ${isCustomerSelected ? 'border-blue-500 bg-blue-50 pr-28 font-semibold text-blue-800' : 'border-gray-300 bg-white'} rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 text-base`}
                                 autoComplete="off"
                             />
                              {isCustomerSelected && (
                                 <button
                                     onClick={handleClearCustomer}
-                                    className="absolute top-1/2 right-2 -translate-y-1/2 h-8 px-4 rounded-lg flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-95"
+                                    className="absolute top-1/2 right-1.5 -translate-y-1/2 h-8 px-3 rounded-md flex items-center justify-center gap-1.5 font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-95 text-sm"
                                     aria-label="거래처 변경"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -420,7 +420,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 }}
                                 placeholder="품목명 또는 바코드 검색"
                                 disabled={!isCustomerSelected}
-                                className={`w-full p-3 h-10 border-2 ${isCustomerSelected ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-100'} rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 transition-colors duration-200 text-base pr-28`}
+                                className={`w-full px-3 h-11 border ${isCustomerSelected ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-100'} rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400 transition-colors duration-200 text-base pr-28`}
                                 autoComplete="off"
                             />
                             <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
@@ -433,7 +433,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                             />
                         </div>
                     </div>
-                    <button onClick={handleOpenScanner} disabled={!isCustomerSelected} className="w-24 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed">
+                    <button onClick={handleOpenScanner} disabled={!isCustomerSelected} className="w-20 bg-blue-600 text-white rounded-lg flex flex-col items-center justify-center gap-1 font-bold hover:bg-blue-700 transition active:scale-95 shadow shadow-blue-500/30 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
                         <span className="text-xs">스캔</span>
                     </button>
@@ -456,20 +456,20 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 )}
             </main>
 
-            <footer className="p-1.5 bg-white border-t border-gray-200 z-10 flex-shrink-0">
+            <footer className="p-2 bg-white border-t border-gray-200 z-10 flex-shrink-0">
                 <div className="max-w-2xl mx-auto">
-                    <div className="flex justify-between items-center font-bold mb-1.5 px-2">
+                    <div className="flex justify-between items-center font-bold mb-2 px-2">
                         <span className="text-lg text-gray-600">총 합계:</span>
                         <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                     </div>
-                    <div className="grid grid-cols-5 gap-1.5">
-                         <button onClick={handleOpenMemoModal} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
+                    <div className="grid grid-cols-5 gap-2">
+                         <button onClick={handleOpenMemoModal} className="h-11 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
                             <span>메모</span>
                         </button>
-                        <button onClick={handleResetOrder} className="h-10 bg-gray-200 text-gray-700 rounded-xl font-bold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
+                        <button onClick={handleResetOrder} className="h-11 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
                             <span>삭제</span>
                         </button>
-                        <button onClick={handleSaveOrder} disabled={isSaving || items.length === 0 || !selectedCustomer} className="relative h-10 bg-blue-600 text-white rounded-xl font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
+                        <button onClick={handleSaveOrder} disabled={isSaving || items.length === 0 || !selectedCustomer} className="relative h-11 bg-blue-600 text-white rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center active:scale-95 col-span-3">
                             <span className={isSaving ? 'opacity-0' : 'opacity-100'}>발주 저장</span>
                             {isSaving && (
                                 <div className="absolute inset-0 flex items-center justify-center">

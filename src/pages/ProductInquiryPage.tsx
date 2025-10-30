@@ -12,7 +12,7 @@ const ProductCard: React.FC<{ product: Product, index: number }> = ({ product, i
 
     return (
         <div
-            className="relative overflow-hidden p-4 flex flex-col items-start gap-y-1 animate-card-enter"
+            className="relative overflow-hidden p-3 flex flex-col items-start gap-y-1 animate-card-enter"
             style={{ animationDelay: `${Math.min(index * 50, 500)}ms` }}
         >
             {saleIsActive && hasSalePrice && (
@@ -20,7 +20,7 @@ const ProductCard: React.FC<{ product: Product, index: number }> = ({ product, i
             )}
             {/* Line 1: Product Name, Sale Badge */}
             <div className="flex items-center gap-2 flex-wrap w-full">
-                <p className="font-bold text-gray-800 text-base whitespace-pre-wrap">{product.name}</p>
+                <p className="font-semibold text-gray-800 text-base whitespace-pre-wrap">{product.name}</p>
             </div>
             
             {/* Line 2: Barcode */}
@@ -48,7 +48,7 @@ const ProductCard: React.FC<{ product: Product, index: number }> = ({ product, i
                 <div className="text-xs text-gray-500 pt-1">
                     <div className="flex items-center gap-x-3">
                         {product.saleEndDate && (
-                            <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400'}>
+                            <span className={saleIsActive ? 'font-semibold text-blue-600' : 'text-gray-400'}>
                                 ~{product.saleEndDate}
                             </span>
                         )}
@@ -150,7 +150,7 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     return (
         <div className="h-full flex flex-col bg-white">
-            <div className="fixed-filter w-full p-3 bg-white border-b border-gray-200 z-10 shadow-sm">
+            <div className="fixed-filter w-full p-3 bg-white border-b border-gray-200 z-10">
                 <form onSubmit={handleSearch} className="relative w-full max-w-2xl mx-auto">
                     <div className="absolute top-1/2 left-4 -translate-y-1/2 text-gray-400 pointer-events-none">
                         <SearchIcon className="w-5 h-5" />
@@ -160,20 +160,20 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         placeholder="상품명 또는 바코드 검색"
-                        className="w-full h-14 p-3 pl-12 pr-36 border-2 border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-blue-500 placeholder:text-gray-400 transition text-base"
+                        className="w-full h-12 p-3 pl-12 pr-32 border border-gray-300 bg-white rounded-xl focus:ring-1 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400 transition text-base"
                     />
-                    <div className="absolute top-1/2 right-3 -translate-y-1/2 flex items-center gap-2">
+                    <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center gap-1.5">
                          <button
                             type="button"
                             onClick={handleScan}
-                            className="h-10 w-10 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center font-bold hover:bg-gray-200 transition active:scale-95"
+                            className="h-9 w-9 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center font-bold hover:bg-gray-200 transition active:scale-95"
                             aria-label="바코드 스캔"
                         >
                             <BarcodeScannerIcon className="w-6 h-6" />
                         </button>
                         <button
                             type="submit"
-                            className="h-10 px-5 rounded-lg flex items-center justify-center font-semibold transition bg-blue-600 text-white hover:bg-blue-700 active:scale-95"
+                            className="h-9 px-4 rounded-lg flex items-center justify-center font-semibold transition bg-blue-600 text-white hover:bg-blue-700 active:scale-95"
                             aria-label="검색"
                         >
                             검색

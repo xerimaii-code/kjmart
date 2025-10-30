@@ -39,9 +39,9 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
     };
 
     return (
-        <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
+        <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
             <div
-                className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                className={`bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
             >
                 <div className="p-8 text-center">
                     <p id="alert-dialog-title" className="text-lg text-slate-800 whitespace-pre-line font-medium leading-relaxed">{message}</p>
@@ -51,13 +51,13 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
                         <>
                             <button
                                 onClick={handleCancel}
-                                className="px-6 py-3 rounded-xl font-bold text-slate-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-75 transition-transform active:scale-95"
+                                className="px-6 py-3 rounded-lg font-bold text-slate-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-75 transition-transform active:scale-95"
                             >
                                 취소
                             </button>
                             <button
                                 onClick={handleConfirm}
-                                className={`text-white px-6 py-3 rounded-xl font-bold focus:outline-none focus:ring-2 focus:ring-opacity-75 transition-transform active:scale-95 ${confirmButtonClass || 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'}`}
+                                className={`text-white px-6 py-3 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-opacity-75 transition-transform active:scale-95 ${confirmButtonClass || 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'}`}
                             >
                                 {confirmText || '확인'}
                             </button>
@@ -65,7 +65,7 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
                     ) : (
                         <button
                             onClick={onClose}
-                            className="bg-blue-500 text-white w-full px-6 py-3 rounded-xl font-bold hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-transform active:scale-95"
+                            className="bg-blue-500 text-white w-full px-6 py-3 rounded-lg font-bold hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-transform active:scale-95"
                         >
                             확인
                         </button>

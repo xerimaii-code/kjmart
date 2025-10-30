@@ -51,8 +51,8 @@ const DeliveryTypeModal: React.FC<DeliveryTypeModalProps> = ({ isOpen, onClose, 
     );
 
     return (
-        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} role="dialog" aria-modal="true">
-            <div className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} role="dialog" aria-modal="true">
+            <div className={`bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
                 <div className="p-6">
                     <h3 className="text-xl font-bold text-gray-800 text-center mb-6">배송 유형 선택</h3>
                     <div className="space-y-4">
@@ -63,14 +63,14 @@ const DeliveryTypeModal: React.FC<DeliveryTypeModalProps> = ({ isOpen, onClose, 
                 <div className="bg-gray-50 p-3 grid grid-cols-2 gap-3">
                     <button
                         onClick={onClose}
-                        className="px-6 py-3 rounded-xl font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition active:scale-95"
+                        className="px-6 py-3 rounded-lg font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition active:scale-95"
                     >
                         취소
                     </button>
                     <button
                         onClick={handleConfirm}
                         disabled={!selectedType}
-                        className="text-white px-6 py-3 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        className="text-white px-6 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
                         계속
                     </button>

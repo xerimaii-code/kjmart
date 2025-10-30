@@ -170,7 +170,7 @@ const SyncSection: React.FC<{
             />
             <h4 className="text-base font-bold text-gray-700">{dataTypeKorean} 데이터</h4>
             {/* Google Drive Sync UI */}
-            <div className="p-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+            <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
                 <div className="space-y-3">
                      <p className="text-xs text-center text-gray-500 -mt-1">Google Drive의 엑셀 파일과 동기화합니다.</p>
                     {settings?.fileId ? (
@@ -231,7 +231,7 @@ const SyncSection: React.FC<{
                 </div>
             </div>
              {/* Local File Sync UI */}
-             <div className="p-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+             <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
                 <div className="space-y-3">
                     <p className="text-xs text-center text-gray-500">기기에 저장된 엑셀 파일로 1회성 동기화를 합니다.</p>
                     <button
@@ -368,7 +368,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 <select 
                                     value={selectedCameraId || 'default'} 
                                     onChange={handleCameraChange}
-                                    className="w-full p-2.5 border-2 border-gray-200 bg-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    className="w-full p-2.5 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                                 >
                                     <option value="default">기본 카메라</option>
                                     {cameras.map((camera, index) => (

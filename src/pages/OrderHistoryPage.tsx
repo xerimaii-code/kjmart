@@ -80,7 +80,7 @@ const OrderRow = memo(({
                 >
                     <div className="flex justify-between items-center gap-2">
                         <div className="flex-grow min-w-0">
-                            <p className="font-bold text-gray-800 text-base flex items-center" title={order.customer.name}>
+                            <p className="font-semibold text-gray-800 text-base flex items-center" title={order.customer.name}>
                                 {getStatusIcon(order, hasDraft)}
                                 <span className="truncate">{order.customer.name}</span>
                                 {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
@@ -105,7 +105,7 @@ const OrderRow = memo(({
             </div>
 
             {isMenuOpen && (
-                <div className="absolute top-12 right-4 w-52 bg-white rounded-xl shadow-2xl border border-gray-200/60 z-20 py-2 animate-fade-in-down" onClick={(e) => e.stopPropagation()}>
+                <div className="absolute top-12 right-4 w-52 bg-white rounded-xl shadow-lg border border-gray-200/60 z-20 py-2 animate-fade-in-down" onClick={(e) => e.stopPropagation()}>
                     {actionMenuItems.map(item => (
                         <button
                             key={item.id}
@@ -385,12 +385,12 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
 
     return (
         <div className="h-full flex flex-col bg-white">
-            <div className="sticky top-0 z-10 p-3 bg-white border-b border-gray-200 shadow-sm">
+            <div className="sticky top-0 z-10 p-3 bg-white border-b border-gray-200">
                 <div className="flex flex-wrap justify-end items-center gap-x-4 gap-y-2 max-w-2xl mx-auto w-full">
                     <div className="flex items-center gap-2 text-sm w-full sm:w-auto justify-end">
-                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="시작일" />
+                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="시작일" />
                         <span className="text-gray-500 font-semibold">~</span>
-                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border-2 border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="종료일" />
+                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="종료일" />
                     </div>
                 </div>
             </div>
@@ -414,7 +414,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                 return (
                                     <div key={group.date} className={`${isGroupActive ? 'relative z-10' : ''}`}>
                                         <div className="flex justify-between items-center p-4 bg-gray-100">
-                                            <h3 className="font-bold text-gray-800 text-base" id={`date-header-${group.date}`}>
+                                            <h3 className="font-semibold text-gray-800 text-base" id={`date-header-${group.date}`}>
                                                 {new Date(group.date).toLocaleDateString('ko-KR', {
                                                     year: 'numeric',
                                                     month: 'long',

@@ -82,12 +82,12 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const hasSalePrice = !!product.salePrice;
 
     return (
-        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
-            <div ref={modalContentRef} className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
+            <div ref={modalContentRef} className={`bg-white rounded-xl shadow-lg w-full max-w-sm transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
-                    <h3 id="addItemModalTitle" className="text-2xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
+                    <h3 id="addItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
                     <div className="text-center text-gray-600 mb-4 space-y-1">
-                        <div className="text-lg flex items-baseline justify-center gap-x-1.5 flex-wrap">
+                        <div className="text-base flex items-baseline justify-center gap-x-1.5 flex-wrap">
                             <span className="text-gray-600 font-semibold">{product.costPrice.toLocaleString()}원</span>
                             <span className="text-gray-400">/</span>
                             <span className={`font-semibold ${saleIsActive && hasSalePrice ? 'line-through text-gray-400' : 'text-gray-800'}`}>
@@ -103,10 +103,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                             )}
                         </div>
                         {(product.saleEndDate || product.supplierName) && (
-                            <div className="text-sm text-gray-500">
+                            <div className="text-xs text-gray-500">
                                 <div className="flex items-center justify-center gap-x-3">
                                     {product.saleEndDate && (
-                                        <span className={saleIsActive ? 'font-bold text-blue-600' : 'text-gray-400 text-xs'}>
+                                        <span className={saleIsActive ? 'font-semibold text-blue-600' : 'text-gray-400'}>
                                             ~{product.saleEndDate}
                                         </span>
                                     )}
@@ -118,7 +118,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                         )}
                     </div>
                     {existingItem && (
-                        <div className="text-center text-sm font-semibold text-blue-700 bg-blue-100 p-2.5 rounded-lg mb-4">
+                        <div className="text-center text-sm font-semibold text-blue-700 bg-blue-100 p-2 rounded-md mb-4">
                             이미 <span className="font-bold">{existingItem.quantity}{existingItem.unit}</span>가 담겨있습니다. 추가 수량을 입력하세요.
                         </div>
                     )}
@@ -127,7 +127,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2 text-center">수량</label>
                             <div className="flex justify-center items-center gap-2">
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(-1)} className="w-12 h-12 bg-gray-100 text-gray-600 text-2xl font-bold rounded-lg transition hover:bg-gray-200 active:scale-95 flex-shrink-0" aria-label="수량 감소">-</button>
                                 <input
                                     ref={inputRef}
                                     type="text" inputMode="numeric"
@@ -143,9 +143,9 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                             }
                                         }
                                     }}
-                                    className="w-24 h-14 text-center border-2 border-blue-500 bg-blue-50 rounded-xl text-gray-800 font-bold text-3xl focus:outline-none"
+                                    className="w-20 h-12 text-center border border-gray-300 bg-white rounded-lg text-gray-800 font-bold text-2xl focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                                 />
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(1)} className="w-14 h-14 bg-gray-200 text-gray-700 text-3xl font-bold rounded-xl transition hover:bg-gray-300 active:scale-95 flex-shrink-0" aria-label="수량 증가">+</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => changeQuantity(1)} className="w-12 h-12 bg-gray-100 text-gray-600 text-2xl font-bold rounded-lg transition hover:bg-gray-200 active:scale-95 flex-shrink-0" aria-label="수량 증가">+</button>
                             </div>
                         </div>
                         
@@ -154,7 +154,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                             <input
                                 id="item-memo" type="text" value={memo} onChange={(e) => setMemo(e.target.value)}
                                 placeholder="예: 월요일 도착"
-                                className="w-full px-3 py-2 border-2 border-gray-200 bg-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base"
+                                className="w-full px-3 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-base"
                                 maxLength={50}
                             />
                         </div>
@@ -165,20 +165,20 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                     </div>
                 </div>
                 
-                <div className="bg-gray-50 px-3 py-3 rounded-b-2xl">
+                <div className="bg-gray-50 px-4 py-3 rounded-b-xl">
                     {isContinuousScan ? (
                         <div className="space-y-2">
-                             <button onMouseDown={(e) => e.preventDefault()} onClick={handleAddAndScan} disabled={!isQuantityValid} className="w-full text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed">추가 후 계속 스캔</button>
+                             <button onMouseDown={(e) => e.preventDefault()} onClick={handleAddAndScan} disabled={!isQuantityValid} className="w-full text-white px-4 h-12 flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed">추가 후 계속 스캔</button>
                             <div className="grid grid-cols-3 gap-2">
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">스캔 종료</button>
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95 text-center disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed">추가 후 종료</button>
-                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (onNextScan) { onClose(); onNextScan(); } }} className="px-2 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">건너뛰기</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-2 h-10 flex items-center justify-center rounded-md font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">스캔 종료</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="px-2 h-10 flex items-center justify-center rounded-md font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95 text-center disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed">추가 후 종료</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (onNextScan) { onClose(); onNextScan(); } }} className="px-2 h-10 flex items-center justify-center rounded-md font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">건너뛰기</button>
                             </div>
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">
-                            <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-4 h-16 flex items-center justify-center rounded-xl font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-lg active:scale-95">취소</button>
-                            <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="text-white px-4 h-16 flex items-center justify-center rounded-xl font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-lg active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed">{existingItem ? '수량 추가' : '품목 추가'}</button>
+                            <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-4 h-12 flex items-center justify-center rounded-lg font-semibold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-base active:scale-95">취소</button>
+                            <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="text-white px-4 h-12 flex items-center justify-center rounded-lg font-bold bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed">{existingItem ? '수량 추가' : '품목 추가'}</button>
                         </div>
                     )}
                 </div>

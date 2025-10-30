@@ -12,9 +12,9 @@ const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, icon, children
     const [isOpen, setIsOpen] = useState(initiallyOpen);
 
     return (
-        <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/60 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <button
-                className="w-full flex justify-between items-center p-4 bg-white/60 hover:bg-gray-50/80 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="w-full flex justify-between items-center p-4 hover:bg-gray-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
             >
@@ -28,7 +28,7 @@ const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, icon, children
                 className={`grid transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
             >
                 <div className="overflow-hidden">
-                    <div className="p-4 pt-2 border-t border-gray-200/80">
+                    <div className="p-4 pt-2 border-t border-gray-200">
                          <div className="space-y-4">
                             {children}
                         </div>

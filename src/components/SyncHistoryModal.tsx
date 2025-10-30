@@ -3,10 +3,6 @@ import { SyncLog } from '../types';
 import * as db from '../services/dbService';
 import { SpinnerIcon, RemoveIcon, PencilSquareIcon, TrashIcon, HistoryIcon, UserCircleIcon } from './Icons';
 
-// We need to add UserCircleIcon to Icons.tsx
-// FIX: Removed local definition of UserIcon which was incorrect and unused. The imported UserCircleIcon will be used instead.
-
-
 const formatTimeAgo = (timestamp: number): string => {
     const now = new Date();
     const then = new Date(timestamp);
@@ -35,7 +31,7 @@ const LogItem: React.FC<{ log: SyncLog }> = ({ log }) => {
                 <ActionIcon className={`w-4 h-4 ${iconColor}`} />
             </div>
             <div className="flex-grow min-w-0">
-                <p className="font-bold text-gray-800 truncate" title={itemName}>{itemName}</p>
+                <p className="font-semibold text-gray-800 truncate" title={itemName}>{itemName}</p>
                 <div className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="flex items-center gap-1">
                         <UserCircleIcon className="w-3.5 h-3.5" />
@@ -99,17 +95,17 @@ const SyncHistoryModal: React.FC<SyncHistoryModalProps> = ({ isOpen, onClose }) 
 
     return (
         <div 
-            className={`fixed inset-0 bg-black z-40 transition-opacity duration-300 ${isRendered ? 'bg-opacity-60' : 'bg-opacity-0'}`}
+            className={`fixed inset-0 bg-black z-40 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}
             onClick={onClose}
             role="dialog"
             aria-modal="true"
         >
             <div 
                 style={{ top: 'calc(env(safe-area-inset-top) + 1rem)', bottom: '1rem' }}
-                className={`absolute left-1/2 -translate-x-1/2 w-[95%] max-w-2xl flex flex-col bg-gray-50 shadow-2xl transition-all duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'} rounded-2xl will-change-transform`}
+                className={`absolute left-1/2 -translate-x-1/2 w-[95%] max-w-2xl flex flex-col bg-gray-50 shadow-lg transition-all duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'} rounded-xl will-change-transform`}
                 onClick={e => e.stopPropagation()}
             >
-                <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">
+                <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-xl flex items-center justify-center">
                     <h2 className="text-lg font-bold text-gray-800">동기화 이력</h2>
                     <button onClick={onClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
                         <RemoveIcon className="w-6 h-6"/>

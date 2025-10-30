@@ -58,7 +58,7 @@ const Header: React.FC = () => {
     );
 
     return (
-        <header id="app-header" className="bg-white/60 backdrop-blur-xl px-4 flex justify-between items-center h-14 flex-shrink-0 border-b border-gray-200/80">
+        <header id="app-header" className="bg-white px-4 flex justify-between items-center h-14 flex-shrink-0 border-b border-gray-200">
             <div className="flex items-center gap-3">
                 <h1 className="text-xl font-extrabold text-gray-800 tracking-tight">발주관리</h1>
                 <StatusIndicator />

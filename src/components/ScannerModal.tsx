@@ -201,7 +201,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 <p className="text-white mt-4 font-semibold">스캐너 준비 중...</p>
                 <button
                     onClick={onClose}
-                    className="absolute bottom-10 bg-white/90 text-gray-900 px-8 py-3 rounded-full text-lg font-bold shadow-lg backdrop-blur-sm"
+                    className="absolute bottom-10 bg-white text-gray-900 px-8 py-3 rounded-full text-lg font-bold shadow-lg"
                 >
                     취소
                 </button>
@@ -230,7 +230,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
             <button
                 onClick={onClose}
-                className="absolute bottom-10 bg-white/90 text-gray-900 px-8 py-3 rounded-full text-lg font-bold shadow-lg z-20 backdrop-blur-sm transition-transform active:scale-95"
+                className="absolute bottom-10 bg-white/95 text-gray-900 px-8 py-3 rounded-full text-lg font-bold shadow-lg z-20 transition-transform active:scale-95"
             >
                 스캔 종료
             </button>

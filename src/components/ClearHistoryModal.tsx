@@ -98,8 +98,8 @@ const ClearHistoryModal: React.FC<ClearHistoryModalProps> = ({ isOpen, onClose }
     );
 
     return (
-        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-60' : 'bg-transparent'}`} role="dialog" aria-modal="true" onClick={onClose}>
-            <div className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} role="dialog" aria-modal="true" onClick={onClose}>
+            <div className={`bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-6">
                     <h3 className="text-xl font-bold text-gray-800 text-center mb-6">발주 내역 정리</h3>
                     <div className="space-y-4">
@@ -110,7 +110,7 @@ const ClearHistoryModal: React.FC<ClearHistoryModalProps> = ({ isOpen, onClose }
                                     type="date"
                                     value={date}
                                     onChange={(e) => setDate(e.target.value)}
-                                    className="w-full p-2 border-2 border-gray-300 rounded-lg text-gray-700 bg-white"
+                                    className="w-full p-2 border border-gray-300 rounded-lg text-gray-700 bg-white"
                                     aria-label="기준일"
                                 />
                                 <p className="text-xs text-gray-500 mt-2">선택한 날짜를 포함하여 그 이전의 모든 발주 내역이 삭제됩니다.</p>
@@ -123,14 +123,14 @@ const ClearHistoryModal: React.FC<ClearHistoryModalProps> = ({ isOpen, onClose }
                     <button
                         onClick={onClose}
                         disabled={isLoading}
-                        className="px-6 py-3 rounded-xl font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition active:scale-95 disabled:opacity-50"
+                        className="px-6 py-3 rounded-lg font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition active:scale-95 disabled:opacity-50"
                     >
                         취소
                     </button>
                     <button
                         onClick={handleConfirm}
                         disabled={isLoading || (clearOption === 'beforeDate' && !date)}
-                        className="relative text-white px-6 py-3 rounded-xl font-bold bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 transition active:scale-95 disabled:bg-rose-400 disabled:cursor-not-allowed flex items-center justify-center"
+                        className="relative text-white px-6 py-3 rounded-lg font-bold bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 transition active:scale-95 disabled:bg-rose-400 disabled:cursor-not-allowed flex items-center justify-center"
                     >
                         <span className={isLoading ? 'opacity-0' : 'opacity-100'}>삭제 실행</span>
                         {isLoading && (
