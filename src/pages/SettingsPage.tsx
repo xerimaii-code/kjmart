@@ -13,7 +13,6 @@ interface SyncSettings {
     fileId: string;
     fileName: string;
     lastSyncTime: string | null; // ISO string for file modification time
-    autoSync: boolean;
 }
 
 interface SettingsPageProps {
@@ -58,7 +57,6 @@ const SyncSection: React.FC<{
                 fileId,
                 fileName: metadata.name,
                 lastSyncTime: null,
-                autoSync: settings?.autoSync || false,
             });
         } catch (err) {
             if (err instanceof Error && (err.message.includes("cancelled") || err.message.includes("popup_closed"))) {
@@ -142,15 +140,9 @@ const SyncSection: React.FC<{
         }
     };
     
-    const handleAutoSyncToggle = (isChecked: boolean) => {
-        if (settings) {
-            setSettings({ ...settings, autoSync: isChecked });
-        }
-    };
-    
     const handleDisconnect = () => {
         showAlert(
-            `'${settings?.fileName}' 파일과의 연결을 해제하시겠습니까? 자동 동기화도 비활성화됩니다.`,
+            `'${settings?.fileName}' 파일과의 연결을 해제하시겠습니까?`,
             () => setSettings(null),
             '연결 해제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
@@ -187,16 +179,6 @@ const SyncSection: React.FC<{
                                     마지막 동기화: {new Date(settings.lastSyncTime).toLocaleString()}
                                 </p>
                             )}
-                            <div className="p-2.5 bg-white rounded-lg border border-gray-200 flex justify-center">
-                                <ToggleSwitch
-                                    id={`autosync-${dataType}`}
-                                    label="자동 동기화 (미구현)"
-                                    checked={settings.autoSync}
-                                    onChange={handleAutoSyncToggle}
-                                    color="blue"
-                                    disabled
-                                />
-                            </div>
                         </>
                     ) : (
                         <p className="text-sm text-gray-500 text-center py-2">연결된 Google Drive 파일이 없습니다.</p>
@@ -228,6 +210,14 @@ const SyncSection: React.FC<{
                             )}
                         </button>
                     </div>
+                    {isCurrentSyncForThisType && syncSource === 'drive' && (
+                        <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-center text-sm text-blue-700 font-medium animate-fade-in-down">
+                            <div className="flex items-center justify-center gap-2">
+                                <SpinnerIcon className="w-4 h-4 text-blue-500" />
+                                <span>{syncStatusText}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
              {/* Local File Sync UI */}
@@ -252,12 +242,15 @@ const SyncSection: React.FC<{
                            </>
                         )}
                     </button>
+                    {isCurrentSyncForThisType && syncSource === 'local' && (
+                        <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-center text-sm text-blue-700 font-medium animate-fade-in-down">
+                            <div className="flex items-center justify-center gap-2">
+                                <SpinnerIcon className="w-4 h-4 text-blue-500" />
+                                <span>{syncStatusText}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
-                {isCurrentSyncForThisType && (
-                    <div className="mt-3 text-center text-sm text-blue-600 font-medium">
-                        <p>{syncStatusText}</p>
-                    </div>
-                )}
             </div>
         </div>
     );
