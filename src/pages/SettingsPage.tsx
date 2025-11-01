@@ -79,7 +79,6 @@ const SyncSection: React.FC<{
 
             await syncWithFile(fileBlob, dataType, 'drive');
             
-            showToast(`${dataTypeKorean} Google Drive 동기화가 완료되었습니다.`, 'success');
             onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
 
         } catch (err: any) {
@@ -90,7 +89,6 @@ const SyncSection: React.FC<{
                     async () => {
                         try {
                             await proceed();
-                            showToast(`${dataTypeKorean} 동기화가 완료되었습니다.`, 'success');
                             if (settings?.fileId) {
                                 const metadata = await googleDrive.getFileMetadata(settings.fileId);
                                 onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
@@ -112,7 +110,6 @@ const SyncSection: React.FC<{
             const file = event.target.files[0];
             try {
                 await syncWithFile(file, dataType, 'local');
-                showToast(`${dataTypeKorean} 로컬 파일 동기화가 완료되었습니다.`, 'success');
             } catch (err: any) {
                  if (err.message === 'MASS_DELETION_DETECTED') {
                     const { numExisting, numDeletions, proceed } = err.details;
@@ -121,7 +118,6 @@ const SyncSection: React.FC<{
                         async () => {
                             try {
                                 await proceed();
-                                showToast(`${dataTypeKorean} 동기화가 완료되었습니다.`, 'success');
                             } catch (proceedError) {
                                // Error is handled by the syncWithFile action
                             }
