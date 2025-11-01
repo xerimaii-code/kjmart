@@ -35,6 +35,7 @@
             --shadow-color-rgb: 110 120 140;
             --danger-rgb: 239 68 68; /* red-500 */
             --success-rgb: 34 197 94; /* green-500 */
+            --header-height: calc(3.5rem + env(safe-area-inset-top));
         }
 
         html, body, #root {
@@ -74,7 +75,7 @@
         #app-header {
             -webkit-app-region: drag;
             padding-top: env(safe-area-inset-top);
-            height: calc(3.5rem + env(safe-area-inset-top)); /* 3.5rem is h-14 from Tailwind */
+            height: var(--header-height);
         }
         #app-header button, #app-header a, #app-header input, #app-header select {
             -webkit-app-region: no-drag;

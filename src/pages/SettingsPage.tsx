@@ -7,7 +7,7 @@ import { SyncSettings } from '../types';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
 import CollapsibleCard from '../components/CollapsibleCard';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { IS_DEVELOPER_MODE } from '../config';
 
 interface SettingsPageProps {
     isActive: boolean;
@@ -304,7 +304,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [isCleaning, setIsCleaning] = useState(false);
-    const [isDevMode, setIsDevMode] = useLocalStorage('developer-mode-enabled', false);
     
     useEffect(() => {
         const getCameras = async () => {
@@ -378,6 +377,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         } else {
             showToast('로그 보관 기간이 저장되었습니다.', 'success');
         }
+    };
+    
+    const handleForceSync = () => {
+        showAlert(
+            "다음 앱 로드 시 전체 데이터를 동기화하시겠습니까?\n\n개발 환경에서 테스트용으로만 사용하세요. 앱이 새로고침됩니다.",
+            () => {
+                localStorage.setItem('forceFullSyncOnNextLoad', 'true');
+                window.location.reload();
+            },
+            '새로고침 및 동기화',
+            'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'
+        );
     };
 
     return (
@@ -490,21 +501,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             description="오래된 발주 내역을 삭제하여 앱을 최적화합니다."
                         />
                         
-                        <div className="border-t border-gray-200/80 my-2" />
-                        <h4 className="text-sm font-bold text-orange-600 px-3 pt-2">개발자 옵션</h4>
-                         <div className="flex justify-between items-center p-3 bg-orange-50/80 rounded-lg">
-                            <ToggleSwitch 
-                                id="dev-mode"
-                                label="개발자 모드 활성화"
-                                checked={!!isDevMode}
-                                onChange={(checked) => setIsDevMode(checked)}
-                                color="red"
-                            />
-                         </div>
-                         <p className="text-xs text-gray-600 mt-1 px-3 pb-2">
-                            활성화하면 앱 재시작 시 Firebase 데이터 동기화를 건너뛰고 로컬 캐시 데이터로 즉시 시작합니다. 데이터가 최신이 아닐 수 있습니다.
-                         </p>
-
+                        {IS_DEVELOPER_MODE && (
+                            <>
+                                <div className="border-t border-gray-200/80 my-2" />
+                                <p className="text-xs text-orange-600 font-semibold px-3 py-1">개발자 도구</p>
+                                <ActionButton
+                                    onClick={handleForceSync}
+                                    icon={<DatabaseIcon className="w-6 h-6" />}
+                                    label="강제 전체 동기화"
+                                    description="다음 앱 로드 시 개발 모드를 무시하고 전체 데이터를 동기화합니다."
+                                />
+                            </>
+                        )}
+                        
                         <div className="border-t border-gray-200/80 my-2" />
                         <p className="text-xs text-red-600 font-semibold px-3 py-1">주의: 아래 작업은 되돌릴 수 없습니다.</p>
 

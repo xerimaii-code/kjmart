@@ -1,6 +1,13 @@
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
 import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType, SyncLog, DeviceSettings, SyncSettings } from '../types';
-import * as db from '../services/dbService';
+import { 
+    isInitialized, getDeviceSettings, db as firebaseDb, getStore, 
+    getLastSyncLogKey, getSyncLogChanges, listenForNewLogs, cleanupSyncLogs,
+    addOrder as dbAddOrder, updateOrder as dbUpdateOrder, deleteOrder as dbDeleteOrder,
+    updateOrderStatus as dbUpdateOrderStatus, clearOrders as dbClearOrders, 
+    clearOrdersBeforeDate as dbClearOrdersBeforeDate, resetData as dbResetData,
+    smartSyncData
+} from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
 import { useAuth } from './AuthContext';
@@ -8,8 +15,8 @@ import * as googleDrive from '../services/googleDriveService';
 import { getDeviceId } from '../services/deviceService';
 import Toast, { ToastState } from '../components/Toast';
 import { processExcelFileInWorker } from '../services/dataService';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/database';
+import { IS_DEVELOPER_MODE } from '../config';
+
 
 // --- TYPE DEFINITIONS ---
 
@@ -208,30 +215,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // --- Data Actions ---
     const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'itemCount' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
-        const newOrderId = await db.addOrderWithItems(orderData, orderData.items);
+        const newOrderId = await dbAddOrder(orderData, orderData.items);
         return newOrderId;
     }, []);
 
     const updateOrder = useCallback(async (order: Order) => {
         if (!order.items) throw new Error("Order items are missing for update.");
-        await db.updateOrderAndItems(order, order.items);
+        await dbUpdateOrder(order, order.items);
     }, []);
 
     const deleteOrder = useCallback(async (orderId: number) => {
-        await db.deleteOrderAndItems(orderId);
+        await dbDeleteOrder(orderId);
     }, []);
 
     const updateOrderStatus = useCallback(async (orderId: number, completionDetails: Order['completionDetails']) => {
-        await db.updateOrderStatus(orderId, completionDetails);
+        await dbUpdateOrderStatus(orderId, completionDetails);
     }, []);
 
     const clearOrders = useCallback(async () => {
-        await db.clearOrders();
+        await dbClearOrders();
     }, []);
 
     const clearOrdersBeforeDate = useCallback(async (date: Date) => {
         const isoString = date.toISOString();
-        return await db.clearOrdersBeforeDate(isoString);
+        return await dbClearOrdersBeforeDate(isoString);
     }, []);
 
     const syncWithFile = useCallback(async (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => {
@@ -257,7 +264,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const parsedResult = await processExcelFileInWorker(file, dataType.slice(0, -1) as 'customer' | 'product', onProgress);
             const newData = parsedResult.valid as (Customer[] | Product[]);
     
-            const syncResult = await db.smartSyncData(dataType, newData, user?.email || 'unknown', onProgress, existingData);
+            const syncResult = await smartSyncData(dataType, newData, user?.email || 'unknown', onProgress, existingData);
     
             if (dataType === 'customers') {
                 setCustomers(newData as Customer[]);
@@ -281,7 +288,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const proceed = async () => {
                     const parsedResult = error.details.parsedResult;
                     const newData = parsedResult.valid as (Customer[] | Product[]);
-                    const syncResult = await db.smartSyncData(dataType, newData, user?.email || 'unknown', (msg) => setSyncStatusText(msg), existingData, { bypassMassDeleteCheck: true });
+                    const syncResult = await smartSyncData(dataType, newData, user?.email || 'unknown', (msg) => setSyncStatusText(msg), existingData, { bypassMassDeleteCheck: true });
                     
                     if (dataType === 'customers') {
                         setCustomers(newData as Customer[]);
@@ -309,7 +316,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, [isSyncing, customers, products, user, showToast]);
 
     const forceFullSync = useCallback(async () => {
-        if (!db.isInitialized()) {
+        if (!isInitialized()) {
             showAlert("데이터베이스에 연결되지 않아 동기화할 수 없습니다.");
             return;
         }
@@ -317,12 +324,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSyncDataType('full');
         try {
             setSyncStatusText("거래처 데이터 동기화 중...");
-            const remoteCustomers = await db.getStore<Customer>('customers');
+            const remoteCustomers = await getStore<Customer>('customers');
             await cache.setCachedData('customers', remoteCustomers);
             setCustomers(remoteCustomers);
 
             setSyncStatusText("상품 데이터 동기화 중...");
-            const remoteProducts = await db.getStore<Product>('products');
+            const remoteProducts = await getStore<Product>('products');
             await cache.setCachedData('products', remoteProducts);
             setProducts(remoteProducts);
             
@@ -340,8 +347,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const resetData = useCallback(async (dataType: 'customers' | 'products') => {
         const typeKorean = dataType === 'customers' ? '거래처' : '상품';
         try {
-            await db.replaceAll(dataType, null);
-            await db.setValue(`sync-logs/${dataType}`, null);
+            await dbResetData(dataType);
             await cache.setCachedData(dataType, []);
             if (dataType === 'customers') setCustomers([]);
             else setProducts([]);
@@ -358,7 +364,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedCameraId: async (id: string | null) => {
             setDeviceSettings(prev => ({ ...prev, selectedCameraId: id }));
             try {
-                await db.setDeviceSetting(getDeviceId(), 'selectedCameraId', id);
+                await getDeviceSettings(getDeviceId());
             } catch (e) {
                 console.error("Failed to save selected camera ID", e);
                 showToast("카메라 설정 저장에 실패했습니다.", 'error');
@@ -368,7 +374,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const newSettings = { ...deviceSettings.scanSettings, ...settings };
             setDeviceSettings(prev => ({ ...prev, scanSettings: newSettings }));
             try {
-                await db.setDeviceSetting(getDeviceId(), 'scanSettings', newSettings);
+                await getDeviceSettings(getDeviceId());
             } catch (e) {
                 console.error("Failed to save scan settings", e);
                 showToast("스캔 설정 저장에 실패했습니다.", 'error');
@@ -377,7 +383,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setLogRetentionDays: async (days: number) => {
             setDeviceSettings(prev => ({ ...prev, logRetentionDays: days }));
             try {
-                await db.setDeviceSetting(getDeviceId(), 'logRetentionDays', days);
+                await getDeviceSettings(getDeviceId());
             } catch (e) {
                 console.error("Failed to save log retention", e);
                 showToast("로그 보관 기간 저장에 실패했습니다.", 'error');
@@ -392,7 +398,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 },
             }));
             try {
-                await db.setDeviceSetting(getDeviceId(), `googleDriveSyncSettings/${type}`, settings);
+                await getDeviceSettings(getDeviceId());
             } catch (e) {
                 console.error(`Failed to save GDrive settings for ${type}`, e);
                 showToast("Google Drive 설정 저장에 실패했습니다.", 'error');
@@ -403,7 +409,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // --- Initial Data Load and Sync Effect ---
     useEffect(() => {
-        if (!user || !db.isInitialized()) {
+        if (!user || !isInitialized()) {
             setInitialSyncCompleted(!user);
             return;
         }
@@ -443,17 +449,68 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     
         const runInitialSync = async () => {
-            const isDevMode = localStorage.getItem('developer-mode-enabled') === 'true';
+            const forceFullSyncFlag = localStorage.getItem('forceFullSyncOnNextLoad') === 'true';
 
-            if (isDevMode) {
-                console.warn('%c[DEV MODE] Skipping initial sync. Using local cache.', 'color: orange; font-weight: bold;');
-                setSyncStatusText("DEV MODE: 로컬 캐시 사용");
-                const cachedCustomers = await cache.getCachedData<Customer>('customers');
-                setCustomers(cachedCustomers);
-                const cachedProducts = await cache.getCachedData<Product>('products');
-                setProducts(cachedProducts);
-                setInitialSyncCompleted(true);
+            if (IS_DEVELOPER_MODE && !forceFullSyncFlag) {
+                console.warn('%c[DEV MODE] Minimal data sync is active.', 'color: orange; font-weight: bold;');
+                setIsSyncing(true);
+                setSyncDataType('full');
+                setSyncProgress(0);
+        
+                try {
+                    setSyncStatusText("DEV MODE: 기기 설정 로딩");
+                    const deviceId = getDeviceId();
+                    const remoteSettings = await getDeviceSettings(deviceId);
+                    const loadedSettings = {
+                        ...defaultDeviceSettings,
+                        ...remoteSettings,
+                        scanSettings: { ...defaultDeviceSettings.scanSettings, ...(remoteSettings.scanSettings || {}) },
+                        googleDriveSyncSettings: { ...defaultDeviceSettings.googleDriveSyncSettings, ...(remoteSettings.googleDriveSyncSettings || {}) },
+                    };
+                    setDeviceSettings(loadedSettings);
+                    setSyncProgress(25);
+        
+                    setSyncStatusText("DEV MODE: 거래처 샘플 로딩 (10개)");
+                    const customerSnapshot = await firebaseDb.ref('customers').limitToFirst(10).get();
+                    const customerData = customerSnapshot.val() || {};
+                    const limitedCustomers = Object.values(customerData) as Customer[];
+                    setCustomers(limitedCustomers);
+                    await cache.setCachedData('customers', limitedCustomers);
+                    setSyncProgress(50);
+        
+                    setSyncStatusText("DEV MODE: 상품 샘플 로딩 (50개)");
+                    const productSnapshot = await firebaseDb.ref('products').limitToFirst(50).get();
+                    const productData = productSnapshot.val() || {};
+                    const limitedProducts = Object.values(productData) as Product[];
+                    setProducts(limitedProducts);
+                    await cache.setCachedData('products', limitedProducts);
+                    setSyncProgress(75);
+        
+                    setSyncStatusText("앱 시작 준비 완료");
+                    setSyncProgress(100);
+                    setTimeout(() => {
+                        setInitialSyncCompleted(true);
+                        setIsSyncing(false);
+                    }, 300);
+        
+                } catch (error) {
+                    console.error("Dev mode sync failed:", error);
+                    showAlert("개발자 모드 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
+                    // Still try to load from cache as a fallback
+                    const cachedCustomers = await cache.getCachedData<Customer>('customers');
+                    setCustomers(cachedCustomers);
+                    const cachedProducts = await cache.getCachedData<Product>('products');
+                    setProducts(cachedProducts);
+                    setInitialSyncCompleted(true);
+                    setIsSyncing(false);
+                }
                 return;
+            }
+
+            // This is now the full sync logic
+            if (forceFullSyncFlag) {
+                localStorage.removeItem('forceFullSyncOnNextLoad');
+                showToast("강제 전체 동기화를 시작합니다.", 'success');
             }
 
             setIsSyncing(true);
@@ -466,7 +523,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             try {
                 setSyncProgress(5);
                 setSyncStatusText("기기 설정 로딩");
-                const remoteSettings = await db.getDeviceSettings(deviceId);
+                const remoteSettings = await getDeviceSettings(deviceId);
                 loadedSettings = {
                     ...defaultDeviceSettings,
                     ...remoteSettings,
@@ -509,21 +566,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
                 if (!lastKey || !hasCache) { // Full Sync
                     setSyncStatusText(`${typeName} 전체 데이터 다운로드`);
-                    const remoteData = await db.getStore<Customer | Product>(dataType);
+                    const remoteData = await getStore<Customer | Product>(dataType);
                     
                     setSyncProgress(progressStart + (progressEnd - progressStart) * 0.7);
                     setSyncStatusText(`${typeName} 정보 적용`);
                     
                     if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
                     await cache.setCachedData(dataType, remoteData as any);
-                    const newLastKey = await db.getLastSyncLogKey(dataType);
+                    const newLastKey = await getLastSyncLogKey(dataType);
                     setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
                     
                     setSyncProgress(progressEnd);
                     return newLastKey;
                 } else { // Incremental Sync
                     setSyncStatusText(`${typeName} 변경사항 확인`);
-                    const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
+                    const { items: changes, newLastKey } = await getSyncLogChanges(dataType, lastKey);
                     
                     setSyncProgress(progressStart + (progressEnd - progressStart) * 0.7);
 
@@ -544,7 +601,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 
                 setSyncStatusText("거래처 실시간 연결 설정");
                 unsubscribers.push(
-                    db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
+                    listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
                         await applyChanges('customers', [newItem]);
                         setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
                     })
@@ -555,7 +612,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 
                 setSyncStatusText("상품 실시간 연결 설정");
                 unsubscribers.push(
-                    db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
+                    listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
                         await applyChanges('products', [newItem]);
                         setLastSyncKeys(prev => ({ ...prev, products: newKey }));
                     })
@@ -566,8 +623,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const retentionDays = loadedSettings.logRetentionDays;
                 if (typeof retentionDays === 'number' && retentionDays > 0) {
                     Promise.all([
-                        db.cleanupSyncLogs('customers', retentionDays),
-                        db.cleanupSyncLogs('products', retentionDays)
+                        cleanupSyncLogs('customers', retentionDays),
+                        cleanupSyncLogs('products', retentionDays)
                     ]).catch(err => console.warn("Background log cleanup failed on startup:", err));
                 }
 
@@ -593,7 +650,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             clearTimeout(syncTimeout);
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert]);
+    }, [user, showAlert, showToast]);
 
 
     // --- Modal Actions ---

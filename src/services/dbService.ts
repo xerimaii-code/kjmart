@@ -179,7 +179,7 @@ export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
 // --- Data Modification ---
 const DB_UNINITIALIZED_ERROR = new Error("Database not initialized");
 
-export const addOrderWithItems = (
+export const addOrder = (
     orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'completedAt' | 'completionDetails' | 'itemCount' | 'items'>, 
     items: OrderItem[]
 ): Promise<number> => {
@@ -210,7 +210,7 @@ export const addOrderWithItems = (
     return Promise.resolve(newOrderId);
 };
 
-export const updateOrderAndItems = (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
+export const updateOrder = (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
     if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     
     const now = new Date().toISOString();
@@ -249,7 +249,7 @@ export const updateOrderStatus = (
     return Promise.resolve();
 };
 
-export const deleteOrderAndItems = (orderId: number): Promise<void> => {
+export const deleteOrder = (orderId: number): Promise<void> => {
     if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
     
     const updates: { [key: string]: null } = {};
@@ -316,6 +316,12 @@ export const clearOrdersBeforeDate = async (isoDateString: string): Promise<numb
     
     return deletedCount;
 };
+
+export const resetData = async (dataType: 'customers' | 'products') => {
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+    await db.ref(dataType).set(null);
+    await db.ref(`sync-logs/${dataType}`).set(null);
+}
 
 
 export const setValue = async (path: string, value: any): Promise<void> => {
