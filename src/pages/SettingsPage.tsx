@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon, CodeBracketIcon } from '../components/Icons';
 import { SyncSettings } from '../types';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
@@ -501,19 +501,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             description="오래된 발주 내역을 삭제하여 앱을 최적화합니다."
                         />
                         
-                        {IS_DEVELOPER_MODE && (
-                            <>
-                                <div className="border-t border-gray-200/80 my-2" />
-                                <p className="text-xs text-orange-600 font-semibold px-3 py-1">개발자 도구</p>
-                                <ActionButton
-                                    onClick={handleForceSync}
-                                    icon={<DatabaseIcon className="w-6 h-6" />}
-                                    label="강제 전체 동기화"
-                                    description="다음 앱 로드 시 개발 모드를 무시하고 전체 데이터를 동기화합니다."
-                                />
-                            </>
-                        )}
-                        
                         <div className="border-t border-gray-200/80 my-2" />
                         <p className="text-xs text-red-600 font-semibold px-3 py-1">주의: 아래 작업은 되돌릴 수 없습니다.</p>
 
@@ -542,6 +529,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             isDestructive={true}
                         />
                     </CollapsibleCard>
+                    
+                    {IS_DEVELOPER_MODE && (
+                        <CollapsibleCard title="개발자 도구" icon={<CodeBracketIcon className="w-6 h-6 text-gray-500" />}>
+                             <ActionButton
+                                onClick={handleForceSync}
+                                icon={<DatabaseIcon className="w-6 h-6" />}
+                                label="강제 전체 동기화"
+                                description="다음 앱 로드 시 개발 모드를 무시하고 전체 데이터를 동기화합니다."
+                            />
+                        </CollapsibleCard>
+                    )}
                 </div>
             </div>
         </div>
