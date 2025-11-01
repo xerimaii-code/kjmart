@@ -6,7 +6,7 @@ import { useSyncState } from '../context/AppContext';
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [isOnline, setIsOnline] = useState(navigator.onLine);
-    const { isSyncing, syncStatusText } = useSyncState();
+    const { isSyncing, syncStatusText, initialSyncCompleted } = useSyncState();
     const [currentTime, setCurrentTime] = useState(new Date());
 
     useEffect(() => {
@@ -56,10 +56,10 @@ const Header: React.FC = () => {
                     </div>
                 )}
             </div>
-            {isSyncing && syncStatusText && (
-                <p className="text-sm font-medium text-gray-700 animate-fade-in-down whitespace-nowrap" key={syncStatusText}>
-                    {syncStatusText}
-                </p>
+            {isSyncing && initialSyncCompleted && syncStatusText && (
+                <span className="text-sm font-medium text-blue-600 animate-fade-in-down">
+                    {syncStatusText}...
+                </span>
             )}
         </div>
     );

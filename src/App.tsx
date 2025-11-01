@@ -109,31 +109,36 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 
 
 const InitialSyncLoader: React.FC = () => {
-    const { syncProgress, syncStatusText } = useSyncState();
+    const { syncProgress } = useSyncState();
     const [displayedProgress, setDisplayedProgress] = useState(0);
     const radius = 42;
     const strokeWidth = 10;
     const circumference = 2 * Math.PI * radius;
 
     useEffect(() => {
-        const interval = setInterval(() => {
+        let animationFrameId: number;
+        
+        const animateProgress = () => {
             setDisplayedProgress(prev => {
-                if (prev < syncProgress) {
-                    const diff = syncProgress - prev;
-                    // Move faster for larger gaps, but ensure at least 1% increment
-                    const step = Math.max(1, Math.floor(diff / 10)); 
-                    return Math.min(prev + step, syncProgress);
+                if (Math.abs(prev - syncProgress) < 0.1) {
+                    cancelAnimationFrame(animationFrameId);
+                    return syncProgress; // Snap to final value
                 }
                 if (prev > syncProgress) {
                     return syncProgress; // Snap back if progress goes down
                 }
-                // At this point, prev === syncProgress, so we can stop.
-                clearInterval(interval);
-                return prev;
+                // Smooth easing
+                const diff = syncProgress - prev;
+                const step = diff / 10;
+                const newProgress = prev + step;
+                animationFrameId = requestAnimationFrame(animateProgress);
+                return newProgress;
             });
-        }, 30); // ~33fps animation feels smooth
+        };
 
-        return () => clearInterval(interval);
+        animationFrameId = requestAnimationFrame(animateProgress);
+
+        return () => cancelAnimationFrame(animationFrameId);
     }, [syncProgress]);
     
     const syncSteps = [
@@ -162,10 +167,15 @@ const InitialSyncLoader: React.FC = () => {
             </li>
         );
     };
+    
+    const currentStep = useMemo(() => {
+        // Find the last step that has been started
+        return [...syncSteps].reverse().find(step => syncProgress >= step.progressThreshold) || syncSteps[0];
+    }, [syncProgress]);
 
     return (
         <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-4">
-            <div className="relative w-36 h-36 mb-4">
+            <div className="relative w-36 h-36 mb-6">
                 <svg className="w-full h-full" viewBox="0 0 100 100">
                     {/* Background circle */}
                     <circle
@@ -189,20 +199,21 @@ const InitialSyncLoader: React.FC = () => {
                         r={radius}
                         cx="50"
                         cy="50"
-                        style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 0.2s linear' }}
+                        style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 0.3s ease-out' }}
                     />
                 </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <span className="text-4xl font-bold text-gray-800 tabular-nums">
-                        {Math.round(displayedProgress)}%
-                    </span>
-                    <p className="mt-1 text-sm font-medium text-gray-500 h-5" key={syncStatusText}>
-                        {syncStatusText}
-                    </p>
-                </div>
+            </div>
+
+            <div className="text-center mb-6">
+                <p className="text-4xl font-bold text-gray-800 tabular-nums">
+                    {Math.round(displayedProgress)}%
+                </p>
+                <p className="text-base font-semibold text-gray-700 h-6 mt-2" key={currentStep.name}>
+                    {currentStep.name}...
+                </p>
             </div>
             
-            <div className="mt-4 w-full max-w-xs bg-white p-5 rounded-xl shadow-lg border border-gray-200 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
+            <div className="w-full max-w-xs bg-white p-5 rounded-xl shadow-lg border border-gray-200 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
                 <ul className="space-y-3">
                     {syncSteps.map((step, index) => {
                         const nextStep = syncSteps[index + 1];

@@ -325,20 +325,40 @@ export const setValue = async (path: string, value: any): Promise<void> => {
 
 // --- Sync Log Management ---
 
+// Helper function to create a fully normalized, comparable product object.
+// This ensures that optional fields from Excel (undefined) are compared correctly against
+// existing data from Firebase (which might have "" or null).
+const createComparableProduct = (item: any) => ({
+    barcode: item.barcode || '',
+    name: (item.name || '').trim(),
+    costPrice: Number(item.costPrice || 0),
+    sellingPrice: Number(item.sellingPrice || 0),
+    salePrice: item.salePrice == null ? '' : String(item.salePrice).trim(),
+    saleEndDate: item.saleEndDate || '',
+    supplierName: (item.supplierName || '').trim(),
+});
+
+// Helper for customers.
+const createComparableCustomer = (item: any) => ({
+    comcode: item.comcode || '',
+    name: (item.name || '').trim(),
+});
+
 const areObjectsEqual = (newItem: any, existingItem: any, type: 'customers' | 'products'): boolean => {
     if (!newItem || !existingItem) return false;
-    // Normalize and remove lastModified for comparison
-    const normalize = (item: any) => {
-        const { lastModified, ...rest } = item;
-        if (type === 'products') {
-            rest.salePrice = rest.salePrice == null ? '' : String(rest.salePrice).trim();
-            rest.saleEndDate = rest.saleEndDate || '';
-            rest.supplierName = (rest.supplierName || '').trim();
-        }
-        rest.name = (rest.name || '').trim();
-        return rest;
-    };
-    return JSON.stringify(normalize(newItem)) === JSON.stringify(normalize(existingItem));
+
+    if (type === 'products') {
+        return JSON.stringify(createComparableProduct(newItem)) === JSON.stringify(createComparableProduct(existingItem));
+    }
+    
+    if (type === 'customers') {
+        return JSON.stringify(createComparableCustomer(newItem)) === JSON.stringify(createComparableCustomer(existingItem));
+    }
+
+    // Fallback for any other type (should not happen)
+    const { lastModified: lm1, ...rest1 } = newItem;
+    const { lastModified: lm2, ...rest2 } = existingItem;
+    return JSON.stringify(rest1) === JSON.stringify(rest2);
 };
 
 
@@ -350,7 +370,7 @@ export const smartSyncData = async (
     existingDataArray: (Customer | Product)[],
     options?: { bypassMassDeleteCheck?: boolean }
 ): Promise<{ additions: number; updates: number; deletions: number; }> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
+    if (!isInitialized() || !db) throw DB_UNINITIALIZED_ERROR;
 
     const keyField = storeName === 'customers' ? 'comcode' : 'barcode';
     
@@ -388,7 +408,14 @@ export const smartSyncData = async (
     for (const [key, newItem] of newDataMap.entries()) {
         const existingItem = existingDataMap.get(key);
         
-        const itemWithMeta = { ...newItem, lastModified: nowISO };
+        // FIX: Normalize the new item from the Excel file before comparison and saving.
+        // This ensures data consistency between the source and the database, preventing
+        // false positives on subsequent syncs.
+        const normalizedNewItem = storeName === 'products'
+            ? createComparableProduct(newItem)
+            : createComparableCustomer(newItem);
+
+        const itemWithMeta = { ...normalizedNewItem, lastModified: nowISO };
         const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
 
         if (!existingItem) {
@@ -397,7 +424,7 @@ export const smartSyncData = async (
                 updates[`/${storeName}/${key}`] = itemWithMeta;
                 updates[`/sync-logs/${storeName}/${logRefKey}`] = { ...itemWithMeta, timestamp, user: logUser };
             }
-        } else if (!areObjectsEqual(newItem, existingItem, storeName)) {
+        } else if (!areObjectsEqual(normalizedNewItem, existingItem, storeName)) {
             updatesCount++;
             if (logRefKey) {
                 updates[`/${storeName}/${key}`] = itemWithMeta;
