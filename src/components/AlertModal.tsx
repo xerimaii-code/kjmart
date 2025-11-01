@@ -41,7 +41,7 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
     return (
         <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
             <div
-                className={`bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden transition-all duration-300 ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                className={`bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
             >
                 <div className="p-8 text-center">
                     <p id="alert-dialog-title" className="text-lg text-slate-800 whitespace-pre-line font-medium leading-relaxed">{message}</p>

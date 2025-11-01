@@ -102,7 +102,7 @@ const SyncHistoryModal: React.FC<SyncHistoryModalProps> = ({ isOpen, onClose }) 
         >
             <div 
                 style={{ top: 'calc(env(safe-area-inset-top) + 1rem)', bottom: '1rem' }}
-                className={`absolute left-1/2 -translate-x-1/2 w-[95%] max-w-2xl flex flex-col bg-gray-50 shadow-lg transition-all duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'} rounded-xl will-change-transform`}
+                className={`absolute left-1/2 -translate-x-1/2 w-[95%] max-w-2xl flex flex-col bg-gray-50 shadow-lg transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'} rounded-xl will-change-[opacity,transform]`}
                 onClick={e => e.stopPropagation()}
             >
                 <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-xl flex items-center justify-center">

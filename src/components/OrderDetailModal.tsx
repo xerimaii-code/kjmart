@@ -317,7 +317,7 @@ const OrderDetailModal: React.FC = () => {
         >
             <div 
                 style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}
-                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-white shadow-lg transition-transform duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'translate-y-0' : 'translate-y-full'} rounded-t-2xl will-change-transform`}
+                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-white shadow-lg transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'} rounded-t-2xl will-change-[opacity,transform]`}
                 onClick={e => e.stopPropagation()}
             >
                 <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">

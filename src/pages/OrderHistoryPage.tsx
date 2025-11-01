@@ -14,7 +14,6 @@ interface ActionMenuItem {
     label: string;
     icon: React.ReactNode;
     className?: string;
-    onClick: () => void;
 }
 
 interface OrderHistoryPageProps {
@@ -41,6 +40,17 @@ const getStatusIcon = (order: Order, hasDraft: boolean) => {
     return null;
 };
 
+interface OrderRowProps {
+    order: Order;
+    isHighlighted: boolean;
+    isMenuOpen: boolean;
+    hasDraft: boolean;
+    onCardClick: (e: React.MouseEvent) => void;
+    onMenuToggle: (e: React.MouseEvent) => void;
+    onMenuAction: (e: React.MouseEvent) => void;
+    index: number;
+}
+
 const OrderRow = memo(({
     order,
     isHighlighted,
@@ -48,20 +58,23 @@ const OrderRow = memo(({
     hasDraft,
     onCardClick,
     onMenuToggle,
-    actionMenuItems,
+    onMenuAction,
     index,
-}: {
-    order: Order;
-    isHighlighted: boolean;
-    isMenuOpen: boolean;
-    hasDraft: boolean;
-    onCardClick: () => void;
-    onMenuToggle: (e: React.MouseEvent) => void;
-    actionMenuItems: ActionMenuItem[];
-    index: number;
-}) => {
+}: OrderRowProps) => {
     const isCompleted = !!order.completedAt || !!order.completionDetails;
     const isUpdated = order.updatedAt && order.createdAt && new Date(order.updatedAt).getTime() > new Date(order.createdAt).getTime();
+    
+    const actionMenuItems = useMemo((): Omit<ActionMenuItem, 'onClick'>[] => {
+        const menuItems: Omit<ActionMenuItem, 'onClick'>[] = [];
+        if (isCompleted) {
+            menuItems.push({ id: 'undo', label: '완료 취소', icon: <UndoIcon className="w-5 h-5" /> });
+        } else {
+            menuItems.push({ id: 'sms', label: 'SMS로 내보내기', icon: <SmsIcon className="w-5 h-5" /> });
+            menuItems.push({ id: 'xls', label: 'XLS로 내보내기', icon: <XlsIcon className="w-5 h-5" /> });
+        }
+        menuItems.push({ id: 'delete', label: '삭제', icon: <TrashIcon className="w-5 h-5" />, className: 'text-red-600' });
+        return menuItems;
+    }, [isCompleted]);
 
     return (
         <div 
@@ -74,6 +87,7 @@ const OrderRow = memo(({
             >
                 <div
                     onClick={onCardClick}
+                    data-order-id={order.id}
                     className={`flex-grow p-4 cursor-pointer ${isCompleted ? 'opacity-70' : ''}`}
                     role="button"
                     aria-label={`${order.customer.name} 주문 보기`}
@@ -98,7 +112,7 @@ const OrderRow = memo(({
                     </div>
                 </div>
                 <div className="flex-shrink-0 pr-2">
-                    <button onClick={onMenuToggle} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors" aria-label="추가 옵션">
+                    <button onClick={onMenuToggle} data-order-id={order.id} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors" aria-label="추가 옵션">
                         <MoreVerticalIcon className="w-5 h-5" />
                     </button>
                 </div>
@@ -109,7 +123,9 @@ const OrderRow = memo(({
                     {actionMenuItems.map(item => (
                         <button
                             key={item.id}
-                            onClick={item.onClick}
+                            onClick={onMenuAction}
+                            data-action={item.id}
+                            data-order-id={order.id}
                             className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 transition-colors ${item.className || 'text-gray-700'}`}
                         >
                             {item.icon}
@@ -302,86 +318,87 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         };
     }, [activeMenuOrderId]);
 
-    const handleMenuToggle = (e: React.MouseEvent, orderId: number) => {
+    const ordersMap = useMemo(() => new Map(orders.map(o => [o.id, o])), [orders]);
+
+    const handleMenuToggle = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
-        setActiveMenuOrderId(prev => (prev === orderId ? null : orderId));
-    };
+        const orderId = Number((e.currentTarget as HTMLElement).dataset.orderId);
+        if (orderId) {
+            setActiveMenuOrderId(prev => (prev === orderId ? null : orderId));
+        }
+    }, []);
 
-    const getActionMenuItems = useCallback((order: Order): ActionMenuItem[] => {
-        const isCompleted = !!order.completedAt || !!order.completionDetails;
-
-        const closeMenuAnd = (fn: () => void) => () => {
-            setActiveMenuOrderId(null);
-            fn();
-        };
-
-        const handleDelete = closeMenuAnd(() => {
-            showAlert(
-                `'${order.customer.name}'의 발주 내역을 삭제하시겠습니까?`,
-                () => deleteOrder(order.id),
-                '삭제',
-                'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
-            );
-        });
-
-        const handleUndoCompletion = closeMenuAnd(() => {
-            showAlert(
-                `'${order.customer.name}'의 발주를 완료 취소하시겠습니까?`,
-                () => updateOrderStatus(order.id, null)
-            );
-        });
-        
-        const handleSms = closeMenuAnd(async () => {
-            const orderWithItems = { ...order, items: await db.getOrderItems(order.id) };
-            if(orderWithItems.items.length === 0){
-                showAlert("품목이 없어 내보낼 수 없습니다.");
-                return;
-            }
-            const smsBody = exportToSMS(orderWithItems);
-            const encodedSmsBody = encodeURIComponent(smsBody);
-            window.location.href = `sms:?body=${encodedSmsBody}`;
-            const timestamp = new Date().toISOString();
-            updateOrderStatus(order.id, { type: 'sms', timestamp });
-        });
-
-        const handleXls = closeMenuAnd(async () => {
+    const handleCardClick = useCallback(async (e: React.MouseEvent) => {
+        const orderId = Number((e.currentTarget as HTMLElement).dataset.orderId);
+        const order = ordersMap.get(orderId);
+        if (order) {
             try {
                 const items = await db.getOrderItems(order.id);
-                if (items.length === 0) {
-                    showAlert("품목이 없어 내보낼 수 없습니다.");
-                    return;
-                }
-                const orderWithItems = { ...order, items };
-                openDeliveryModal(orderWithItems);
+                openDetailModal({ ...order, items });
             } catch (error) {
-                console.error("Failed to fetch order items for XLS export:", error);
-                showAlert("XLS로 내보내기 위해 주문 품목을 불러오는 데 실패했습니다.");
+                console.error("Failed to fetch order items:", error);
+                showAlert("주문 상세 정보를 불러오는 데 실패했습니다.");
             }
-        });
-        
-        const menuItems: ActionMenuItem[] = [];
-
-        if (isCompleted) {
-            menuItems.push({ id: 'undo', label: '완료 취소', icon: <UndoIcon className="w-5 h-5" />, onClick: handleUndoCompletion });
-        } else {
-            menuItems.push({ id: 'sms', label: 'SMS로 내보내기', icon: <SmsIcon className="w-5 h-5" />, onClick: handleSms });
-            menuItems.push({ id: 'xls', label: 'XLS로 내보내기', icon: <XlsIcon className="w-5 h-5" />, onClick: handleXls });
         }
-        
-        menuItems.push({ id: 'delete', label: '삭제', icon: <TrashIcon className="w-5 h-5" />, className: 'text-red-600', onClick: handleDelete });
-
-        return menuItems;
-    }, [showAlert, deleteOrder, updateOrderStatus, openDeliveryModal]);
+    }, [ordersMap, openDetailModal, showAlert]);
     
-    const handleCardClick = useCallback(async (order: Order) => {
-        try {
-            const items = await db.getOrderItems(order.id);
-            openDetailModal({ ...order, items });
-        } catch (error) {
-            console.error("Failed to fetch order items:", error);
-            showAlert("주문 상세 정보를 불러오는 데 실패했습니다.");
+    const handleMenuAction = useCallback((e: React.MouseEvent) => {
+        const target = e.currentTarget as HTMLButtonElement;
+        const action = target.dataset.action;
+        const orderId = Number(target.dataset.orderId);
+        const order = ordersMap.get(orderId);
+    
+        if (!action || !order) return;
+        
+        setActiveMenuOrderId(null);
+    
+        switch (action) {
+            case 'delete':
+                showAlert(
+                    `'${order.customer.name}'의 발주 내역을 삭제하시겠습니까?`,
+                    () => deleteOrder(order.id),
+                    '삭제',
+                    'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+                );
+                break;
+            case 'undo':
+                showAlert(
+                    `'${order.customer.name}'의 발주를 완료 취소하시겠습니까?`,
+                    () => updateOrderStatus(order.id, null)
+                );
+                break;
+            case 'sms':
+                (async () => {
+                    const orderWithItems = { ...order, items: await db.getOrderItems(order.id) };
+                    if(orderWithItems.items.length === 0){
+                        showAlert("품목이 없어 내보낼 수 없습니다.");
+                        return;
+                    }
+                    const smsBody = exportToSMS(orderWithItems);
+                    const encodedSmsBody = encodeURIComponent(smsBody);
+                    window.location.href = `sms:?body=${encodedSmsBody}`;
+                    const timestamp = new Date().toISOString();
+                    updateOrderStatus(order.id, { type: 'sms', timestamp });
+                })();
+                break;
+            case 'xls':
+                (async () => {
+                    try {
+                        const items = await db.getOrderItems(order.id);
+                        if (items.length === 0) {
+                            showAlert("품목이 없어 내보낼 수 없습니다.");
+                            return;
+                        }
+                        const orderWithItems = { ...order, items };
+                        openDeliveryModal(orderWithItems);
+                    } catch (error) {
+                        console.error("Failed to fetch order items for XLS export:", error);
+                        showAlert("XLS로 내보내기 위해 주문 품목을 불러오는 데 실패했습니다.");
+                    }
+                })();
+                break;
         }
-    }, [openDetailModal, showAlert]);
+    }, [ordersMap, showAlert, deleteOrder, updateOrderStatus, openDeliveryModal]);
 
     return (
         <div className="h-full flex flex-col bg-white">
@@ -432,9 +449,9 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                                                     isHighlighted={order.id === lastModifiedOrderId}
                                                     isMenuOpen={activeMenuOrderId === order.id}
                                                     hasDraft={draftKeys.has(order.id)}
-                                                    onCardClick={() => handleCardClick(order)}
-                                                    onMenuToggle={(e) => handleMenuToggle(e, order.id)}
-                                                    actionMenuItems={getActionMenuItems(order)}
+                                                    onCardClick={handleCardClick}
+                                                    onMenuToggle={handleMenuToggle}
+                                                    onMenuAction={handleMenuAction}
                                                     index={visibleOrders.findIndex(o => o.id === order.id)}
                                                 />
                                             ))}
