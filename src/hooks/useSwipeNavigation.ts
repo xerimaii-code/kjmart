@@ -138,6 +138,7 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
         transform: `translateX(${translateX}px)`,
         transition: isAnimating ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'none',
         willChange: 'transform',
+        touchAction: 'pan-y',
     };
 
     return { onTouchStart, onTouchMove, onTouchEnd, containerStyle };

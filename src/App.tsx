@@ -3,7 +3,7 @@ import { AppProvider, useModals, useScanner, useSyncState, useDataState, useData
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import Header from './components/Header';
-import { SpinnerIcon, CheckCircleIcon } from './components/Icons';
+import { SpinnerIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS, loadScript } from './services/dataService';
@@ -109,132 +109,44 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
 
 
 const InitialSyncLoader: React.FC = () => {
-    const { syncProgress } = useSyncState();
-    const [displayedProgress, setDisplayedProgress] = useState(0);
-    const radius = 42;
-    const strokeWidth = 10;
+    const { syncStatusText, syncProgress } = useSyncState();
+    const radius = 54;
     const circumference = 2 * Math.PI * radius;
-
-    useEffect(() => {
-        let animationFrameId: number;
-        
-        const animateProgress = () => {
-            setDisplayedProgress(prev => {
-                if (Math.abs(prev - syncProgress) < 0.1) {
-                    cancelAnimationFrame(animationFrameId);
-                    return syncProgress; // Snap to final value
-                }
-                if (prev > syncProgress) {
-                    return syncProgress; // Snap back if progress goes down
-                }
-                // Smooth easing
-                const diff = syncProgress - prev;
-                const step = diff / 10;
-                const newProgress = prev + step;
-                animationFrameId = requestAnimationFrame(animateProgress);
-                return newProgress;
-            });
-        };
-
-        animationFrameId = requestAnimationFrame(animateProgress);
-
-        return () => cancelAnimationFrame(animationFrameId);
-    }, [syncProgress]);
-    
-    const syncSteps = [
-        { name: '로컬 캐시 로딩', progressThreshold: 0 },
-        { name: '거래처 데이터 동기화', progressThreshold: 10 },
-        { name: '상품 데이터 동기화', progressThreshold: 55 },
-        { name: '앱 준비 완료', progressThreshold: 100 },
-    ];
-    
-    const SyncStep: React.FC<{ label: string; status: 'completed' | 'in-progress' | 'pending' }> = ({ label, status }) => {
-        const getStatusIcon = () => {
-            switch (status) {
-                case 'completed':
-                    return <CheckCircleIcon className="w-5 h-5 text-green-500" />;
-                case 'in-progress':
-                    return <SpinnerIcon className="w-5 h-5 text-blue-500" />;
-                case 'pending':
-                    return <div className="w-5 h-5 flex items-center justify-center"><div className="w-2.5 h-2.5 bg-gray-300 rounded-full"></div></div>;
-            }
-        };
-    
-        return (
-            <li className={`flex items-center gap-3 transition-all duration-300 ${status === 'pending' ? 'text-gray-400' : 'text-gray-800 font-semibold'}`}>
-                {getStatusIcon()}
-                <span>{label}</span>
-            </li>
-        );
-    };
-    
-    const currentStep = useMemo(() => {
-        // Find the last step that has been started
-        return [...syncSteps].reverse().find(step => syncProgress >= step.progressThreshold) || syncSteps[0];
-    }, [syncProgress]);
+    const offset = circumference - (syncProgress / 100) * circumference;
 
     return (
         <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-4">
-            <div className="relative w-36 h-36 mb-6">
-                <svg className="w-full h-full" viewBox="0 0 100 100">
-                    {/* Background circle */}
+            <div className="relative w-32 h-32 flex items-center justify-center mb-6">
+                <svg className="absolute w-full h-full" viewBox="0 0 120 120">
                     <circle
                         className="text-gray-200"
-                        strokeWidth={strokeWidth}
+                        strokeWidth="8"
                         stroke="currentColor"
                         fill="transparent"
                         r={radius}
-                        cx="50"
-                        cy="50"
+                        cx="60"
+                        cy="60"
                     />
-                    {/* Progress circle */}
                     <circle
                         className="text-blue-500"
-                        strokeWidth={strokeWidth}
+                        strokeWidth="8"
                         strokeDasharray={circumference}
-                        strokeDashoffset={circumference * (1 - displayedProgress / 100)}
+                        strokeDashoffset={offset}
                         strokeLinecap="round"
                         stroke="currentColor"
                         fill="transparent"
                         r={radius}
-                        cx="50"
-                        cy="50"
-                        style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 0.3s ease-out' }}
+                        cx="60"
+                        cy="60"
+                        transform="rotate(-90 60 60)"
+                        style={{ transition: 'stroke-dashoffset 0.35s ease' }}
                     />
                 </svg>
+                <span className="text-2xl font-bold text-blue-600 tabular-nums">{Math.round(syncProgress)}%</span>
             </div>
-
-            <div className="text-center mb-6">
-                <p className="text-4xl font-bold text-gray-800 tabular-nums">
-                    {Math.round(displayedProgress)}%
-                </p>
-                <p className="text-base font-semibold text-gray-700 h-6 mt-2" key={currentStep.name}>
-                    {currentStep.name}...
-                </p>
-            </div>
-            
-            <div className="w-full max-w-xs bg-white p-5 rounded-xl shadow-lg border border-gray-200 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
-                <ul className="space-y-3">
-                    {syncSteps.map((step, index) => {
-                        const nextStep = syncSteps[index + 1];
-                        const isCompleted = syncProgress >= (nextStep?.progressThreshold ?? 100);
-                        const isInProgress = syncProgress >= step.progressThreshold && !isCompleted;
-
-                        let status: 'completed' | 'in-progress' | 'pending' = 'pending';
-                        if (isCompleted) {
-                            status = 'completed';
-                        } else if (isInProgress) {
-                            status = 'in-progress';
-                        }
-                        
-                        if (step.progressThreshold === 100 && syncProgress >= 100) {
-                            status = 'completed';
-                        }
-
-                        return <SyncStep key={step.name} label={step.name} status={status} />;
-                    })}
-                </ul>
-            </div>
+            <p className="text-lg font-semibold text-gray-700 animate-fade-in-up" key={syncStatusText}>
+                {syncStatusText}...
+            </p>
         </div>
     );
 };
