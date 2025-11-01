@@ -73,3 +73,24 @@ export interface SyncLog {
     name?: string;
     [key: string]: any;
 }
+
+// --- App Settings Types ---
+export interface SyncSettings {
+    fileId: string;
+    fileName: string;
+    lastSyncTime: string | null;
+    autoSync: boolean;
+}
+
+export interface DeviceSettings {
+    selectedCameraId: string | null;
+    scanSettings: {
+        vibrateOnScan: boolean;
+        soundOnScan: boolean;
+    };
+    logRetentionDays: number;
+    googleDriveSyncSettings: {
+        customers: SyncSettings | null;
+        products: SyncSettings | null;
+    };
+}

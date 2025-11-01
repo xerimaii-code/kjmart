@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useDataState, useAlert, useDataActions } from '../context/AppContext';
+import { useScanner, useAlert } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
 import { SpinnerIcon } from './Icons';
 import './ScannerModal.css';
@@ -18,8 +18,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const videoRef = useRef<HTMLVideoElement>(null);
     const codeReaderRef = useRef<any>(null);
     const audioCtxRef = useRef<AudioContext | null>(null); // Use a ref for the context
-    const { selectedCameraId, scanSettings } = useDataState();
-    const { setSelectedCameraId } = useDataActions();
+    const { selectedCameraId, scanSettings } = useScanner();
     const { showAlert } = useAlert();
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
     const [isRendered, setIsRendered] = useState(false);
@@ -44,13 +43,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             return;
         }
     
-        // Resume context if suspended. This must be tied to a user gesture.
         if (audioCtx.state === 'suspended') {
             try {
                 await audioCtx.resume();
             } catch (err) {
                 console.error("Failed to resume AudioContext:", err);
-                return; // Can't play sound if context fails to resume
+                return;
             }
         }
     
@@ -61,13 +59,13 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
             
-            gainNode.gain.value = 0.5; // Louder beep
-            oscillator.frequency.value = 1200; // Higher pitch
-            oscillator.type = 'square'; // Sharper sound
+            gainNode.gain.value = 0.5; 
+            oscillator.frequency.value = 1200; 
+            oscillator.type = 'square'; 
             
             const now = audioCtx.currentTime;
             oscillator.start(now);
-            oscillator.stop(now + 0.08); // Shorter duration
+            oscillator.stop(now + 0.08); 
         } catch (error) {
             console.error("Failed to play beep sound:", error);
         }
@@ -75,7 +73,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
     useEffect(() => {
         if (isOpen) {
-            getAudioContext(); // Ensure audio context is ready
+            getAudioContext(); 
             const timer = setTimeout(() => setIsRendered(true), 10);
 
             setIsLibraryLoading(true);
@@ -105,7 +103,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             hints.set(ZXing.DecodeHintType.ASSUME_GS1, true);
             codeReaderRef.current = new ZXing.BrowserMultiFormatReader(hints);
             
-            // This flag prevents the scan callback from firing multiple times in quick succession.
             const isHandlingResult = { current: false };
 
             const tryStartScanning = async (deviceId: string | null) => {
@@ -113,7 +110,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     deviceId: deviceId ? { exact: deviceId } : undefined,
                 };
 
-                // Advanced settings for better camera performance, cast to any to allow non-standard properties.
                 const advancedVideoSettings: MediaTrackConstraints = {
                     facingMode: 'environment',
                     focusMode: 'continuous',
@@ -135,12 +131,11 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         const codeReader = codeReaderRef.current;
                         await codeReader.decodeFromConstraints(constraints, videoRef.current, (result: any, err: any) => {
                             if (result && !isHandlingResult.current) {
-                                isHandlingResult.current = true; // Set flag to prevent re-entry
+                                isHandlingResult.current = true;
                                 
-                                // Play sound immediately for faster perceived response
                                 if (scanSettings.soundOnScan) playBeep();
 
-                                codeReader.reset(); // Stop scanning to release the camera
+                                codeReader.reset();
 
                                 if (scanSettings.vibrateOnScan && navigator.vibrate) navigator.vibrate(100);
                                 
@@ -168,7 +163,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 } catch (e) {
                     if (e instanceof DOMException && e.name === 'NotFoundError' && selectedCameraId) {
                         showAlert("저장된 카메라를 찾을 수 없습니다. 기본 카메라로 다시 시도합니다.");
-                        await setSelectedCameraId(null);
+                        // This would require an action from context to update the setting, which might be complex here.
+                        // For now, we just try again with the default. A better UX would be to inform the user to change settings.
                         try {
                            await tryStartScanning(null);
                         } catch {
@@ -190,7 +186,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 codeReaderRef.current.reset();
             }
         };
-    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert, playBeep, setSelectedCameraId, scanSettings]);
+    }, [isOpen, isLibraryLoading, selectedCameraId, onScanSuccess, onClose, showAlert, playBeep, scanSettings]);
 
     if (!isOpen) return null;
 

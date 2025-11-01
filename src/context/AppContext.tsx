@@ -1,5 +1,5 @@
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
-import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType, SyncLog } from '../types';
+import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType, SyncLog, DeviceSettings, SyncSettings } from '../types';
 import * as db from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
@@ -7,7 +7,6 @@ import { useAuth } from './AuthContext';
 import * as googleDrive from '../services/googleDriveService';
 import { getDeviceId } from '../services/deviceService';
 import Toast, { ToastState } from '../components/Toast';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 import { processExcelFileInWorker } from '../services/dataService';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/database';
@@ -32,22 +31,10 @@ export interface MemoModalPayload {
     onSave: (memo: string) => void;
 }
 
-interface SyncSettings {
-    fileId: string;
-    fileName: string;
-    lastSyncTime: string | null;
-    autoSync: boolean;
-}
-
 // Data Context
 interface DataState {
     customers: Customer[];
     products: Product[];
-    selectedCameraId: string | null;
-    scanSettings: {
-        vibrateOnScan: boolean;
-        soundOnScan: boolean;
-    };
 }
 
 interface DataActions {
@@ -60,12 +47,21 @@ interface DataActions {
     syncWithFile: (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<void>;
     forceFullSync: () => Promise<void>;
     resetData: (dataType: 'customers' | 'products') => Promise<void>;
-    setSelectedCameraId: (id: string | null) => Promise<void>;
-    setScanSettings: (settings: Partial<DataState['scanSettings']>) => Promise<void>;
 }
 
 const DataStateContext = createContext<DataState | undefined>(undefined);
 const DataActionsContext = createContext<DataActions | undefined>(undefined);
+
+// Device Settings Context
+interface DeviceSettingsActions {
+    setSelectedCameraId: (id: string | null) => Promise<void>;
+    setScanSettings: (settings: Partial<DeviceSettings['scanSettings']>) => Promise<void>;
+    setLogRetentionDays: (days: number) => Promise<void>;
+    setGoogleDriveSyncSettings: (type: 'customers' | 'products', settings: SyncSettings | null) => Promise<void>;
+}
+
+const DeviceSettingsContext = createContext<(DeviceSettings & DeviceSettingsActions) | undefined>(undefined);
+
 
 // --- Sync Context ---
 interface SyncState {
@@ -73,7 +69,6 @@ interface SyncState {
     syncProgress: number;
     syncStatusText: string;
     syncDataType: 'customers' | 'products' | 'full' | null;
-    // FIX: Add syncSource to track the source of the sync operation.
     syncSource: 'local' | 'drive' | null;
     initialSyncCompleted: boolean;
 }
@@ -160,6 +155,20 @@ const initialModalsState: ModalsState = {
     isClearHistoryModalOpen: false,
 };
 
+const defaultDeviceSettings: DeviceSettings = {
+    selectedCameraId: null,
+    scanSettings: {
+        vibrateOnScan: true,
+        soundOnScan: true,
+    },
+    logRetentionDays: 30,
+    googleDriveSyncSettings: {
+        customers: null,
+        products: null,
+    },
+};
+
+
 // --- AppProvider Component ---
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -168,16 +177,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Data State ---
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
-    const [selectedCameraId, setSelectedCameraIdState] = useState<string | null>(null);
-    const [scanSettings, setScanSettingsState] = useState({ vibrateOnScan: true, soundOnScan: true });
-    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage('lastSyncKeys', { customers: null, products: null });
+    const [lastSyncKeys, setLastSyncKeys] = useState<{ customers: string | null; products: string | null; }>({ customers: null, products: null });
+    const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(defaultDeviceSettings);
 
     // --- Sync State ---
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState(0);
     const [syncStatusText, setSyncStatusText] = useState('');
     const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | null>(null);
-    // FIX: Add state for sync source
     const [syncSource, setSyncSource] = useState<'local' | 'drive' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
 
@@ -252,7 +259,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
             const syncResult = await db.smartSyncData(dataType, newData, user?.email || 'unknown', onProgress, existingData);
     
-            // After successful sync, update local state and cache
             if (dataType === 'customers') {
                 setCustomers(newData as Customer[]);
                 await cache.setCachedData('customers', newData as Customer[]);
@@ -261,7 +267,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 await cache.setCachedData('products', newData as Product[]);
             }
             
-            // Show summary toast
             const { additions, updates, deletions } = syncResult;
             if (additions > 0 || updates > 0 || deletions > 0) {
                 const message = `${dataTypeKorean} 동기화 완료:\n${additions}개 추가, ${updates}개 수정, ${deletions}개 삭제됨`;
@@ -272,15 +277,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             
         } catch (error: any) {
             console.error(`Sync from ${source} failed:`, error);
-            // This re-throws the error to be handled by the UI component, which will show the alert.
-            // The special `proceed` function is attached here.
              if (error.message === 'MASS_DELETION_DETECTED') {
                 const proceed = async () => {
                     const parsedResult = error.details.parsedResult;
                     const newData = parsedResult.valid as (Customer[] | Product[]);
                     const syncResult = await db.smartSyncData(dataType, newData, user?.email || 'unknown', (msg) => setSyncStatusText(msg), existingData, { bypassMassDeleteCheck: true });
                     
-                    // After successful sync, update local state and cache
                     if (dataType === 'customers') {
                         setCustomers(newData as Customer[]);
                         await cache.setCachedData('customers', newData as Customer[]);
@@ -289,7 +291,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         await cache.setCachedData('products', newData as Product[]);
                     }
     
-                    // Show summary toast
                     const { additions, updates, deletions } = syncResult;
                     const message = `${dataTypeKorean} 동기화 완료:\n${additions}개 추가, ${updates}개 수정, ${deletions}개 삭제됨`;
                     showToast(message, 'success');
@@ -331,7 +332,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         } finally {
             setIsSyncing(false);
             setSyncDataType(null);
-            // FIX: Reset sync source
             setSyncSource(null);
             setSyncStatusText("");
         }
@@ -340,17 +340,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const resetData = useCallback(async (dataType: 'customers' | 'products') => {
         const typeKorean = dataType === 'customers' ? '거래처' : '상품';
         try {
-            // Clear RTDB
             await db.replaceAll(dataType, null);
             await db.setValue(`sync-logs/${dataType}`, null);
-            // Clear local cache
             await cache.setCachedData(dataType, []);
-            // Clear component state
-            if (dataType === 'customers') {
-                setCustomers([]);
-            } else {
-                setProducts([]);
-            }
+            if (dataType === 'customers') setCustomers([]);
+            else setProducts([]);
             showToast(`${typeKorean} 데이터가 성공적으로 초기화되었습니다.`, 'success');
         } catch (err) {
             console.error(`Failed to reset ${dataType} data:`, err);
@@ -359,26 +353,53 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
     }, [showToast]);
 
-    const setSelectedCameraId = useCallback(async (id: string | null) => {
-        setSelectedCameraIdState(id);
-        const deviceId = getDeviceId();
-        try {
-            await db.setValue(`device-settings/${deviceId}/selectedCameraId`, id);
-        } catch (e) {
-            console.error("Failed to save selected camera ID to DB", e);
+    // --- Device Settings Actions ---
+    const deviceSettingsActions = useMemo<DeviceSettingsActions>(() => ({
+        setSelectedCameraId: async (id: string | null) => {
+            setDeviceSettings(prev => ({ ...prev, selectedCameraId: id }));
+            try {
+                await db.setDeviceSetting(getDeviceId(), 'selectedCameraId', id);
+            } catch (e) {
+                console.error("Failed to save selected camera ID", e);
+                showToast("카메라 설정 저장에 실패했습니다.", 'error');
+            }
+        },
+        setScanSettings: async (settings: Partial<DeviceSettings['scanSettings']>) => {
+            const newSettings = { ...deviceSettings.scanSettings, ...settings };
+            setDeviceSettings(prev => ({ ...prev, scanSettings: newSettings }));
+            try {
+                await db.setDeviceSetting(getDeviceId(), 'scanSettings', newSettings);
+            } catch (e) {
+                console.error("Failed to save scan settings", e);
+                showToast("스캔 설정 저장에 실패했습니다.", 'error');
+            }
+        },
+        setLogRetentionDays: async (days: number) => {
+            setDeviceSettings(prev => ({ ...prev, logRetentionDays: days }));
+            try {
+                await db.setDeviceSetting(getDeviceId(), 'logRetentionDays', days);
+            } catch (e) {
+                console.error("Failed to save log retention", e);
+                showToast("로그 보관 기간 저장에 실패했습니다.", 'error');
+            }
+        },
+        setGoogleDriveSyncSettings: async (type: 'customers' | 'products', settings: SyncSettings | null) => {
+            setDeviceSettings(prev => ({
+                ...prev,
+                googleDriveSyncSettings: {
+                    ...prev.googleDriveSyncSettings,
+                    [type]: settings,
+                },
+            }));
+            try {
+                await db.setDeviceSetting(getDeviceId(), `googleDriveSyncSettings/${type}`, settings);
+            } catch (e) {
+                console.error(`Failed to save GDrive settings for ${type}`, e);
+                showToast("Google Drive 설정 저장에 실패했습니다.", 'error');
+            }
         }
-    }, []);
+    }), [deviceSettings, showToast]);
 
-    const setScanSettings = useCallback(async (settings: Partial<DataState['scanSettings']>) => {
-        setScanSettingsState(prev => {
-            const newSettings = { ...prev, ...settings };
-            const deviceId = getDeviceId();
-            db.setValue(`device-settings/${deviceId}/scanSettings`, newSettings).catch(e => {
-                console.error("Failed to save scan settings to DB", e);
-            });
-            return newSettings;
-        });
-    }, []);
 
     // --- Initial Data Load and Sync Effect ---
     useEffect(() => {
@@ -422,24 +443,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     
         const runInitialSync = async () => {
+            const isDevMode = localStorage.getItem('developer-mode-enabled') === 'true';
+
+            if (isDevMode) {
+                console.warn('%c[DEV MODE] Skipping initial sync. Using local cache.', 'color: orange; font-weight: bold;');
+                setSyncStatusText("DEV MODE: 로컬 캐시 사용");
+                const cachedCustomers = await cache.getCachedData<Customer>('customers');
+                setCustomers(cachedCustomers);
+                const cachedProducts = await cache.getCachedData<Product>('products');
+                setProducts(cachedProducts);
+                setInitialSyncCompleted(true);
+                return;
+            }
+
             setIsSyncing(true);
             setSyncDataType('full');
             setSyncProgress(0);
             setSyncStatusText("앱 초기화 중");
             
+            let loadedSettings = { ...defaultDeviceSettings };
             const deviceId = getDeviceId();
             try {
                 setSyncProgress(5);
                 setSyncStatusText("기기 설정 로딩");
-                const deviceSettings = await db.getValue<{ selectedCameraId: string | null; scanSettings: DataState['scanSettings'] }>(`device-settings/${deviceId}`, null);
-                if (deviceSettings) {
-                    if (typeof deviceSettings.selectedCameraId !== 'undefined') {
-                        setSelectedCameraIdState(deviceSettings.selectedCameraId);
-                    }
-                    if (deviceSettings.scanSettings) {
-                        setScanSettingsState(prev => ({...prev, ...deviceSettings.scanSettings}));
-                    }
-                }
+                const remoteSettings = await db.getDeviceSettings(deviceId);
+                loadedSettings = {
+                    ...defaultDeviceSettings,
+                    ...remoteSettings,
+                    scanSettings: { ...defaultDeviceSettings.scanSettings, ...(remoteSettings.scanSettings || {}) },
+                    googleDriveSyncSettings: { ...defaultDeviceSettings.googleDriveSyncSettings, ...(remoteSettings.googleDriveSyncSettings || {}) },
+                };
+                setDeviceSettings(loadedSettings);
+
             } catch (e) {
                 console.warn("Could not load device settings from Firebase", e);
             }
@@ -465,7 +500,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
             }, 20000);
     
-            const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null, progressStart: number, progressEnd: number) => {
+            const syncDataTypeOp = async (dataType: 'customers' | 'products', lastKey: string | null, progressStart: number, progressEnd: number) => {
                 const typeName = dataType === 'customers' ? '거래처' : '상품';
                 const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
                 
@@ -505,8 +540,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             };
     
             try {
-                // Customer Sync: 30% -> 60%
-                const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers, 30, 60);
+                const finalCustomerKey = await syncDataTypeOp('customers', lastSyncKeys.customers, 30, 60);
                 
                 setSyncStatusText("거래처 실시간 연결 설정");
                 unsubscribers.push(
@@ -517,8 +551,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 );
                 setSyncProgress(65);
 
-                // Product Sync: 65% -> 95%
-                const finalProductKey = await syncDataType('products', lastSyncKeys.products, 65, 95);
+                const finalProductKey = await syncDataTypeOp('products', lastSyncKeys.products, 65, 95);
                 
                 setSyncStatusText("상품 실시간 연결 설정");
                 unsubscribers.push(
@@ -529,6 +562,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 );
                 
                 clearTimeout(syncTimeout);
+
+                const retentionDays = loadedSettings.logRetentionDays;
+                if (typeof retentionDays === 'number' && retentionDays > 0) {
+                    Promise.all([
+                        db.cleanupSyncLogs('customers', retentionDays),
+                        db.cleanupSyncLogs('products', retentionDays)
+                    ]).catch(err => console.warn("Background log cleanup failed on startup:", err));
+                }
+
                 setSyncProgress(100);
                 setSyncStatusText("앱 시작 준비 완료");
                 setTimeout(() => {
@@ -551,7 +593,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             clearTimeout(syncTimeout);
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
+    }, [user, showAlert]);
 
 
     // --- Modal Actions ---
@@ -603,12 +645,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, [showToast]);
 
     // --- Context Values ---
-    const dataStateValue = useMemo(() => ({ customers, products, selectedCameraId, scanSettings }), [customers, products, selectedCameraId, scanSettings]);
-    const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData, setSelectedCameraId, setScanSettings }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData, setSelectedCameraId, setScanSettings]);
-    // FIX: Include syncSource in context value
+    const dataStateValue = useMemo(() => ({ customers, products }), [customers, products]);
+    const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData]);
     const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);
+    const deviceSettingsValue = useMemo(() => ({ ...deviceSettings, ...deviceSettingsActions }), [deviceSettings, deviceSettingsActions]);
     const modalsValue = useMemo(() => ({ ...modalsState, ...modalsActions }), [modalsState, modalsActions]);
-    const scannerValue = useMemo(() => ({ ...scannerState, ...scannerActions }), [scannerState, scannerActions]);
+    const scannerValue = useMemo(() => ({ ...scannerState, ...scannerActions, scanSettings: deviceSettings.scanSettings, selectedCameraId: deviceSettings.selectedCameraId }), [scannerState, scannerActions, deviceSettings.scanSettings, deviceSettings.selectedCameraId]);
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
     const pwaInstallValue = useMemo(() => ({ isInstallPromptAvailable, triggerInstallPrompt }), [isInstallPromptAvailable, triggerInstallPrompt]);
 
@@ -616,21 +658,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         <DataStateContext.Provider value={dataStateValue}>
             <DataActionsContext.Provider value={dataActionsValue}>
                 <SyncStateContext.Provider value={syncStateValue}>
-                    <ModalsContext.Provider value={modalsValue}>
-                        <ScannerContext.Provider value={scannerValue}>
-                            <MiscUIContext.Provider value={miscUIValue}>
-                                <AlertContext.Provider value={showAlert}>
-                                    <ToastContext.Provider value={showToast}>
-                                        <PWAInstallContext.Provider value={pwaInstallValue}>
-                                            {children}
-                                            <AlertModal {...alertState} onClose={() => setAlertState(s => ({ ...s, isOpen: false }))} />
-                                            <Toast {...toastState} onClose={() => setToastState(s => ({ ...s, isOpen: false }))} />
-                                        </PWAInstallContext.Provider>
-                                    </ToastContext.Provider>
-                                </AlertContext.Provider>
-                            </MiscUIContext.Provider>
-                        </ScannerContext.Provider>
-                    </ModalsContext.Provider>
+                    <DeviceSettingsContext.Provider value={deviceSettingsValue}>
+                        <ModalsContext.Provider value={modalsValue}>
+                            <ScannerContext.Provider value={scannerValue}>
+                                <MiscUIContext.Provider value={miscUIValue}>
+                                    <AlertContext.Provider value={showAlert}>
+                                        <ToastContext.Provider value={showToast}>
+                                            <PWAInstallContext.Provider value={pwaInstallValue}>
+                                                {children}
+                                                <AlertModal {...alertState} onClose={() => setAlertState(s => ({ ...s, isOpen: false }))} />
+                                                <Toast {...toastState} onClose={() => setToastState(s => ({ ...s, isOpen: false }))} />
+                                            </PWAInstallContext.Provider>
+                                        </ToastContext.Provider>
+                                    </AlertContext.Provider>
+                                </MiscUIContext.Provider>
+                            </ScannerContext.Provider>
+                        </ModalsContext.Provider>
+                    </DeviceSettingsContext.Provider>
                 </SyncStateContext.Provider>
             </DataActionsContext.Provider>
         </DataStateContext.Provider>
@@ -639,35 +683,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
 // --- Custom Hooks ---
 
-// Hook for accessing data
 export const useDataState = (): DataState => {
     const context = useContext(DataStateContext);
     if (context === undefined) throw new Error('useDataState must be used within an AppProvider');
     return context;
 };
 
-// Hook for accessing data modification actions
 export const useDataActions = (): DataActions => {
     const context = useContext(DataActionsContext);
     if (context === undefined) throw new Error('useDataActions must be used within an AppProvider');
     return context;
 };
 
-// Hook for sync status
 export const useSyncState = (): SyncState => {
     const context = useContext(SyncStateContext);
     if (context === undefined) throw new Error('useSyncState must be used within an AppProvider');
     return context;
 };
 
-// Hook for modals
+export const useDeviceSettings = (): DeviceSettings & DeviceSettingsActions => {
+    const context = useContext(DeviceSettingsContext);
+    if (context === undefined) throw new Error('useDeviceSettings must be used within an AppProvider');
+    return context;
+};
+
+
 export const useModals = (): ModalsState & ModalsActions => {
     const context = useContext(ModalsContext);
     if (context === undefined) throw new Error('useModals must be used within an AppProvider');
     return context;
 };
 
-// Hook for alerts and toasts
 export const useAlert = () => {
     const showAlert = useContext(AlertContext);
     const showToast = useContext(ToastContext);
@@ -675,21 +721,18 @@ export const useAlert = () => {
     return { showAlert, showToast };
 };
 
-// Hook for misc UI state
 export const useMiscUI = (): MiscUIState & MiscUIActions => {
     const context = useContext(MiscUIContext);
     if (context === undefined) throw new Error('useMiscUI must be used within an AppProvider');
     return context;
 };
 
-// Hook for scanner
-export const useScanner = (): ScannerState & ScannerActions => {
+export const useScanner = (): ScannerState & ScannerActions & { scanSettings: DeviceSettings['scanSettings'], selectedCameraId: string | null } => {
     const context = useContext(ScannerContext);
     if (context === undefined) throw new Error('useScanner must be used within an AppProvider');
-    return context;
+    return context as any;
 };
 
-// Hook for PWA installation
 export const usePWAInstall = (): PWAInstallState => {
     const context = useContext(PWAInstallContext);
     if (context === undefined) throw new Error('usePWAInstall must be used within an AppProvider');

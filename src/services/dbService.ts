@@ -3,7 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/database';
 import { firebaseConfig } from '../firebaseConfig';
-import { Order, OrderItem, Customer, Product, SyncLog } from '../types';
+import { Order, OrderItem, Customer, Product, SyncLog, DeviceSettings } from '../types';
 
 let app: firebase.app.App | null = null;
 let db: firebase.database.Database | null = null;
@@ -11,19 +11,12 @@ let auth: firebase.auth.Auth | null = null;
 let isFirebaseInitialized = false;
 
 try {
-    // Check if the config is populated and not using placeholder values.
     if (firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("YOUR_")) {
-        // FIX: Use v8 style initialization.
         if (!firebase.apps.length) {
             app = firebase.initializeApp(firebaseConfig);
         } else {
             app = firebase.app();
         }
-        
-        // NOTE: The call to setPersistenceEnabled was removed. For the modern Firebase JS SDK,
-        // offline persistence for the Realtime Database is handled automatically and does not
-        // require an explicit function call to be enabled. Attempting to call the old function
-        // was causing the entire initialization process to fail.
         
         db = app.database();
         auth = app.auth();
@@ -34,7 +27,6 @@ try {
     }
 } catch (e) {
     console.error("Firebase initialization failed:", e);
-    // isFirebaseInitialized remains false, db and auth remain null.
 }
 
 export { db, auth, isFirebaseInitialized };
@@ -51,6 +43,23 @@ const arrayToObject = (arr: any[], keyField: string) => {
 };
 
 export const isInitialized = () => isFirebaseInitialized;
+
+// --- Device Settings ---
+export const getDeviceSettings = async (deviceId: string): Promise<Partial<DeviceSettings>> => {
+    if (!isFirebaseInitialized || !db) return {};
+    const snapshot = await db.ref(`settings/devices/${deviceId}`).get();
+    const settings = snapshot.val() || {};
+    // Ensure nested objects exist to prevent errors during merging
+    if (!settings.scanSettings) settings.scanSettings = {};
+    if (!settings.googleDriveSyncSettings) settings.googleDriveSyncSettings = {};
+    return settings;
+};
+
+export const setDeviceSetting = async (deviceId: string, key: string, value: any): Promise<void> => {
+    if (!isFirebaseInitialized || !db) throw new Error("Database not initialized");
+    await db.ref(`settings/devices/${deviceId}/${key}`).set(value);
+};
+
 
 // --- Listener functions for realtime updates ---
 export const listenToOrderChangesByDateRange = (
@@ -69,7 +78,6 @@ export const listenToOrderChangesByDateRange = (
     const endOfDay = new Date(endDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // FIX: Use v8 compat API for queries
     let ordersQuery: firebase.database.Query = db.ref('orders').orderByChild('date').endAt(endOfDay.toISOString());
 
     if (startDate) {
@@ -78,7 +86,6 @@ export const listenToOrderChangesByDateRange = (
         ordersQuery = ordersQuery.startAt(startOfDay.toISOString());
     }
 
-    // FIX: Use v8 compat API for listeners
     const onAdd = ordersQuery.on('child_added', (snapshot) => {
         const order = snapshot.val() as Order;
         if (order) callbacks.onAdd(order);
@@ -92,7 +99,6 @@ export const listenToOrderChangesByDateRange = (
         if (order) callbacks.onRemove(order);
     });
     
-    // FIX: Unsubscribe using off() method
     return () => {
         ordersQuery.off('child_added', onAdd);
         ordersQuery.off('child_changed', onChange);
@@ -106,7 +112,6 @@ export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[
         return () => {};
     }
     const itemsRef = db.ref(`order-items/${orderId}`);
-    // FIX: Use v8 compat API for listeners
     const listener = itemsRef.on('value', (snapshot) => {
         const data = snapshot.val();
         callback(data || []);
@@ -114,7 +119,6 @@ export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[
         console.error(`Error listening to order items for order ${orderId}:`, error);
         callback([]);
     });
-    // FIX: Unsubscribe using off() method
     return () => itemsRef.off('value', listener);
 };
 
@@ -138,7 +142,6 @@ export const getStore = async <T>(storeName: string): Promise<T[]> => {
             return values.filter(item => (item as Product).barcode) as T[];
         }
         
-        // For any other store, just return the non-null values
         return values as T[];
 
     } catch (error) {
@@ -149,7 +152,6 @@ export const getStore = async <T>(storeName: string): Promise<T[]> => {
 
 export const getValue = async <T>(path: string, defaultValue: T): Promise<T> => {
     if (!isFirebaseInitialized || !db) return defaultValue;
-    // FIX: Use v8 compat API for get()
     const snapshot = await db.ref(path).get();
     const data = snapshot.val();
     return data ?? defaultValue;
@@ -158,12 +160,10 @@ export const getValue = async <T>(path: string, defaultValue: T): Promise<T> => 
 export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
     if (!isFirebaseInitialized || !db) return [];
 
-    // FIX: Use v8 compat API for get()
     let snapshot = await db.ref(`order-items/${orderId}`).get();
     let data = snapshot.val();
 
     if (!data) {
-        // FIX: Use v8 compat API for get()
         snapshot = await db.ref(`orders/${orderId}/items`).get();
         data = snapshot.val();
     }
@@ -296,7 +296,7 @@ export const clearOrdersBeforeDate = async (isoDateString: string): Promise<numb
     const snapshot = await ordersQuery.get();
 
     if (!snapshot.exists()) {
-        return 0; // No orders to delete
+        return 0;
     }
 
     const updates: { [key: string]: null } = {};
@@ -325,9 +325,6 @@ export const setValue = async (path: string, value: any): Promise<void> => {
 
 // --- Sync Log Management ---
 
-// Helper function to create a fully normalized, comparable product object.
-// This ensures that optional fields from Excel (undefined) are compared correctly against
-// existing data from Firebase (which might have "" or null).
 const createComparableProduct = (item: any) => ({
     barcode: item.barcode || '',
     name: (item.name || '').trim(),
@@ -338,7 +335,6 @@ const createComparableProduct = (item: any) => ({
     supplierName: (item.supplierName || '').trim(),
 });
 
-// Helper for customers.
 const createComparableCustomer = (item: any) => ({
     comcode: item.comcode || '',
     name: (item.name || '').trim(),
@@ -355,7 +351,6 @@ const areObjectsEqual = (newItem: any, existingItem: any, type: 'customers' | 'p
         return JSON.stringify(createComparableCustomer(newItem)) === JSON.stringify(createComparableCustomer(existingItem));
     }
 
-    // Fallback for any other type (should not happen)
     const { lastModified: lm1, ...rest1 } = newItem;
     const { lastModified: lm2, ...rest2 } = existingItem;
     return JSON.stringify(rest1) === JSON.stringify(rest2);
@@ -375,7 +370,7 @@ export const smartSyncData = async (
     const keyField = storeName === 'customers' ? 'comcode' : 'barcode';
     
     onProgress(`기존 데이터(${existingDataArray.length}건)와 비교 시작...`);
-    await new Promise(resolve => setTimeout(resolve, 0)); // Yield to main thread
+    await new Promise(resolve => setTimeout(resolve, 0)); 
 
     const existingDataMap = new Map(existingDataArray.map(item => [(item as any)[keyField], item]));
     const newDataMap = new Map(newData.map(item => [(item as any)[keyField], item]));
@@ -385,10 +380,9 @@ export const smartSyncData = async (
     const numExisting = existingDataMap.size;
     const numNew = newDataMap.size;
 
-    // Safeguard against accidental mass deletion
     if (!options?.bypassMassDeleteCheck && numExisting > 100 && numDeletions > numExisting * 0.5) {
         const error = new Error("MASS_DELETION_DETECTED");
-        const parsedResult = { valid: newData }; // Create a minimal structure for the proceed function
+        const parsedResult = { valid: newData }; 
         (error as any).details = { numExisting, numNew, numDeletions, parsedResult };
         throw error;
     }
@@ -404,13 +398,9 @@ export const smartSyncData = async (
     const totalNew = newData.length;
     let processedNew = 0;
 
-    // Process updates and additions
     for (const [key, newItem] of newDataMap.entries()) {
         const existingItem = existingDataMap.get(key);
         
-        // FIX: Normalize the new item from the Excel file before comparison and saving.
-        // This ensures data consistency between the source and the database, preventing
-        // false positives on subsequent syncs.
         const normalizedNewItem = storeName === 'products'
             ? createComparableProduct(newItem)
             : createComparableCustomer(newItem);
@@ -433,7 +423,7 @@ export const smartSyncData = async (
         }
 
         processedNew++;
-        if (processedNew % 100 === 0) { // Yield to main thread every 100 items
+        if (processedNew % 100 === 0) { 
             onProgress(`변경/추가 확인 중... (${processedNew}/${totalNew})`);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
@@ -441,7 +431,6 @@ export const smartSyncData = async (
 
     const totalExisting = deletions.length;
     let processedExisting = 0;
-    // Process deletions
     for (const key of deletions) {
         const existingItem = existingDataMap.get(key);
         const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
@@ -478,7 +467,6 @@ export const getSyncLogChanges = async (
 
     let query = db.ref(`sync-logs/${dataType}`).orderByKey();
     if (lastKey) {
-        // 'startAfter' does not exist in the RTDB SDK. Use 'startAt' instead.
         query = query.startAt(lastKey);
     }
     
@@ -492,14 +480,12 @@ export const getSyncLogChanges = async (
     let isFirst = true;
 
     snapshot.forEach(childSnapshot => {
-        // If we started at a specific key (lastKey), we must skip that key itself in the results
-        // because 'startAt' is inclusive.
         if (lastKey && isFirst && childSnapshot.key === lastKey) {
-            isFirst = false; // Set flag so we don't skip subsequent items
-            return; // Skip this item
+            isFirst = false; 
+            return; 
         }
         
-        isFirst = false; // Not the first item anymore
+        isFirst = false; 
         items.push(childSnapshot.val());
         processedLastKey = childSnapshot.key;
     });
@@ -528,7 +514,7 @@ export const getSyncLogs = async (dataType: 'customers' | 'products', limit: num
         logs.push({ ...child.val(), _key: child.key });
     });
     
-    return logs.reverse(); // Newest first
+    return logs.reverse();
 };
 
 export const listenForNewLogs = (
@@ -540,15 +526,9 @@ export const listenForNewLogs = (
 
     let query = db.ref(`sync-logs/${dataType}`).orderByKey();
     
-    // The 'startAfter' method does not exist in the Realtime Database SDK.
-    // The correct approach is to use 'startAt'.
     if (startKey) {
         query = query.startAt(startKey);
     } else {
-        // If there is no startKey, it means we've just completed a full sync and
-        // only want to listen for brand new changes from this point forward.
-        // We can generate a push key for "now" and start listening from there,
-        // effectively ignoring all past records. Firebase push keys are chronologically ordered.
         const nowKey = db.ref().push().key;
         if (nowKey) {
             query = query.startAt(nowKey);
@@ -556,7 +536,6 @@ export const listenForNewLogs = (
     }
 
     const listener = query.on('child_added', (snapshot) => {
-        // Since startAt is inclusive, we must explicitly ignore the event for the startKey itself.
         if (snapshot.key && snapshot.key !== startKey) {
             callback(snapshot.val(), snapshot.key);
         }
@@ -566,7 +545,7 @@ export const listenForNewLogs = (
 };
 
 export const cleanupSyncLogs = async (dataType: 'customers' | 'products', retentionDays: number): Promise<void> => {
-    if (!isFirebaseInitialized || !db || retentionDays < 0) return; // -1 means keep forever
+    if (!isFirebaseInitialized || !db || retentionDays < 0) return;
 
     const cutoff = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
     const logRef = db.ref(`sync-logs/${dataType}`);

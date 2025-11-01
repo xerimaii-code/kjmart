@@ -1,20 +1,13 @@
-import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { useDataState, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon } from '../components/Icons';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { SyncSettings } from '../types';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
 import CollapsibleCard from '../components/CollapsibleCard';
-
-// --- Types ---
-interface SyncSettings {
-    fileId: string;
-    fileName: string;
-    lastSyncTime: string | null; // ISO string for file modification time
-    autoSync: boolean;
-}
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 interface SettingsPageProps {
     isActive: boolean;
@@ -23,11 +16,12 @@ interface SettingsPageProps {
 // --- Reusable Sync Section Component ---
 const SyncSection: React.FC<{
     dataType: 'customers' | 'products';
-}> = ({ dataType }) => {
+    settings: SyncSettings | null;
+    onSettingsChange: (settings: SyncSettings | null) => void;
+}> = ({ dataType, settings, onSettingsChange }) => {
     const { showToast, showAlert } = useAlert();
     const { syncWithFile } = useDataActions();
     const { isSyncing, syncStatusText, syncDataType, syncSource } = useSyncState();
-    const [settings, setSettings] = useLocalStorage<SyncSettings>(`google-drive-sync-settings-${dataType}`, null, { deviceSpecific: true });
     const [isPicking, setIsPicking] = useState(false);
     const [isApiReady, setIsApiReady] = useState(false);
 
@@ -54,7 +48,7 @@ const SyncSection: React.FC<{
             if (!await initializeApi()) return;
             const fileId = await googleDrive.showPicker();
             const metadata = await googleDrive.getFileMetadata(fileId);
-            setSettings({
+            onSettingsChange({
                 fileId,
                 fileName: metadata.name,
                 lastSyncTime: null,
@@ -86,7 +80,7 @@ const SyncSection: React.FC<{
             await syncWithFile(fileBlob, dataType, 'drive');
             
             showToast(`${dataTypeKorean} Google Drive 동기화가 완료되었습니다.`, 'success');
-            setSettings({ ...settings, lastSyncTime: metadata.modifiedTime });
+            onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
 
         } catch (err: any) {
              if (err.message === 'MASS_DELETION_DETECTED') {
@@ -99,7 +93,7 @@ const SyncSection: React.FC<{
                             showToast(`${dataTypeKorean} 동기화가 완료되었습니다.`, 'success');
                             if (settings?.fileId) {
                                 const metadata = await googleDrive.getFileMetadata(settings.fileId);
-                                setSettings({ ...settings, lastSyncTime: metadata.modifiedTime });
+                                onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
                             }
                         } catch (proceedError) {
                              // Error is handled by the syncWithFile action
@@ -144,14 +138,14 @@ const SyncSection: React.FC<{
     
     const handleAutoSyncToggle = (isChecked: boolean) => {
         if (settings) {
-            setSettings({ ...settings, autoSync: isChecked });
+            onSettingsChange({ ...settings, autoSync: isChecked });
         }
     };
     
     const handleDisconnect = () => {
         showAlert(
             `'${settings?.fileName}' 파일과의 연결을 해제하시겠습니까? 자동 동기화도 비활성화됩니다.`,
-            () => setSettings(null),
+            () => onSettingsChange(null),
             '연결 해제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
@@ -169,7 +163,6 @@ const SyncSection: React.FC<{
                 accept=".xlsx, .xls"
             />
             <h4 className="text-base font-bold text-gray-700">{dataTypeKorean} 데이터</h4>
-            {/* Google Drive Sync UI */}
             <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
                 <div className="space-y-3">
                      <p className="text-xs text-center text-gray-500 -mt-1">Google Drive의 엑셀 파일과 동기화합니다.</p>
@@ -230,7 +223,6 @@ const SyncSection: React.FC<{
                     </div>
                 </div>
             </div>
-             {/* Local File Sync UI */}
              <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
                 <div className="space-y-3">
                     <p className="text-xs text-center text-gray-500">기기에 저장된 엑셀 파일로 1회성 동기화를 합니다.</p>
@@ -263,7 +255,6 @@ const SyncSection: React.FC<{
     );
 };
 
-// --- Settings Action Button ---
 const ActionButton: React.FC<{
     onClick: () => void;
     icon: React.ReactNode;
@@ -295,13 +286,25 @@ const ActionButton: React.FC<{
 
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
-    const { selectedCameraId, scanSettings } = useDataState();
-    const { setSelectedCameraId, setScanSettings, resetData } = useDataActions();
+    const { 
+        selectedCameraId, 
+        scanSettings, 
+        logRetentionDays,
+        googleDriveSyncSettings,
+        setSelectedCameraId, 
+        setScanSettings,
+        setLogRetentionDays,
+        setGoogleDriveSyncSettings,
+    } = useDeviceSettings();
+
+    const { resetData } = useDataActions();
     const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
     const { openHistoryModal, openClearHistoryModal } = useModals();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+    const [isCleaning, setIsCleaning] = useState(false);
+    const [isDevMode, setIsDevMode] = useLocalStorage('developer-mode-enabled', false);
     
     useEffect(() => {
         const getCameras = async () => {
@@ -353,6 +356,28 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             '초기화',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
+    };
+
+    const handleRetentionChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const days = parseInt(event.target.value, 10);
+        setLogRetentionDays(days);
+        
+        if (days > 0) {
+            setIsCleaning(true);
+            try {
+                await Promise.all([
+                    db.cleanupSyncLogs('customers', days),
+                    db.cleanupSyncLogs('products', days)
+                ]);
+                showToast('오래된 동기화 로그가 정리되었습니다.', 'success');
+            } catch (e) {
+                showToast('로그 정리 중 오류가 발생했습니다.', 'error');
+            } finally {
+                setIsCleaning(false);
+            }
+        } else {
+            showToast('로그 보관 기간이 저장되었습니다.', 'success');
+        }
     };
 
     return (
@@ -409,9 +434,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     </CollapsibleCard>
 
                     <CollapsibleCard title="데이터 동기화" icon={<DatabaseIcon className="w-6 h-6 text-gray-500" />}>
-                        <SyncSection dataType="customers" />
+                        <SyncSection 
+                            dataType="customers" 
+                            settings={googleDriveSyncSettings.customers}
+                            onSettingsChange={(s) => setGoogleDriveSyncSettings('customers', s)}
+                        />
                         <div className="border-t border-gray-200/80 my-4" />
-                        <SyncSection dataType="products" />
+                        <SyncSection 
+                            dataType="products"
+                            settings={googleDriveSyncSettings.products}
+                            onSettingsChange={(s) => setGoogleDriveSyncSettings('products', s)}
+                        />
                     </CollapsibleCard>
                     
                     <CollapsibleCard title="데이터 관리" icon={<UserCircleIcon className="w-6 h-6 text-gray-500" />}>
@@ -421,12 +454,56 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             label="동기화 이력 보기"
                             description="최근 데이터 변경 내역을 확인합니다."
                         />
+
+                        <div className="w-full text-left p-3 rounded-lg flex items-center gap-4">
+                            <div className="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100 text-gray-600">
+                                <HistoryIcon className="w-6 h-6" />
+                            </div>
+                            <div className="flex-grow">
+                                <label htmlFor="log-retention" className="font-semibold text-gray-800">동기화 로그 보관 기간</label>
+                                <p className="text-xs text-gray-500">오래된 동기화 기록을 자동으로 정리합니다.</p>
+                            </div>
+                            <div className="flex-shrink-0">
+                                {isCleaning ? (
+                                    <SpinnerIcon className="w-5 h-5 text-blue-500" />
+                                ) : (
+                                    <select
+                                        id="log-retention"
+                                        value={logRetentionDays}
+                                        onChange={handleRetentionChange}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="p-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                    >
+                                        <option value="7">7일</option>
+                                        <option value="30">30일</option>
+                                        <option value="90">90일</option>
+                                        <option value="-1">영구 보관</option>
+                                    </select>
+                                )}
+                            </div>
+                        </div>
+
                          <ActionButton
                             onClick={openClearHistoryModal}
                             icon={<TrashIcon className="w-6 h-6" />}
                             label="발주 내역 정리"
                             description="오래된 발주 내역을 삭제하여 앱을 최적화합니다."
                         />
+                        
+                        <div className="border-t border-gray-200/80 my-2" />
+                        <h4 className="text-sm font-bold text-orange-600 px-3 pt-2">개발자 옵션</h4>
+                         <div className="flex justify-between items-center p-3 bg-orange-50/80 rounded-lg">
+                            <ToggleSwitch 
+                                id="dev-mode"
+                                label="개발자 모드 활성화"
+                                checked={!!isDevMode}
+                                onChange={(checked) => setIsDevMode(checked)}
+                                color="red"
+                            />
+                         </div>
+                         <p className="text-xs text-gray-600 mt-1 px-3 pb-2">
+                            활성화하면 앱 재시작 시 Firebase 데이터 동기화를 건너뛰고 로컬 캐시 데이터로 즉시 시작합니다. 데이터가 최신이 아닐 수 있습니다.
+                         </p>
 
                         <div className="border-t border-gray-200/80 my-2" />
                         <p className="text-xs text-red-600 font-semibold px-3 py-1">주의: 아래 작업은 되돌릴 수 없습니다.</p>
