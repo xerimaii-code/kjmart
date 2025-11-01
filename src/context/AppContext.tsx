@@ -396,7 +396,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
             const setData = dataType === 'customers' ? setCustomers : setProducts;
     
-            // Batch cache updates
             for (const change of changes) {
                 const key = (change as any)[keyField];
                 if (change._deleted) {
@@ -407,7 +406,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
             }
     
-            // Batch state updates
             setData(prevData => {
                 const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
                 changes.forEach(change => {
@@ -427,10 +425,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setIsSyncing(true);
             setSyncDataType('full');
             setSyncProgress(0);
-            setSyncStatusText("로컬 캐시 로딩 중...");
+            setSyncStatusText("앱 초기화 중");
             
             const deviceId = getDeviceId();
             try {
+                setSyncProgress(5);
+                setSyncStatusText("기기 설정 로딩");
                 const deviceSettings = await db.getValue<{ selectedCameraId: string | null; scanSettings: DataState['scanSettings'] }>(`device-settings/${deviceId}`, null);
                 if (deviceSettings) {
                     if (typeof deviceSettings.selectedCameraId !== 'undefined') {
@@ -444,71 +444,93 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 console.warn("Could not load device settings from Firebase", e);
             }
 
-            const [cachedCustomers, cachedProducts] = await Promise.all([
-                cache.getCachedData<Customer>('customers'),
-                cache.getCachedData<Product>('products'),
-            ]);
-    
-            setCustomers(cachedCustomers);
-            setProducts(cachedProducts);
             setSyncProgress(10);
+            setSyncStatusText("로컬 캐시 읽기 (거래처)");
+            const cachedCustomers = await cache.getCachedData<Customer>('customers');
+            setCustomers(cachedCustomers);
+
+            setSyncProgress(20);
+            setSyncStatusText("로컬 캐시 읽기 (상품)");
+            const cachedProducts = await cache.getCachedData<Product>('products');
+            setProducts(cachedProducts);
+    
+            setSyncProgress(30);
     
             syncTimeout = window.setTimeout(() => {
                 if (!initialSyncCompleted) {
                     console.warn("Sync timed out. Using cached data.");
-                    showAlert("서버 동기화에 시간이 초과되었습니다. 오프라인 데이터로 시작합니다.");
+                    showAlert("서버 동기화가 시간 초과되었습니다. 오프라인 데이터로 시작합니다.");
                     setInitialSyncCompleted(true);
                     setIsSyncing(false);
                 }
             }, 20000);
     
-            const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null) => {
+            const syncDataType = async (dataType: 'customers' | 'products', lastKey: string | null, progressStart: number, progressEnd: number) => {
                 const typeName = dataType === 'customers' ? '거래처' : '상품';
                 const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
-    
+                
+                setSyncStatusText(`${typeName} 정보 동기화`);
+                setSyncProgress(progressStart);
+
                 if (!lastKey || !hasCache) { // Full Sync
-                    setSyncStatusText(`${typeName} 전체 데이터 동기화 중...`);
+                    setSyncStatusText(`${typeName} 전체 데이터 다운로드`);
                     const remoteData = await db.getStore<Customer | Product>(dataType);
+                    
+                    setSyncProgress(progressStart + (progressEnd - progressStart) * 0.7);
+                    setSyncStatusText(`${typeName} 정보 적용`);
+                    
                     if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
                     await cache.setCachedData(dataType, remoteData as any);
                     const newLastKey = await db.getLastSyncLogKey(dataType);
                     setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
+                    
+                    setSyncProgress(progressEnd);
                     return newLastKey;
                 } else { // Incremental Sync
-                    setSyncStatusText(`${typeName} 변경사항 확인 중...`);
+                    setSyncStatusText(`${typeName} 변경사항 확인`);
                     const { items: changes, newLastKey } = await db.getSyncLogChanges(dataType, lastKey);
+                    
+                    setSyncProgress(progressStart + (progressEnd - progressStart) * 0.7);
+
                     if (changes.length > 0) {
-                        setSyncStatusText(`${typeName} ${changes.length}건 업데이트 중...`);
+                        setSyncStatusText(`${typeName} ${changes.length}건 업데이트 적용`);
                         await applyChanges(dataType, changes);
                     }
                     if (newLastKey !== lastKey) {
                         setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
                     }
+                    setSyncProgress(progressEnd);
                     return newLastKey;
                 }
             };
     
             try {
-                const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers);
-                setSyncProgress(55);
+                // Customer Sync: 30% -> 60%
+                const finalCustomerKey = await syncDataType('customers', lastSyncKeys.customers, 30, 60);
+                
+                setSyncStatusText("거래처 실시간 연결 설정");
                 unsubscribers.push(
                     db.listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
                         await applyChanges('customers', [newItem]);
                         setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
                     })
                 );
-    
-                const finalProductKey = await syncDataType('products', lastSyncKeys.products);
-                setSyncProgress(100);
+                setSyncProgress(65);
+
+                // Product Sync: 65% -> 95%
+                const finalProductKey = await syncDataType('products', lastSyncKeys.products, 65, 95);
+                
+                setSyncStatusText("상품 실시간 연결 설정");
                 unsubscribers.push(
                     db.listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
                         await applyChanges('products', [newItem]);
                         setLastSyncKeys(prev => ({ ...prev, products: newKey }));
                     })
                 );
-    
+                
                 clearTimeout(syncTimeout);
-                setSyncStatusText("동기화 완료");
+                setSyncProgress(100);
+                setSyncStatusText("앱 시작 준비 완료");
                 setTimeout(() => {
                     setInitialSyncCompleted(true);
                     setIsSyncing(false);
@@ -530,6 +552,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             unsubscribers.forEach(unsub => unsub());
         };
     }, [user, showAlert, lastSyncKeys, setLastSyncKeys]);
+
 
     // --- Modal Actions ---
     const modalsActions = useMemo<ModalsActions>(() => ({
