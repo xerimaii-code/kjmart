@@ -349,7 +349,7 @@ export const smartSyncData = async (
     onProgress: (message: string) => void,
     existingDataArray: (Customer | Product)[],
     options?: { bypassMassDeleteCheck?: boolean }
-): Promise<void> => {
+): Promise<{ additions: number; updates: number; deletions: number; }> => {
     if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
 
     const keyField = storeName === 'customers' ? 'comcode' : 'barcode';
@@ -377,6 +377,9 @@ export const smartSyncData = async (
     const timestamp = firebase.database.ServerValue.TIMESTAMP;
     const nowISO = new Date().toISOString();
     const logUser = userEmail.split('@')[0];
+    
+    let additionsCount = 0;
+    let updatesCount = 0;
 
     const totalNew = newData.length;
     let processedNew = 0;
@@ -385,10 +388,17 @@ export const smartSyncData = async (
     for (const [key, newItem] of newDataMap.entries()) {
         const existingItem = existingDataMap.get(key);
         
-        if (!existingItem || !areObjectsEqual(newItem, existingItem, storeName)) {
-            const itemWithMeta = { ...newItem, lastModified: nowISO };
-            const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
+        const itemWithMeta = { ...newItem, lastModified: nowISO };
+        const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
 
+        if (!existingItem) {
+            additionsCount++;
+            if (logRefKey) {
+                updates[`/${storeName}/${key}`] = itemWithMeta;
+                updates[`/sync-logs/${storeName}/${logRefKey}`] = { ...itemWithMeta, timestamp, user: logUser };
+            }
+        } else if (!areObjectsEqual(newItem, existingItem, storeName)) {
+            updatesCount++;
             if (logRefKey) {
                 updates[`/${storeName}/${key}`] = itemWithMeta;
                 updates[`/sync-logs/${storeName}/${logRefKey}`] = { ...itemWithMeta, timestamp, user: logUser };
@@ -429,6 +439,8 @@ export const smartSyncData = async (
         onProgress('데이터베이스에 업로드 중...');
         await db.ref().update(updates);
     }
+
+    return { additions: additionsCount, updates: updatesCount, deletions: numDeletions };
 };
 
 export const getSyncLogChanges = async (

@@ -168,8 +168,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Data State ---
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
-    const [selectedCameraId, setSelectedCameraIdState] = useLocalStorage<string>('selectedCameraId', null, { deviceSpecific: true });
-    const [scanSettings, setScanSettingsState] = useLocalStorage('scanSettings', { vibrateOnScan: true, soundOnScan: true });
+    const [selectedCameraId, setSelectedCameraIdState] = useState<string | null>(null);
+    const [scanSettings, setScanSettingsState] = useState({ vibrateOnScan: true, soundOnScan: true });
     const [lastSyncKeys, setLastSyncKeys] = useLocalStorage('lastSyncKeys', { customers: null, products: null });
 
     // --- Sync State ---
@@ -232,26 +232,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             showToast("이미 다른 동기화가 진행 중입니다.", 'error');
             throw new Error("Sync already in progress");
         }
-
+    
         setIsSyncing(true);
         setSyncDataType(dataType);
-        // FIX: Set sync source
         setSyncSource(source);
         setSyncProgress(0);
         setSyncStatusText("기존 데이터 로딩 중...");
-
+    
         const existingData = dataType === 'customers' ? customers : products;
+        const dataTypeKorean = dataType === 'customers' ? '거래처' : '상품';
         
         try {
             const onProgress = (message: string) => {
                 setSyncStatusText(message);
             };
-
+    
             const parsedResult = await processExcelFileInWorker(file, dataType.slice(0, -1) as 'customer' | 'product', onProgress);
             const newData = parsedResult.valid as (Customer[] | Product[]);
-
-            await db.smartSyncData(dataType, newData, user?.email || 'unknown', onProgress, existingData);
-
+    
+            const syncResult = await db.smartSyncData(dataType, newData, user?.email || 'unknown', onProgress, existingData);
+    
             // After successful sync, update local state and cache
             if (dataType === 'customers') {
                 setCustomers(newData as Customer[]);
@@ -259,6 +259,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             } else {
                 setProducts(newData as Product[]);
                 await cache.setCachedData('products', newData as Product[]);
+            }
+            
+            // Show summary toast
+            const { additions, updates, deletions } = syncResult;
+            if (additions > 0 || updates > 0 || deletions > 0) {
+                const message = `${dataTypeKorean} 동기화 완료:\n${additions}개 추가, ${updates}개 수정, ${deletions}개 삭제됨`;
+                showToast(message, 'success');
+            } else {
+                showToast(`${dataTypeKorean} 동기화 완료: 변경된 내용이 없습니다.`, 'success');
             }
             
         } catch (error: any) {
@@ -269,7 +278,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const proceed = async () => {
                     const parsedResult = error.details.parsedResult;
                     const newData = parsedResult.valid as (Customer[] | Product[]);
-                    await db.smartSyncData(dataType, newData, user?.email || 'unknown', (msg) => setSyncStatusText(msg), existingData, { bypassMassDeleteCheck: true });
+                    const syncResult = await db.smartSyncData(dataType, newData, user?.email || 'unknown', (msg) => setSyncStatusText(msg), existingData, { bypassMassDeleteCheck: true });
                     
                     // After successful sync, update local state and cache
                     if (dataType === 'customers') {
@@ -279,16 +288,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         setProducts(newData as Product[]);
                         await cache.setCachedData('products', newData as Product[]);
                     }
+    
+                    // Show summary toast
+                    const { additions, updates, deletions } = syncResult;
+                    const message = `${dataTypeKorean} 동기화 완료:\n${additions}개 추가, ${updates}개 수정, ${deletions}개 삭제됨`;
+                    showToast(message, 'success');
                 };
                 error.details.proceed = proceed;
             } else {
-                showToast(`${dataType === 'customers' ? '거래처' : '상품'} 동기화 실패.`, 'error');
+                showToast(`${dataTypeKorean} 동기화 실패.`, 'error');
             }
             throw error;
         } finally {
             setIsSyncing(false);
             setSyncDataType(null);
-            // FIX: Reset sync source
             setSyncSource(null);
             setSyncStatusText("");
         }
@@ -348,11 +361,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const setSelectedCameraId = useCallback(async (id: string | null) => {
         setSelectedCameraIdState(id);
-    }, [setSelectedCameraIdState]);
+        const deviceId = getDeviceId();
+        try {
+            await db.setValue(`device-settings/${deviceId}/selectedCameraId`, id);
+        } catch (e) {
+            console.error("Failed to save selected camera ID to DB", e);
+        }
+    }, []);
 
     const setScanSettings = useCallback(async (settings: Partial<DataState['scanSettings']>) => {
-        setScanSettingsState(prev => ({ ...prev, ...settings }));
-    }, [setScanSettingsState]);
+        setScanSettingsState(prev => {
+            const newSettings = { ...prev, ...settings };
+            const deviceId = getDeviceId();
+            db.setValue(`device-settings/${deviceId}/scanSettings`, newSettings).catch(e => {
+                console.error("Failed to save scan settings to DB", e);
+            });
+            return newSettings;
+        });
+    }, []);
 
     // --- Initial Data Load and Sync Effect ---
     useEffect(() => {
@@ -402,7 +428,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setSyncDataType('full');
             setSyncProgress(0);
             setSyncStatusText("로컬 캐시 로딩 중...");
-    
+            
+            const deviceId = getDeviceId();
+            try {
+                const deviceSettings = await db.getValue<{ selectedCameraId: string | null; scanSettings: DataState['scanSettings'] }>(`device-settings/${deviceId}`, null);
+                if (deviceSettings) {
+                    if (typeof deviceSettings.selectedCameraId !== 'undefined') {
+                        setSelectedCameraIdState(deviceSettings.selectedCameraId);
+                    }
+                    if (deviceSettings.scanSettings) {
+                        setScanSettingsState(prev => ({...prev, ...deviceSettings.scanSettings}));
+                    }
+                }
+            } catch (e) {
+                console.warn("Could not load device settings from Firebase", e);
+            }
+
             const [cachedCustomers, cachedProducts] = await Promise.all([
                 cache.getCachedData<Customer>('customers'),
                 cache.getCachedData<Product>('products'),
@@ -539,7 +580,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, [showToast]);
 
     // --- Context Values ---
-    const dataStateValue = useMemo(() => ({ customers, products, selectedCameraId, scanSettings: scanSettings! }), [customers, products, selectedCameraId, scanSettings]);
+    const dataStateValue = useMemo(() => ({ customers, products, selectedCameraId, scanSettings }), [customers, products, selectedCameraId, scanSettings]);
     const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData, setSelectedCameraId, setScanSettings }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData, setSelectedCameraId, setScanSettings]);
     // FIX: Include syncSource in context value
     const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);

@@ -6,7 +6,7 @@ import { useSyncState } from '../context/AppContext';
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [isOnline, setIsOnline] = useState(navigator.onLine);
-    const { isSyncing } = useSyncState();
+    const { isSyncing, syncStatusText } = useSyncState();
     const [currentTime, setCurrentTime] = useState(new Date());
 
     useEffect(() => {
@@ -42,25 +42,32 @@ const Header: React.FC = () => {
     };
     
     const StatusIndicator = () => (
-        <div className="w-4 h-4 flex items-center justify-center">
-            {isSyncing ? (
-                <SpinnerIcon className="w-4 h-4 text-blue-500" title="데이터 동기화 중..." />
-            ) : (
-                <div 
-                    className={`relative w-2.5 h-2.5 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
-                    title={isOnline ? '온라인' : '오프라인'}
-                    aria-label={isOnline ? '온라인 상태' : '오프라인 상태'}
-                >
-                    {isOnline && <div className="absolute inset-0 w-full h-full bg-green-400 rounded-full animate-ping opacity-75"></div>}
-                </div>
+        <div className="flex items-center gap-2">
+            <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                {isSyncing ? (
+                    <SpinnerIcon className="w-4 h-4 text-blue-500" title="데이터 동기화 중..." />
+                ) : (
+                    <div 
+                        className={`relative w-2.5 h-2.5 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
+                        title={isOnline ? '온라인' : '오프라인'}
+                        aria-label={isOnline ? '온라인 상태' : '오프라인 상태'}
+                    >
+                        {isOnline && <div className="absolute inset-0 w-full h-full bg-green-400 rounded-full animate-ping opacity-75"></div>}
+                    </div>
+                )}
+            </div>
+            {isSyncing && syncStatusText && (
+                <p className="text-sm font-medium text-gray-700 animate-fade-in-down whitespace-nowrap" key={syncStatusText}>
+                    {syncStatusText}
+                </p>
             )}
         </div>
     );
 
     return (
         <header id="app-header" className="bg-white px-4 flex justify-between items-center h-14 flex-shrink-0 border-b border-gray-200">
-            <div className="flex items-center gap-3">
-                <h1 className="text-xl font-extrabold text-gray-800 tracking-tight">발주관리</h1>
+            <div className="flex items-center gap-3 min-w-0">
+                <h1 className="text-xl font-extrabold text-gray-800 tracking-tight flex-shrink-0">발주관리</h1>
                 <StatusIndicator />
             </div>
             
