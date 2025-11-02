@@ -136,7 +136,7 @@ const InitialSyncLoader: React.FC = () => {
                         cx="60"
                         cy="60"
                         transform="rotate(-90 60 60)"
-                        style={{ transition: 'stroke-dashoffset 0.35s ease' }}
+                        style={{ transition: 'stroke-dashoffset 0.35s ease', willChange: 'stroke-dashoffset' }}
                     />
                 </svg>
                 <span className="text-2xl font-bold text-blue-600 tabular-nums">{Math.round(syncProgress)}%</span>

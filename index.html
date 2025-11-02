@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="supported-refresh-rates" content="60, 90, 120, 144">
     <title>KJmart 발주 관리</title>
     <link rel="manifest" href="/metadata.json">
     <meta name="theme-color" content="#f9fafb">
@@ -88,6 +89,7 @@
         }
         .animate-fade-in-down {
           animation: fadeInDown 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+          will-change: transform, opacity;
         }
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(16px); }
@@ -95,6 +97,7 @@
         }
         .animate-fade-in-up {
             animation: fadeInUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+            will-change: transform, opacity;
         }
         
         /* Bouncy card entrance animation */
