@@ -186,6 +186,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null; products: string | null; }>('lastSyncKeys', { customers: null, products: null }, { deviceSpecific: true });
+    const lastSyncKeysRef = useRef(lastSyncKeys);
+    useEffect(() => { lastSyncKeysRef.current = lastSyncKeys; }, [lastSyncKeys]);
     const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(defaultDeviceSettings);
 
     // --- Sync State ---
@@ -598,7 +600,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             };
     
             try {
-                const finalCustomerKey = await syncDataTypeOp('customers', lastSyncKeys?.customers, 30, 60);
+                const finalCustomerKey = await syncDataTypeOp('customers', lastSyncKeysRef.current?.customers, 30, 60);
                 
                 setSyncStatusText("거래처 실시간 연결 설정");
                 unsubscribers.push(
@@ -609,7 +611,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 );
                 setSyncProgress(65);
 
-                const finalProductKey = await syncDataTypeOp('products', lastSyncKeys?.products, 65, 95);
+                const finalProductKey = await syncDataTypeOp('products', lastSyncKeysRef.current?.products, 65, 95);
                 
                 setSyncStatusText("상품 실시간 연결 설정");
                 unsubscribers.push(
@@ -651,7 +653,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             clearTimeout(syncTimeout);
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert, showToast, lastSyncKeys, setLastSyncKeys]);
+    }, [user, showAlert, showToast, setLastSyncKeys]);
 
 
     // --- Modal Actions ---
