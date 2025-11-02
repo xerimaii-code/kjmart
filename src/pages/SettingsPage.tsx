@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon, CodeBracketIcon } from '../components/Icons';
 import { SyncSettings } from '../types';
-import ToggleSwitch from './ToggleSwitch';
+import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
 import CollapsibleCard from '../components/CollapsibleCard';
 import { IS_DEVELOPER_MODE } from '../config';

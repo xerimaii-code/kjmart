@@ -6,7 +6,9 @@ import {
     addOrder as dbAddOrder, updateOrder as dbUpdateOrder, deleteOrder as dbDeleteOrder,
     updateOrderStatus as dbUpdateOrderStatus, clearOrders as dbClearOrders, 
     clearOrdersBeforeDate as dbClearOrdersBeforeDate, resetData as dbResetData,
-    smartSyncData
+    smartSyncData,
+    setDeviceSetting,
+    setValue
 } from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
@@ -367,7 +369,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedCameraId: async (id: string | null) => {
             setDeviceSettings(prev => ({ ...prev, selectedCameraId: id }));
             try {
-                await getDeviceSettings(getDeviceId());
+                await setDeviceSetting(getDeviceId(), 'selectedCameraId', id);
             } catch (e) {
                 console.error("Failed to save selected camera ID", e);
                 showToast("카메라 설정 저장에 실패했습니다.", 'error');
@@ -377,7 +379,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const newSettings = { ...deviceSettings.scanSettings, ...settings };
             setDeviceSettings(prev => ({ ...prev, scanSettings: newSettings }));
             try {
-                await getDeviceSettings(getDeviceId());
+                await setDeviceSetting(getDeviceId(), 'scanSettings', newSettings);
             } catch (e) {
                 console.error("Failed to save scan settings", e);
                 showToast("스캔 설정 저장에 실패했습니다.", 'error');
@@ -386,7 +388,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setLogRetentionDays: async (days: number) => {
             setDeviceSettings(prev => ({ ...prev, logRetentionDays: days }));
             try {
-                await getDeviceSettings(getDeviceId());
+                await setDeviceSetting(getDeviceId(), 'logRetentionDays', days);
             } catch (e) {
                 console.error("Failed to save log retention", e);
                 showToast("로그 보관 기간 저장에 실패했습니다.", 'error');
@@ -401,7 +403,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 },
             }));
             try {
-                await getDeviceSettings(getDeviceId());
+                await setValue(`settings/devices/${getDeviceId()}/googleDriveSyncSettings/${type}`, settings);
             } catch (e) {
                 console.error(`Failed to save GDrive settings for ${type}`, e);
                 showToast("Google Drive 설정 저장에 실패했습니다.", 'error');
