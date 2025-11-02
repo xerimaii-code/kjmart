@@ -16,6 +16,7 @@ import { getDeviceId } from '../services/deviceService';
 import Toast, { ToastState } from '../components/Toast';
 import { processExcelFileInWorker } from '../services/dataService';
 import { IS_DEVELOPER_MODE } from '../config';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 
 // --- TYPE DEFINITIONS ---
@@ -184,7 +185,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Data State ---
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
-    const [lastSyncKeys, setLastSyncKeys] = useState<{ customers: string | null; products: string | null; }>({ customers: null, products: null });
+    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null; products: string | null; }>('lastSyncKeys', { customers: null, products: null }, { deviceSpecific: true });
     const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(defaultDeviceSettings);
 
     // --- Sync State ---
@@ -557,7 +558,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 }
             }, 20000);
     
-            const syncDataTypeOp = async (dataType: 'customers' | 'products', lastKey: string | null, progressStart: number, progressEnd: number) => {
+            const syncDataTypeOp = async (dataType: 'customers' | 'products', lastKey: string | null | undefined, progressStart: number, progressEnd: number) => {
                 const typeName = dataType === 'customers' ? '거래처' : '상품';
                 const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
                 
@@ -597,7 +598,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             };
     
             try {
-                const finalCustomerKey = await syncDataTypeOp('customers', lastSyncKeys.customers, 30, 60);
+                const finalCustomerKey = await syncDataTypeOp('customers', lastSyncKeys?.customers, 30, 60);
                 
                 setSyncStatusText("거래처 실시간 연결 설정");
                 unsubscribers.push(
@@ -608,7 +609,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 );
                 setSyncProgress(65);
 
-                const finalProductKey = await syncDataTypeOp('products', lastSyncKeys.products, 65, 95);
+                const finalProductKey = await syncDataTypeOp('products', lastSyncKeys?.products, 65, 95);
                 
                 setSyncStatusText("상품 실시간 연결 설정");
                 unsubscribers.push(
@@ -650,7 +651,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             clearTimeout(syncTimeout);
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert, showToast]);
+    }, [user, showAlert, showToast, lastSyncKeys, setLastSyncKeys]);
 
 
     // --- Modal Actions ---
