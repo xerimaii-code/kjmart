@@ -57,7 +57,7 @@ const TabButton: React.FC<{
 }> = ({ page, label, isActive, onClick }) => (
     <button
         onClick={() => onClick(page)}
-        className={`relative flex-1 py-3 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
+        className={`z-10 relative flex-1 py-3 text-sm font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 rounded-lg ${
             isActive 
                 ? 'text-blue-600' 
                 : 'text-gray-500 hover:text-gray-900'
@@ -65,43 +65,40 @@ const TabButton: React.FC<{
         aria-current={isActive ? 'page' : undefined}
     >
         <span>{label}</span>
-        {isActive && (
-            <div 
-                className="absolute -bottom-0.5 left-0 right-0 h-1 bg-blue-600 rounded-full"
-            />
-        )}
     </button>
 );
 
 const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
+    const tabs = useMemo(() => [
+        { page: "history" as Page, label: "발주내역" },
+        { page: "new-order" as Page, label: "신규발주" },
+        { page: "product-inquiry" as Page, label: "상품조회" },
+        { page: "settings" as Page, label: "설정" },
+    ], []);
+
+    const activeIndex = useMemo(() => tabs.findIndex(tab => tab.page === activePage), [tabs, activePage]);
+
     return (
-        <nav className="w-full bg-white flex justify-around items-center flex-shrink-0 p-1 border-b border-gray-200">
-            <div className="flex w-full justify-around items-center h-full">
+        <nav className="relative w-full bg-white flex items-center flex-shrink-0 p-1 border-b border-gray-200">
+            {tabs.map(tab => (
                 <TabButton
-                    page="history"
-                    label="발주내역"
-                    isActive={activePage === 'history'}
+                    key={tab.page}
+                    page={tab.page}
+                    label={tab.label}
+                    isActive={activePage === tab.page}
                     onClick={setActivePage}
                 />
-                <TabButton
-                    page="new-order"
-                    label="신규발주"
-                    isActive={activePage === 'new-order'}
-                    onClick={setActivePage}
+            ))}
+            {activeIndex !== -1 && (
+                <div
+                    className="absolute left-0 -bottom-0.5 h-1 bg-blue-600 rounded-full transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
+                    style={{
+                        width: `calc(100% / ${tabs.length})`,
+                        transform: `translateX(calc(${activeIndex * 100}%))`,
+                        willChange: 'transform'
+                    }}
                 />
-                 <TabButton
-                    page="product-inquiry"
-                    label="상품조회"
-                    isActive={activePage === 'product-inquiry'}
-                    onClick={setActivePage}
-                />
-                <TabButton
-                    page="settings"
-                    label="설정"
-                    isActive={activePage === 'settings'}
-                    onClick={setActivePage}
-                />
-            </div>
+            )}
         </nav>
     );
 };

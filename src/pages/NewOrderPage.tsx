@@ -25,13 +25,14 @@ const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
     );
 };
 
-const OrderItemRow = memo(({ item, product, onEdit, onRemove }: { item: OrderItem; product: Product | undefined; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void }) => {
+const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: OrderItem; product: Product | undefined; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void; index: number; }) => {
     const saleIsActive = product ? isSaleActive(product.saleEndDate) : false;
     const hasSalePrice = product ? !!product.salePrice : false;
 
     return (
         <div
-            className="relative overflow-hidden flex items-center p-3 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
+            className="relative overflow-hidden flex items-center p-3 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200 animate-card-enter"
+            style={{ animationDelay: `${Math.min(index * 30, 400)}ms` }}
             onClick={() => onEdit(item)}
         >
             {saleIsActive && hasSalePrice && (
@@ -443,13 +444,14 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             <main ref={scrollableContainerRef} className="scrollable-content flex-grow">
                 {items.length > 0 && (
                     <div className="max-w-2xl mx-auto divide-y divide-gray-200">
-                        {items.map(item => (
+                        {items.map((item, index) => (
                             <OrderItemRow 
                                 key={item.barcode} 
                                 item={item}
                                 product={products.find(p => p.barcode === item.barcode)}
                                 onEdit={handleEditItem} 
                                 onRemove={handleRemoveItem}
+                                index={index}
                             />
                         ))}
                     </div>

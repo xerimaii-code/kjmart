@@ -83,7 +83,7 @@ const OrderRow = memo(({
         >
             <div
                 id={`order-item-${order.id}`}
-                className={`flex items-center transition-all duration-300 ease-in-out ${isHighlighted ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}
+                className={`flex items-center transition-colors duration-300 ease-in-out ${isHighlighted ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}
             >
                 <div
                     onClick={onCardClick}
