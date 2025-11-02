@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
 import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon, CodeBracketIcon } from '../components/Icons';
 import { SyncSettings } from '../types';
-import ToggleSwitch from '../components/ToggleSwitch';
+import ToggleSwitch from './ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
 import CollapsibleCard from '../components/CollapsibleCard';
 import { IS_DEVELOPER_MODE } from '../config';
@@ -293,11 +293,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         setGoogleDriveSyncSettings,
     } = useDeviceSettings();
 
-    const { resetData } = useDataActions();
+    const { resetData, forceFullSync } = useDataActions();
     const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
     const { openHistoryModal, openClearHistoryModal } = useModals();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
+    const { isSyncing } = useSyncState();
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [isCleaning, setIsCleaning] = useState(false);
     
@@ -374,15 +375,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             showToast('로그 보관 기간이 저장되었습니다.', 'success');
         }
     };
-    
-    const handleForceSync = () => {
+
+    const handleForceFullSync = () => {
         showAlert(
-            "다음 앱 로드 시 전체 데이터를 동기화하시겠습니까?\n\n개발 환경에서 테스트용으로만 사용하세요. 앱이 새로고침됩니다.",
-            () => {
-                localStorage.setItem('forceFullSyncOnNextLoad', 'true');
-                window.location.reload();
+            "서버의 모든 데이터를 기기로 강제 동기화합니다.\n\n로컬 캐시를 서버 데이터로 덮어씁니다. 계속하시겠습니까?",
+            async () => {
+                try {
+                    await forceFullSync();
+                } catch (e) {
+                    // This error is already handled by forceFullSync internally with an alert
+                    console.error("Force sync failed from SettingsPage:", e);
+                }
             },
-            '새로고침 및 동기화',
+            '동기화 실행',
             'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'
         );
     };
@@ -498,7 +503,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         />
                         
                         <div className="border-t border-gray-200/80 my-2" />
-                        <p className="text-xs text-red-600 font-semibold px-3 py-1">주의: 아래 작업은 되돌릴 수 없습니다.</p>
+
+                        <ActionButton
+                            onClick={handleForceFullSync}
+                            icon={<DatabaseIcon className="w-6 h-6" />}
+                            label="서버 데이터로 강제 동기화"
+                            description="서버의 최신 데이터로 기기 전체를 덮어씁니다."
+                            disabled={isSyncing}
+                        />
+
+                        <p className="text-xs text-red-600 font-semibold px-3 py-1 mt-2">주의: 아래 작업은 되돌릴 수 없습니다.</p>
 
                         <ActionButton
                             onClick={() => handleReset('customers')}
@@ -525,17 +539,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             isDestructive={true}
                         />
                     </CollapsibleCard>
-                    
-                    {IS_DEVELOPER_MODE && (
-                        <CollapsibleCard title="개발자 도구" icon={<CodeBracketIcon className="w-6 h-6 text-gray-500" />}>
-                             <ActionButton
-                                onClick={handleForceSync}
-                                icon={<DatabaseIcon className="w-6 h-6" />}
-                                label="강제 전체 동기화"
-                                description="다음 앱 로드 시 개발 모드를 무시하고 전체 데이터를 동기화합니다."
-                            />
-                        </CollapsibleCard>
-                    )}
                 </div>
             </div>
         </div>

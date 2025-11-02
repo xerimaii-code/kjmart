@@ -653,7 +653,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             clearTimeout(syncTimeout);
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert, showToast, setLastSyncKeys]);
+    }, [user, showAlert, showToast]);
 
 
     // --- Modal Actions ---
