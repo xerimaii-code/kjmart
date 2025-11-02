@@ -530,18 +530,19 @@ export const listenForNewLogs = (
 ): (() => void) => {
     if (!isFirebaseInitialized || !db) return () => {};
 
-    let query = db.ref(`sync-logs/${dataType}`).orderByKey();
-    
-    if (startKey) {
-        query = query.startAt(startKey);
-    } else {
-        const nowKey = db.ref().push().key;
-        if (nowKey) {
-            query = query.startAt(nowKey);
-        }
-    }
+    // By combining orderByKey() and limitToLast(1), we create a listener
+    // that is initially called for the very last item in the log.
+    // Subsequently, it will only be triggered for NEW items added to the end of the log.
+    // This is a highly efficient way to listen for new entries without
+    // re-downloading or re-processing existing ones.
+    const query = db.ref(`sync-logs/${dataType}`).orderByKey().limitToLast(1);
 
     const listener = query.on('child_added', (snapshot) => {
+        // The check 'snapshot.key !== startKey' is crucial.
+        // On initial attachment, the listener receives the last known item. We must
+        // ignore it to prevent processing it again. The 'startKey' holds the key
+        // of the last item processed during the initial catch-up sync.
+        // Any subsequent calls to this callback will be for truly new items.
         if (snapshot.key && snapshot.key !== startKey) {
             callback(snapshot.val(), snapshot.key);
         }
