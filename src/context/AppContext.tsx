@@ -8,7 +8,8 @@ import {
     clearOrdersBeforeDate as dbClearOrdersBeforeDate, resetData as dbResetData,
     smartSyncData,
     setDeviceSetting,
-    setValue
+    setValue,
+    getStoreWithLimit
 } from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
@@ -479,7 +480,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 } else {
                     // Full Sync for this store
                     try {
-                        const serverData = await getStore(storeName);
+                        const serverData = IS_DEVELOPER_MODE
+                            ? await getStoreWithLimit(storeName, storeName === 'customers' ? 10 : 50)
+                            : await getStore(storeName);
+                        
+                        if (IS_DEVELOPER_MODE) {
+                            console.log(`Developer mode: Fetched ${serverData.length} items for ${storeName}.`);
+                        }
+
                         await cache.setCachedData(storeName, serverData as any);
                         const newLastKey = await getLastSyncLogKey(storeName);
                         setLastSyncKeys(prev => ({ ...prev, [storeName]: newLastKey }));

@@ -150,6 +150,32 @@ export const getStore = async <T>(storeName: string): Promise<T[]> => {
     }
 };
 
+export const getStoreWithLimit = async <T>(storeName: string, limit: number): Promise<T[]> => {
+    if (!isFirebaseInitialized || !db) return [];
+    try {
+        const snapshot = await db.ref(storeName).limitToFirst(limit).get();
+        const data = snapshot.val();
+        if (!data) {
+            return [];
+        }
+
+        const values = Object.values(data).filter(item => item != null);
+        
+        if (storeName === 'customers') {
+            return values.filter(item => (item as Customer).comcode) as T[];
+        }
+        if (storeName === 'products') {
+            return values.filter(item => (item as Product).barcode) as T[];
+        }
+        
+        return values as T[];
+
+    } catch (error) {
+        console.error(`Error getting store ${storeName} with limit:`, error);
+        return [];
+    }
+};
+
 export const getValue = async <T>(path: string, defaultValue: T): Promise<T> => {
     if (!isFirebaseInitialized || !db) return defaultValue;
     const snapshot = await db.ref(path).get();
