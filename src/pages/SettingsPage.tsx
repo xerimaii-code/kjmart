@@ -71,64 +71,79 @@ const SyncSection: React.FC<{
             showToast("먼저 동기화할 파일을 선택해주세요.", 'error');
             return;
         }
+        
+        showAlert(
+            `${dataTypeKorean} 마스터 파일 동기화\n\n서버의 데이터를 선택된 Drive 파일의 내용과 일치하도록 덮어씁니다 (추가, 수정, 삭제 포함).\n계속하시겠습니까?`,
+            async () => {
+                try {
+                    if (!await initializeApi()) return;
+                    const metadata = await googleDrive.getFileMetadata(settings.fileId);
+                    const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
 
-        try {
-            if (!await initializeApi()) return;
-            const metadata = await googleDrive.getFileMetadata(settings.fileId);
-            const fileBlob = await googleDrive.getFileContent(settings.fileId, metadata.mimeType);
+                    await syncWithFile(fileBlob, dataType, 'drive');
+                    
+                    onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
 
-            await syncWithFile(fileBlob, dataType, 'drive');
-            
-            onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
-
-        } catch (err: any) {
-             if (err.message === 'MASS_DELETION_DETECTED') {
-                const { numExisting, numDeletions, proceed } = err.details;
-                showAlert(
-                    `경고: 대량 삭제가 감지되었습니다.\n\n기존 데이터: ${numExisting.toLocaleString()}건\n결과적으로 ${numDeletions.toLocaleString()}건의 데이터가 삭제됩니다. 계속하시겠습니까?`,
-                    async () => {
-                        try {
-                            await proceed();
-                            if (settings?.fileId) {
-                                const metadata = await googleDrive.getFileMetadata(settings.fileId);
-                                onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
-                            }
-                        } catch (proceedError) {
-                             // Error is handled by the syncWithFile action
-                        }
-                    },
-                    '삭제 진행',
-                    'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500',
-                    () => showToast('동기화 작업이 취소되었습니다.', 'error')
-                );
-            }
-        }
+                } catch (err: any) {
+                     if (err.message === 'MASS_DELETION_DETECTED') {
+                        const { numExisting, numDeletions, proceed } = err.details;
+                        showAlert(
+                            `경고: 대량 삭제가 감지되었습니다.\n\n기존 데이터: ${numExisting.toLocaleString()}건\n결과적으로 ${numDeletions.toLocaleString()}건의 데이터가 삭제됩니다. 계속하시겠습니까?`,
+                            async () => {
+                                try {
+                                    await proceed();
+                                    if (settings?.fileId) {
+                                        const metadata = await googleDrive.getFileMetadata(settings.fileId);
+                                        onSettingsChange({ ...settings, lastSyncTime: metadata.modifiedTime });
+                                    }
+                                } catch (proceedError) {
+                                     // Error is handled by the syncWithFile action
+                                }
+                            },
+                            '삭제 진행',
+                            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500',
+                            () => showToast('동기화 작업이 취소되었습니다.', 'error')
+                        );
+                    }
+                }
+            },
+            '동기화 실행',
+            'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+        );
     };
     
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
         if (event.target.files && event.target.files.length > 0) {
             const file = event.target.files[0];
-            try {
-                await syncWithFile(file, dataType, 'local');
-            } catch (err: any) {
-                 if (err.message === 'MASS_DELETION_DETECTED') {
-                    const { numExisting, numDeletions, proceed } = err.details;
-                    showAlert(
-                        `경고: 대량 삭제가 감지되었습니다.\n\n기존 데이터: ${numExisting.toLocaleString()}건\n결과적으로 ${numDeletions.toLocaleString()}건의 데이터가 삭제됩니다. 계속하시겠습니까?`,
-                        async () => {
-                            try {
-                                await proceed();
-                            } catch (proceedError) {
-                               // Error is handled by the syncWithFile action
-                            }
-                        },
-                        '삭제 진행', 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500',
-                        () => showToast('동기화 작업이 취소되었습니다.', 'error')
-                    );
-                }
-            } finally {
-                if (fileInputRef.current) fileInputRef.current.value = "";
-            }
+            
+            showAlert(
+                `${dataTypeKorean} 마스터 파일 동기화\n\n서버의 데이터를 선택된 로컬 파일의 내용과 일치하도록 덮어씁니다 (추가, 수정, 삭제 포함).\n계속하시겠습니까?`,
+                async () => {
+                    try {
+                        await syncWithFile(file, dataType, 'local');
+                    } catch (err: any) {
+                         if (err.message === 'MASS_DELETION_DETECTED') {
+                            const { numExisting, numDeletions, proceed } = err.details;
+                            showAlert(
+                                `경고: 대량 삭제가 감지되었습니다.\n\n기존 데이터: ${numExisting.toLocaleString()}건\n결과적으로 ${numDeletions.toLocaleString()}건의 데이터가 삭제됩니다. 계속하시겠습니까?`,
+                                async () => {
+                                    try {
+                                        await proceed();
+                                    } catch (proceedError) {
+                                       // Error is handled by the syncWithFile action
+                                    }
+                                },
+                                '삭제 진행', 'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500',
+                                () => showToast('동기화 작업이 취소되었습니다.', 'error')
+                            );
+                        }
+                    } finally {
+                        if (fileInputRef.current) fileInputRef.current.value = "";
+                    }
+                },
+                '동기화 실행',
+                'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+            );
         }
     };
     
