@@ -170,9 +170,15 @@ export const getFileMetadata = async (fileId: string): Promise<{ name: string; m
     gapi.client.setToken({ access_token: oauthToken });
 
     try {
-        const response = await gapi.client.drive.files.get({
-            fileId: fileId,
-            fields: 'id, name, modifiedTime, mimeType'
+        const response = await gapi.client.request({
+            path: `https://www.googleapis.com/drive/v3/files/${fileId}`,
+            method: 'GET',
+            params: {
+                fields: 'id, name, modifiedTime, mimeType'
+            },
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
         });
         
         if (response.status !== 200 || !response.result) {
@@ -197,9 +203,15 @@ export const getFileContent = async (fileId: string, fileMimeType: string): Prom
 
     // If it's a native Google Sheet, we must export it to a standard format.
     if (fileMimeType === 'application/vnd.google-apps.spreadsheet') {
-        const response = await gapi.client.drive.files.export({
-            fileId: fileId,
-            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        const response = await gapi.client.request({
+            path: `https://www.googleapis.com/drive/v3/files/${fileId}/export`,
+            method: 'GET',
+            params: {
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            },
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
         });
         
         if (response.status !== 200 || !response.body) {
@@ -217,9 +229,15 @@ export const getFileContent = async (fileId: string, fileMimeType: string): Prom
         return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     } else {
         // For other file types (like uploaded .xls, .xlsx), download them directly.
-        const response = await gapi.client.drive.files.get({
-            fileId: fileId,
-            alt: 'media'
+        const response = await gapi.client.request({
+            path: `https://www.googleapis.com/drive/v3/files/${fileId}`,
+            method: 'GET',
+            params: {
+                alt: 'media'
+            },
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
         });
 
         if (response.status !== 200 || !response.body) {
