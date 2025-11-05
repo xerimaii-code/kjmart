@@ -92,6 +92,15 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         setItems(prev => prev.filter(item => item.barcode !== barcode));
     }, []);
 
+    const reorderItems = useCallback((startIndex: number, endIndex: number) => {
+        setItems(prev => {
+            const result = Array.from(prev);
+            const [removed] = result.splice(startIndex, 1);
+            result.splice(endIndex, 0, removed);
+            return result;
+        });
+    }, []);
+
     const totalAmount = useMemo(() => {
         return Math.floor(items.reduce((sum, item) => sum + (item.price * item.quantity), 0));
     }, [items]);
@@ -105,6 +114,7 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         updateItem,
         addOrUpdateItem,
         removeItem,
+        reorderItems,
         resetItems,
         totalAmount,
     };

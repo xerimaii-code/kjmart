@@ -31,7 +31,7 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: O
 
     return (
         <div
-            className="relative overflow-hidden flex items-center p-3 space-x-3 cursor-pointer hover:bg-gray-50 transition-colors duration-200 animate-card-enter"
+            className="relative overflow-hidden flex items-center p-3 space-x-3 hover:bg-gray-50 transition-colors duration-200 animate-card-enter"
             style={{ animationDelay: `${Math.min(index * 30, 400)}ms` }}
             onClick={() => onEdit(item)}
         >
@@ -129,6 +129,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         addOrUpdateItem,
         updateItem,
         removeItem,
+        reorderItems,
         resetItems,
         totalAmount,
     } = useOrderManager({
@@ -212,6 +213,42 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         }
         return results;
     }, [products, debouncedProductSearch]);
+
+    // --- Drag and Drop State and Handlers ---
+    const dragIndex = useRef<number | null>(null);
+    const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+        dragIndex.current = index;
+        e.dataTransfer.effectAllowed = 'move';
+        (e.currentTarget as HTMLElement).classList.add('dragging');
+    };
+    
+    const handleDragEnter = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        if (dragIndex.current === index) return;
+        setDropIndex(index);
+    };
+    
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+    };
+    
+    const handleDragEnd = (e: React.DragEvent) => {
+        (e.currentTarget as HTMLElement).classList.remove('dragging');
+        dragIndex.current = null;
+        setDropIndex(null);
+    };
+    
+    const handleDrop = () => {
+        if (dragIndex.current !== null && dropIndex !== null) {
+            const fromIndex = dragIndex.current;
+            const toIndex = dropIndex > fromIndex ? dropIndex - 1 : dropIndex;
+            if (fromIndex !== toIndex) {
+                reorderItems(fromIndex, toIndex);
+            }
+        }
+    };
 
     const handleSelectCustomer = (customer: Customer) => {
         setSelectedCustomer(customer);
@@ -441,19 +478,30 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 </div>
             </div>
 
-            <main ref={scrollableContainerRef} className="scrollable-content flex-grow">
+            <main ref={scrollableContainerRef} className="scrollable-content flex-grow" onDragOver={handleDragOver} onDrop={handleDrop}>
                 {items.length > 0 && (
                     <div className="max-w-2xl mx-auto divide-y divide-gray-200">
                         {items.map((item, index) => (
-                            <OrderItemRow 
-                                key={item.barcode} 
-                                item={item}
-                                product={products.find(p => p.barcode === item.barcode)}
-                                onEdit={handleEditItem} 
-                                onRemove={handleRemoveItem}
-                                index={index}
-                            />
+                            <React.Fragment key={item.barcode}>
+                                {dropIndex === index && <div className="drag-over-placeholder" />}
+                                <div
+                                    draggable
+                                    onDragStart={(e) => handleDragStart(e, index)}
+                                    onDragEnter={(e) => handleDragEnter(e, index)}
+                                    onDragEnd={handleDragEnd}
+                                    className="cursor-grab"
+                                >
+                                    <OrderItemRow 
+                                        item={item}
+                                        product={products.find(p => p.barcode === item.barcode)}
+                                        onEdit={handleEditItem} 
+                                        onRemove={handleRemoveItem}
+                                        index={index}
+                                    />
+                                </div>
+                            </React.Fragment>
                         ))}
+                         {dropIndex === items.length && <div className="drag-over-placeholder" />}
                     </div>
                 )}
             </main>

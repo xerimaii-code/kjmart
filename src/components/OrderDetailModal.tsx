@@ -11,7 +11,7 @@ import ProductSearchResultItem from './ProductSearchResultItem';
 
 const MAX_SEARCH_RESULTS = 50;
 
-// Helper to create a consistent, comparable representation of an item list.
+// Helper to create a consistent, comparable representation of an item list for content changes.
 const normalizeItemsForComparison = (items: OrderItem[]): Omit<OrderItem, 'price'>[] => {
     if (!items) return [];
     // Price is excluded from comparison because it can be updated from product data
@@ -31,7 +31,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
     return (
         <div
             ref={ref}
-            className={`relative overflow-hidden flex items-center p-3 space-x-3 transition-colors duration-200 ${!isCompleted ? 'cursor-pointer hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
+            className={`relative overflow-hidden flex items-center p-3 space-x-3 transition-colors duration-200 ${!isCompleted ? 'hover:bg-gray-50' : 'opacity-70'} ${isNew ? 'bg-green-50' : ''} ${isModified ? 'bg-amber-50' : ''}`}
             onClick={() => !isCompleted && onEdit(item)}
         >
             {saleIsActive && hasSalePrice && (
@@ -125,7 +125,7 @@ const OrderDetailModal: React.FC = () => {
     const scrollableContainerRef = useRef<HTMLElement>(null);
     const lastItemRef = useRef<HTMLDivElement>(null);
 
-    const { items, addOrUpdateItem, updateItem, removeItem, resetItems, totalAmount } = useOrderManager({
+    const { items, addOrUpdateItem, updateItem, removeItem, resetItems, totalAmount, reorderItems } = useOrderManager({
         initialItems: originalOrder?.items || [],
     });
     useEffect(() => { itemsRef.current = items; }, [items]);
@@ -164,8 +164,19 @@ const OrderDetailModal: React.FC = () => {
     
     const hasChanges = useMemo(() => {
         if (!originalOrder) return false;
-        return JSON.stringify(originalItemsMemo) !== JSON.stringify(currentItemsMemo) || originalMemo !== memo;
-    }, [originalOrder, originalItemsMemo, currentItemsMemo, originalMemo, memo]);
+        // 1. Check if the order of items has changed.
+        const originalOrderStr = (originalOrder?.items || []).map(i => i.barcode).join(',');
+        const currentOrderStr = items.map(i => i.barcode).join(',');
+        if(originalOrderStr !== currentOrderStr) return true;
+
+        // 2. Check if the content (quantity, unit, memo) of any item has changed.
+        if (JSON.stringify(originalItemsMemo) !== JSON.stringify(currentItemsMemo)) return true;
+
+        // 3. Check if the order-level memo has changed.
+        if (originalMemo !== memo) return true;
+
+        return false;
+    }, [originalOrder, originalItemsMemo, currentItemsMemo, originalMemo, memo, items]);
 
     const draftDataToSave = useMemo(() => ({ items, memo }), [items, memo]);
     const debouncedDraftData = useDebounce(draftDataToSave, 500);
@@ -197,6 +208,46 @@ const OrderDetailModal: React.FC = () => {
         prevItemsLength.current = items.length;
     }, [isRendered, items.length]);
 
+    // --- Drag and Drop State and Handlers ---
+    const dragIndex = useRef<number | null>(null);
+    const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+        if (isCompleted) return;
+        dragIndex.current = index;
+        e.dataTransfer.effectAllowed = 'move';
+        (e.currentTarget as HTMLElement).classList.add('dragging');
+    };
+    
+    const handleDragEnter = (e: React.DragEvent, index: number) => {
+        if (isCompleted) return;
+        e.preventDefault();
+        if (dragIndex.current === index) return;
+        setDropIndex(index);
+    };
+    
+    const handleDragOver = (e: React.DragEvent) => {
+        if (isCompleted) return;
+        e.preventDefault();
+    };
+
+    const handleDragEnd = (e: React.DragEvent) => {
+        if (isCompleted) return;
+        (e.currentTarget as HTMLElement).classList.remove('dragging');
+        dragIndex.current = null;
+        setDropIndex(null);
+    };
+    
+    const handleDrop = () => {
+        if (isCompleted) return;
+        if (dragIndex.current !== null && dropIndex !== null) {
+            const fromIndex = dragIndex.current;
+            const toIndex = dropIndex > fromIndex ? dropIndex - 1 : dropIndex;
+            if (fromIndex !== toIndex) {
+                reorderItems(fromIndex, toIndex);
+            }
+        }
+    };
 
     // --- Handlers ---
     const handleClose = useCallback(() => {
@@ -370,23 +421,34 @@ const OrderDetailModal: React.FC = () => {
                     </div>
                 )}
 
-                <main ref={scrollableContainerRef} className="flex-grow overflow-y-auto">
+                <main ref={scrollableContainerRef} className="flex-grow overflow-y-auto" onDragOver={handleDragOver} onDrop={handleDrop}>
                     <div className="p-3 pb-28 max-w-2xl mx-auto">
                         <div>
                             <div className="divide-y divide-gray-200">
                                 {items.map((item, index) => (
-                                    <EditedItemRow
-                                        key={item.barcode}
-                                        ref={index === items.length - 1 ? lastItemRef : null}
-                                        item={item}
-                                        product={products.find(p => p.barcode === item.barcode)}
-                                        isCompleted={isCompleted}
-                                        isNew={newItems.has(item.barcode)}
-                                        isModified={modifiedItems.has(item.barcode)}
-                                        onEdit={handleEditItem}
-                                        onRemove={handleRemoveItem}
-                                    />
+                                    <React.Fragment key={item.barcode}>
+                                        {dropIndex === index && <div className="drag-over-placeholder" />}
+                                        <div
+                                            draggable={!isCompleted}
+                                            onDragStart={(e) => handleDragStart(e, index)}
+                                            onDragEnter={(e) => handleDragEnter(e, index)}
+                                            onDragEnd={handleDragEnd}
+                                            className={!isCompleted ? 'cursor-grab' : ''}
+                                        >
+                                            <EditedItemRow
+                                                ref={index === items.length - 1 ? lastItemRef : null}
+                                                item={item}
+                                                product={products.find(p => p.barcode === item.barcode)}
+                                                isCompleted={isCompleted}
+                                                isNew={newItems.has(item.barcode)}
+                                                isModified={modifiedItems.has(item.barcode)}
+                                                onEdit={handleEditItem}
+                                                onRemove={handleRemoveItem}
+                                            />
+                                        </div>
+                                    </React.Fragment>
                                 ))}
+                                {dropIndex === items.length && <div className="drag-over-placeholder" />}
                             </div>
                         </div>
                     </div>
