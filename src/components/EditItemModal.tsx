@@ -29,7 +29,8 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
     useAdjustForKeyboard(modalContentRef, isOpen);
     
     const finalQuantity = Number(quantity);
-    const isQuantityValid = !isNaN(finalQuantity);
+    // An empty input should be considered invalid, not converted to 0.
+    const isQuantityValid = quantity !== '' && !isNaN(finalQuantity);
 
     useEffect(() => {
         if (isOpen) {
@@ -52,10 +53,24 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
     if (!isOpen || !item) return null;
 
     const handleSave = () => {
-        if (!isQuantityValid) return;
-        onSave({ quantity: finalQuantity, unit, memo: memo.trim() });
+        if (!isQuantityValid || !item) return;
+
+        let quantityToSave = finalQuantity;
+
+        // If user enters a negative number, treat it as a subtraction from the original quantity.
+        if (finalQuantity < 0) {
+            quantityToSave = item.quantity + finalQuantity;
+        }
+
+        // The final quantity cannot be negative. Default to 0, which will trigger removal.
+        if (quantityToSave < 0) {
+            quantityToSave = 0;
+        }
+
+        onSave({ quantity: quantityToSave, unit, memo: memo.trim() });
         onClose();
     };
+
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {

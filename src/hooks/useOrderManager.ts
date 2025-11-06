@@ -51,6 +51,9 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
     
     const updateItem = useCallback((barcode: string, newValues: Partial<OrderItem>) => {
         setItems(prev => {
+            if (newValues.quantity === 0) {
+                return prev.filter(item => item.barcode !== barcode);
+            }
             const updatedItems = prev.map(item => item.barcode === barcode ? { ...item, ...newValues } : item);
             return normalizeItems(updatedItems);
         });
@@ -66,15 +69,24 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
             if (existingItemIndex > -1) {
                 const updatedItems = [...prevItems];
                 const existingItem = updatedItems[existingItemIndex];
-                updatedItems[existingItemIndex] = {
-                    ...existingItem,
-                    quantity: existingItem.quantity + details.quantity,
-                    unit: details.unit,
-                    memo: details.memo || '',
-                    price: priceToUse, // 가격 변동 시 업데이트
-                };
+                const newQuantity = existingItem.quantity + details.quantity;
+
+                if (newQuantity <= 0) {
+                    updatedItems.splice(existingItemIndex, 1);
+                } else {
+                    updatedItems[existingItemIndex] = {
+                        ...existingItem,
+                        quantity: newQuantity,
+                        unit: details.unit,
+                        memo: details.memo || '',
+                        price: priceToUse, // 가격 변동 시 업데이트
+                    };
+                }
                 return normalizeItems(updatedItems);
             } else {
+                if (details.quantity <= 0) {
+                    return prevItems;
+                }
                 const newItem: OrderItem = {
                     barcode: product.barcode,
                     name: product.name,
