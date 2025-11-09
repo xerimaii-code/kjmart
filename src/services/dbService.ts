@@ -179,11 +179,11 @@ export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
 // --- Data Modification ---
 const DB_UNINITIALIZED_ERROR = new Error("Database not initialized");
 
-export const addOrder = (
+export const addOrder = async (
     orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'completedAt' | 'completionDetails' | 'itemCount' | 'items'>, 
     items: OrderItem[]
 ): Promise<number> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
+    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
     
     const newOrderId = Date.now();
     const now = new Date().toISOString();
@@ -203,11 +203,8 @@ export const addOrder = (
     updates[`/orders/${newOrderId}`] = newOrder;
     updates[`/order-items/${newOrderId}`] = items;
 
-    db.ref().update(updates).catch(err => {
-        console.error("Firebase background update failed for addOrderWithItems:", err);
-    });
-
-    return Promise.resolve(newOrderId);
+    await db.ref().update(updates);
+    return newOrderId;
 };
 
 export const updateOrder = (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
@@ -220,11 +217,7 @@ export const updateOrder = (order: Omit<Order, 'items'>, items: OrderItem[]): Pr
     updates[`/orders/${order.id}`] = updatedOrderData;
     updates[`/order-items/${order.id}`] = items;
     
-    db.ref().update(updates).catch(err => {
-        console.error("Firebase background update failed for updateOrderAndItems:", err);
-    });
-    
-    return Promise.resolve();
+    return db.ref().update(updates);
 };
 
 export const updateOrderStatus = (
@@ -242,11 +235,7 @@ export const updateOrderStatus = (
         [`/orders/${orderId}/date`]: now,
     };
 
-    db.ref().update(updates).catch(err => {
-        console.error("Firebase background update failed for updateOrderStatus:", err);
-    });
-    
-    return Promise.resolve();
+    return db.ref().update(updates);
 };
 
 export const deleteOrder = (orderId: number): Promise<void> => {
@@ -256,11 +245,7 @@ export const deleteOrder = (orderId: number): Promise<void> => {
     updates[`/orders/${orderId}`] = null;
     updates[`/order-items/${orderId}`] = null;
     
-    db.ref().update(updates).catch(err => {
-        console.error("Firebase background update failed for deleteOrderAndItems:", err);
-    });
-    
-    return Promise.resolve();
+    return db.ref().update(updates);
 };
 
 export const replaceAll = async <T>(storeName: string, items: T[] | null): Promise<void> => {
