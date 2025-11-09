@@ -18,7 +18,6 @@ const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
 const ScannerModal = lazy(() => import('./components/ScannerModal'));
 const AddItemModal = lazy(() => import('./components/AddItemModal'));
 const EditItemModal = lazy(() => import('./components/EditItemModal'));
-const MemoModal = lazy(() => import('./components/MemoModal'));
 const SyncHistoryModal = lazy(() => import('./components/SyncHistoryModal'));
 const ClearHistoryModal = lazy(() => import('./components/ClearHistoryModal'));
 
@@ -160,8 +159,6 @@ const AppContent: React.FC = () => {
         closeAddItemModal,
         editItemModalProps,
         closeEditItemModal,
-        memoModalProps,
-        closeMemoModal,
         isHistoryModalOpen,
         closeHistoryModal,
         isClearHistoryModalOpen,
@@ -193,10 +190,9 @@ const AppContent: React.FC = () => {
         isScannerOpen || 
         !!addItemModalProps || 
         !!editItemModalProps || 
-        !!memoModalProps || 
         isHistoryModalOpen ||
         isClearHistoryModalOpen
-    ), [isDetailModalOpen, isDeliveryModalOpen, isScannerOpen, addItemModalProps, editItemModalProps, memoModalProps, isHistoryModalOpen, isClearHistoryModalOpen]);
+    ), [isDetailModalOpen, isDeliveryModalOpen, isScannerOpen, addItemModalProps, editItemModalProps, isHistoryModalOpen, isClearHistoryModalOpen]);
 
     const { onTouchStart, onTouchMove, onTouchEnd, containerStyle } = useSwipeNavigation({
         items: pages,
@@ -253,14 +249,6 @@ const AppContent: React.FC = () => {
                       item={editItemModalProps.item}
                       onClose={closeEditItemModal}
                       onSave={editItemModalProps.onSave}
-                  />
-              )}
-              {memoModalProps && (
-                  <MemoModal
-                      isOpen={true}
-                      initialMemo={memoModalProps.initialMemo}
-                      onClose={closeMemoModal}
-                      onSave={memoModalProps.onSave}
                   />
               )}
               {isHistoryModalOpen && <SyncHistoryModal isOpen={isHistoryModalOpen} onClose={closeHistoryModal} />}

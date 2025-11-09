@@ -105,7 +105,7 @@ const OrderDetailModal: React.FC = () => {
     const { products } = useDataState();
     const { updateOrder } = useDataActions();
     const { showAlert } = useAlert();
-    const { editingOrder: originalOrder, closeDetailModal, openAddItemModal, openEditItemModal, openMemoModal } = useModals();
+    const { editingOrder: originalOrder, closeDetailModal, openAddItemModal, openEditItemModal } = useModals();
     const { openScanner } = useScanner();
     const { setLastModifiedOrderId } = useMiscUI();
 
@@ -113,7 +113,6 @@ const OrderDetailModal: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [draftLoaded, setDraftLoaded] = useState(false);
 
-    const [memo, setMemo] = useState('');
     const [productSearch, setProductSearch] = useState('');
     const debouncedProductSearch = useDebounce(productSearch, 200);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
@@ -140,14 +139,13 @@ const OrderDetailModal: React.FC = () => {
     // --- Draft Logic ---
     useEffect(() => {
         if (!originalOrder) return;
-        setMemo(originalOrder.memo || '');
         resetItems(originalOrder.items || []);
 
         getDraft<EditedOrderDraft>(originalOrder.id).then(draft => {
             if (draft) {
                 showAlert(
                     "임시 저장된 수정 내역이 있습니다.\n불러오시겠습니까?",
-                    () => { resetItems(draft.items); setMemo(draft.memo); setDraftLoaded(true); },
+                    () => { resetItems(draft.items); setDraftLoaded(true); },
                     '불러오기',
                     'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500',
                     () => { deleteDraft(originalOrder.id); setDraftLoaded(true); }
@@ -160,7 +158,6 @@ const OrderDetailModal: React.FC = () => {
     
     const originalItemsMemo = useMemo(() => normalizeItemsForComparison(originalOrder?.items || []), [originalOrder]);
     const currentItemsMemo = useMemo(() => normalizeItemsForComparison(items), [items]);
-    const originalMemo = useMemo(() => originalOrder?.memo || '', [originalOrder]);
     
     const hasChanges = useMemo(() => {
         if (!originalOrder) return false;
@@ -172,13 +169,10 @@ const OrderDetailModal: React.FC = () => {
         // 2. Check if the content (quantity, unit, memo) of any item has changed.
         if (JSON.stringify(originalItemsMemo) !== JSON.stringify(currentItemsMemo)) return true;
 
-        // 3. Check if the order-level memo has changed.
-        if (originalMemo !== memo) return true;
-
         return false;
-    }, [originalOrder, originalItemsMemo, currentItemsMemo, originalMemo, memo, items]);
+    }, [originalOrder, originalItemsMemo, currentItemsMemo, items]);
 
-    const draftDataToSave = useMemo(() => ({ items, memo }), [items, memo]);
+    const draftDataToSave = useMemo(() => ({ items }), [items]);
     const debouncedDraftData = useDebounce(draftDataToSave, 500);
 
     useEffect(() => {
@@ -266,7 +260,7 @@ const OrderDetailModal: React.FC = () => {
         if (!originalOrder || !hasChanges) return;
         setIsSaving(true);
         try {
-            const updatedOrderData = { ...originalOrder, items, itemCount: items.length, total: totalAmount, memo };
+            const updatedOrderData = { ...originalOrder, items, itemCount: items.length, total: totalAmount };
             await updateOrder(updatedOrderData);
             await deleteDraft(originalOrder.id);
             setLastModifiedOrderId(originalOrder.id);
@@ -328,10 +322,6 @@ const OrderDetailModal: React.FC = () => {
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
     }, [showAlert, removeItem]);
-
-    const handleOpenMemoModal = useCallback(() => {
-        openMemoModal({ initialMemo: memo, onSave: (newMemo) => setMemo(newMemo) });
-    }, [memo, openMemoModal]);
     
     // --- Derived Data for Rendering ---
     const filteredProducts = useMemo(() => {
@@ -461,10 +451,7 @@ const OrderDetailModal: React.FC = () => {
                             <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                         </div>
                         {!isCompleted && (
-                             <div className="grid grid-cols-4 gap-2">
-                                <button onClick={handleOpenMemoModal} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
-                                    <span>메모</span>
-                                </button>
+                             <div className="grid grid-cols-3 gap-2">
                                 <button onClick={handleClose} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
                                     닫기
                                 </button>

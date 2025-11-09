@@ -153,7 +153,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                             <label htmlFor="item-memo" className="block text-sm font-medium text-gray-700 mb-1">품목 메모 (선택)</label>
                             <input
                                 id="item-memo" type="text" value={memo} onChange={(e) => setMemo(e.target.value)}
-                                placeholder="예: 월요일 도착"
+                                placeholder="예: 행사"
                                 className="w-full px-3 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-base"
                                 maxLength={50}
                             />

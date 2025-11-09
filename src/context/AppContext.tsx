@@ -36,10 +36,6 @@ export interface EditItemModalPayload {
     item: OrderItem;
     onSave: (details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => void;
 }
-export interface MemoModalPayload {
-    initialMemo: string;
-    onSave: (memo: string) => void;
-}
 
 // Data Context
 interface DataState {
@@ -102,7 +98,6 @@ interface ModalsState {
     orderToExport: Order | null;
     addItemModalProps: AddItemModalPayload | null;
     editItemModalProps: EditItemModalPayload | null;
-    memoModalProps: MemoModalPayload | null;
     isHistoryModalOpen: boolean;
     isClearHistoryModalOpen: boolean;
 }
@@ -116,8 +111,6 @@ interface ModalsActions {
     closeAddItemModal: () => void;
     openEditItemModal: (props: EditItemModalPayload) => void;
     closeEditItemModal: () => void;
-    openMemoModal: (props: MemoModalPayload) => void;
-    closeMemoModal: () => void;
     openHistoryModal: () => void;
     closeHistoryModal: () => void;
     openClearHistoryModal: () => void;
@@ -161,7 +154,7 @@ const initialModalsState: ModalsState = {
     isDetailModalOpen: false, editingOrder: null,
     isDeliveryModalOpen: false, orderToExport: null,
     addItemModalProps: null, editItemModalProps: null,
-    memoModalProps: null, isHistoryModalOpen: false,
+    isHistoryModalOpen: false,
     isClearHistoryModalOpen: false,
 };
 
@@ -668,8 +661,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         closeAddItemModal: () => setModalsState(s => ({ ...s, addItemModalProps: null })),
         openEditItemModal: (props) => setModalsState(s => ({ ...s, editItemModalProps: props })),
         closeEditItemModal: () => setModalsState(s => ({ ...s, editItemModalProps: null })),
-        openMemoModal: (props) => setModalsState(s => ({ ...s, memoModalProps: props })),
-        closeMemoModal: () => setModalsState(s => ({ ...s, memoModalProps: null })),
         openHistoryModal: () => setModalsState(s => ({ ...s, isHistoryModalOpen: true })),
         closeHistoryModal: () => setModalsState(s => ({ ...s, isHistoryModalOpen: false })),
         openClearHistoryModal: () => setModalsState(s => ({ ...s, isClearHistoryModalOpen: true })),

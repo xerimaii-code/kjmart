@@ -32,7 +32,6 @@ export interface Order {
     customer: Customer;
     itemCount: number;
     total: number;
-    memo?: string;
     completedAt?: string | null;
     completionDetails?: {
         type: 'sms' | 'xls';
@@ -51,13 +50,11 @@ export type ScannerContext = 'new-order' | 'modal' | 'product-inquiry' | null;
 export interface NewOrderDraft {
     selectedCustomer: Customer | null;
     items: OrderItem[];
-    memo: string;
     isBoxUnitDefault: boolean;
 }
 
 export interface EditedOrderDraft {
     items: OrderItem[];
-    memo: string;
 }
 
 export interface SyncLog {

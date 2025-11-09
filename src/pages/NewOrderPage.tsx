@@ -95,14 +95,13 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const { showAlert } = useAlert();
     const { openScanner } = useScanner();
     const { setLastModifiedOrderId } = useMiscUI();
-    const { openAddItemModal, openEditItemModal, openMemoModal } = useModals();
+    const { openAddItemModal, openEditItemModal } = useModals();
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
     const debouncedCustomerSearch = useDebounce(customerSearch, 200);
     const [productSearch, setProductSearch] = useState('');
     const debouncedProductSearch = useDebounce(productSearch, 200);
-    const [memo, setMemo] = useState('');
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
@@ -145,9 +144,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const draftDataToSave = useMemo(() => ({
         selectedCustomer,
         items,
-        memo,
         isBoxUnitDefault,
-    }), [selectedCustomer, items, memo, isBoxUnitDefault]);
+    }), [selectedCustomer, items, isBoxUnitDefault]);
 
     const debouncedDraftData = useDebounce(draftDataToSave, 500);
 
@@ -159,7 +157,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                     setCustomerSearch(draft.selectedCustomer.name);
                 }
                 resetItems(draft.items);
-                setMemo(draft.memo);
                 setIsBoxUnitDefault(draft.isBoxUnitDefault);
                 setShowDraftLoadedToast(true);
                 setTimeout(() => setShowDraftLoadedToast(false), 3000);
@@ -174,7 +171,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     useEffect(() => {
         if (isDraftLoading) return;
 
-        if (debouncedDraftData.selectedCustomer || debouncedDraftData.items.length > 0 || debouncedDraftData.memo) {
+        if (debouncedDraftData.selectedCustomer || debouncedDraftData.items.length > 0) {
             saveDraft(DRAFT_KEY, debouncedDraftData as NewOrderDraft)
                 .catch(err => console.warn("Could not save new order draft:", err));
         } else {
@@ -268,7 +265,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         setCustomerSearch('');
         setProductSearch('');
         resetItems();
-        setMemo('');
         setIsBoxUnitDefault(false);
 
         if (options?.preventFocus) {
@@ -309,7 +305,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                 customer: selectedCustomer,
                 items,
                 total: totalAmount,
-                memo: memo.trim(),
             });
             setLastModifiedOrderId(newOrderId);
             
@@ -324,7 +319,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         } finally {
             setIsSaving(false);
         }
-    }, [selectedCustomer, items, totalAmount, memo, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
+    }, [selectedCustomer, items, totalAmount, addOrder, setLastModifiedOrderId, resetOrder, showAlert]);
 
     const handleAddProductFromSearch = useCallback((product: Product) => {
         const existingItem = items.find(item => item.barcode === product.barcode);
@@ -380,13 +375,6 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
             onSave: (updatedDetails) => updateItem(item.barcode, updatedDetails)
         });
     }, [openEditItemModal, updateItem]);
-
-    const handleOpenMemoModal = useCallback(() => {
-        openMemoModal({
-            initialMemo: memo,
-            onSave: (newMemo) => setMemo(newMemo),
-        });
-    }, [memo, openMemoModal]);
 
     if (isDraftLoading) {
         return (
@@ -512,10 +500,7 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                         <span className="text-lg text-gray-600">총 합계:</span>
                         <span className="text-2xl text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                     </div>
-                    <div className="grid grid-cols-5 gap-2">
-                         <button onClick={handleOpenMemoModal} className="h-11 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
-                            <span>메모</span>
-                        </button>
+                    <div className="grid grid-cols-4 gap-2">
                         <button onClick={handleResetOrder} className="h-11 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95 col-span-1">
                             <span>삭제</span>
                         </button>

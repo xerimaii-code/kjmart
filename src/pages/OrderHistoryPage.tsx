@@ -97,7 +97,6 @@ const OrderRow = memo(({
                             <p className="font-semibold text-gray-800 text-base flex items-center" title={order.customer.name}>
                                 {getStatusIcon(order, hasDraft)}
                                 <span className="truncate">{order.customer.name}</span>
-                                {order.memo && order.memo.trim() && <ChatBubbleLeftIcon className="w-5 h-5 text-gray-400 ml-2 flex-shrink-0" title="메모 있음" />}
                             </p>
                             <div className="text-sm text-gray-500 mt-1">
                                 <span>{new Date(order.date).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</span>
