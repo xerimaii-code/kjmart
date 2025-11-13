@@ -398,7 +398,7 @@ export const exportReturnToPDF = async (order: Order) => {
         await Promise.all([loadScript(JSPDF_CDN), loadScript(JSBARCODE_CDN)]);
         
         // This assumes the font is placed in the public/fonts directory
-        const fontResponse = await fetch('/fonts/NanumGothic-Regular.ttf');
+        const fontResponse = await fetch('/fonts/NanumGothicLight.ttf');
         if (!fontResponse.ok) {
             throw new Error('나눔고딕 폰트 파일을 불러오는 데 실패했습니다. 파일이 public/fonts/ 에 있는지 확인해주세요.');
         }
@@ -416,14 +416,14 @@ export const exportReturnToPDF = async (order: Order) => {
         const { jsPDF } = (window as any).jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
 
-        doc.addFileToVFS('NanumGothic-Regular.ttf', fontBase64);
-        doc.addFont('NanumGothic-Regular.ttf', 'NanumGothic', 'normal');
+        doc.addFileToVFS('NanumGothicLight.ttf', fontBase64);
+        doc.addFont('NanumGothicLight.ttf', 'NanumGothic', 'normal');
         doc.setFont('NanumGothic');
 
         const PAGE_WIDTH = doc.internal.pageSize.getWidth();
         const PAGE_HEIGHT = doc.internal.pageSize.getHeight();
         const MARGIN = 10;
-        const HEADER_HEIGHT = 20;
+        const HEADER_HEIGHT = 22; // Increased for more header space
         const FOOTER_HEIGHT = 10;
         const MAX_WIDTH = PAGE_WIDTH - MARGIN * 2;
         const COL_COUNT = 3;
@@ -473,7 +473,7 @@ export const exportReturnToPDF = async (order: Order) => {
             doc.setFontSize(10);
             const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
             doc.text(`날짜: ${today}`, MARGIN, MARGIN + 12);
-            doc.text(`거래처: ${order.customer.name}`, MARGIN, MARGIN + 16);
+            doc.text(`거래처: ${order.customer.name}`, MARGIN, MARGIN + 18); // Increased Y for spacing
             
             let totalText;
             if (pageIndex === 0 && totalPages > 1) {
@@ -483,7 +483,7 @@ export const exportReturnToPDF = async (order: Order) => {
             } else {
                  totalText = `합계: ${order.total.toLocaleString('ko-KR')} 원`;
             }
-            doc.text(totalText, PAGE_WIDTH - MARGIN, MARGIN + 16, { align: 'right' });
+            doc.text(totalText, PAGE_WIDTH - MARGIN, MARGIN + 18, { align: 'right' }); // Increased Y for spacing
             
             doc.setDrawColor(100, 100, 100);
             doc.setLineWidth(0.2);
