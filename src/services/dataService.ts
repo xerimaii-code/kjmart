@@ -431,7 +431,7 @@ async function loadKoreanFontForPdf(): Promise<string> {
 }
 
 
-export const exportReturnToPDF = async (order: Order) => {
+export const exportReturnToPDF = async (order: Order): Promise<{ file: File, blobUrl: string }> => {
     try {
         await Promise.all([loadScript(JSPDF_CDN), loadScript(JSBARCODE_CDN)]);
         
@@ -439,8 +439,7 @@ export const exportReturnToPDF = async (order: Order) => {
         const fontBase64 = await loadKoreanFontForPdf();
 
         if (!order.items || order.items.length === 0) {
-            alert("내보낼 품목이 없습니다.");
-            return;
+            throw new Error("내보낼 품목이 없습니다.");
         }
     
         const { jsPDF } = (window as any).jspdf;
@@ -602,10 +601,15 @@ export const exportReturnToPDF = async (order: Order) => {
         }
 
         const fileName = `반품서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.pdf`;
-        doc.save(fileName);
+        
+        const pdfBlob = doc.output('blob');
+        const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(file);
+        
+        return { file, blobUrl };
 
     } catch (error) {
         console.error("PDF 생성 중 오류 발생:", error);
-        alert(`PDF 내보내기에 실패했습니다: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`PDF 내보내기에 실패했습니다: ${error instanceof Error ? error.message : String(error)}`);
     }
 };

@@ -403,6 +403,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                 break;
             case 'return':
                 (async () => {
+                    let blobUrl: string | null = null;
                     try {
                         const items = await db.getOrderItems(order.id);
                         if (items.length === 0) {
@@ -410,90 +411,100 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                             return;
                         }
                         const orderWithItems = { ...order, items };
-                        await exportReturnToPDF(orderWithItems);
-                        showToast('반품 PDF가 저장되었습니다.', 'success');
+                        const pdfData = await exportReturnToPDF(orderWithItems);
+                        blobUrl = pdfData.blobUrl;
+
+                        const link = document.createElement('a');
+                        link.href = blobUrl;
+                        link.download = pdfData.file.name;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        
+                        showToast('반품서 PDF 파일이 다운로드되었습니다.', 'success');
+                        
                         const timestamp = new Date().toISOString();
                         updateOrderStatus(order.id, { type: 'return', timestamp });
+
                     } catch (error) {
-                        console.error("Failed to generate return PDF:", error);
-                        showAlert("반품 PDF 생성에 실패했습니다.");
+                        if (error instanceof Error) {
+                            showAlert(error.message);
+                        } else {
+                            console.error('PDF export failed', error);
+                            showAlert('PDF 내보내기에 실패했습니다.');
+                        }
+                    } finally {
+                        if (blobUrl) {
+                            URL.revokeObjectURL(blobUrl);
+                        }
                     }
                 })();
                 break;
         }
     }, [ordersMap, showAlert, deleteOrder, updateOrderStatus, openDeliveryModal, showToast]);
 
+
     return (
         <div className="h-full flex flex-col bg-white">
-            <div className="sticky top-0 z-10 p-3 bg-white border-b border-gray-200">
-                <div className="flex flex-wrap justify-end items-center gap-x-4 gap-y-2 max-w-2xl mx-auto w-full">
-                    <div className="flex items-center gap-2 text-sm w-full sm:w-auto justify-end">
-                        <input type="date" value={customStartDate} onChange={handleStartDateChange} className="p-2 border border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="시작일" />
-                        <span className="text-gray-500 font-semibold">~</span>
-                        <input type="date" value={customEndDate} onChange={handleEndDateChange} className="p-2 border border-gray-200 rounded-lg text-gray-700 flex-1 sm:flex-initial bg-white" aria-label="종료일" />
-                    </div>
+            <div className="fixed-filter w-full p-2 bg-white border-b border-gray-200 z-20">
+                <div className="flex items-center justify-center gap-2 max-w-2xl mx-auto">
+                    <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={handleStartDateChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg text-gray-700 bg-white"
+                        aria-label="시작일"
+                    />
+                    <span className="text-gray-500 font-semibold">~</span>
+                    <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={handleEndDateChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg text-gray-700 bg-white"
+                        aria-label="종료일"
+                    />
                 </div>
             </div>
-
-            <div ref={listRef} className="scrollable-content flex-grow">
+             <div ref={listRef} className="scrollable-content">
                 {isLoading ? (
-                    <div className="flex items-center justify-center h-full pt-16">
+                    <div className="flex items-center justify-center h-full">
                         <SpinnerIcon className="w-10 h-10 text-blue-500" />
                     </div>
-                ) : orders.length === 0 ? (
-                    <div className="p-3 flex flex-col items-center justify-center h-full text-gray-400 pt-16 text-center">
-                        <ArchiveBoxIcon className="w-16 h-16 text-gray-300 mb-4" />
-                        <p className="text-lg font-semibold">선택한 기간에 발주 내역이 없습니다</p>
-                        <p className="text-sm mt-1">다른 기간을 선택하거나 신규 발주를 생성해보세요.</p>
+                ) : groupedOrders.length === 0 ? (
+                    <div className="text-center p-8 text-gray-500 pt-16">
+                        <p className="font-semibold text-lg">발주 내역이 없습니다.</p>
+                        <p className="text-sm mt-1">기간을 변경하거나 신규 발주를 생성해주세요.</p>
                     </div>
                 ) : (
-                    <>
-                        <div className="p-3 space-y-4 max-w-2xl mx-auto w-full">
-                            {groupedOrders.map(group => {
-                                const isGroupActive = group.orders.some(order => order.id === activeMenuOrderId);
-                                return (
-                                    <div key={group.date} className={`${isGroupActive ? 'relative z-10' : ''}`}>
-                                        <div className="flex justify-between items-center p-4 bg-gray-100">
-                                            <h3 className="font-semibold text-gray-800 text-base" id={`date-header-${group.date}`}>
-                                                {new Date(group.date).toLocaleDateString('ko-KR', {
-                                                    year: 'numeric',
-                                                    month: 'long',
-                                                    day: 'numeric',
-                                                    weekday: 'short',
-                                                })}
-                                            </h3>
-                                            <p className="text-sm text-gray-600 font-semibold">{group.orders.length}건 &middot; <span className="font-bold text-gray-800">{group.total.toLocaleString('ko-KR')} 원</span></p>
-                                        </div>
-                                        <div className="divide-y divide-gray-200">
-                                            {group.orders.map(order => (
-                                                <OrderRow
-                                                    key={order.id}
-                                                    order={order}
-                                                    isHighlighted={order.id === lastModifiedOrderId}
-                                                    isMenuOpen={activeMenuOrderId === order.id}
-                                                    hasDraft={draftKeys.has(order.id)}
-                                                    onCardClick={handleCardClick}
-                                                    onMenuToggle={handleMenuToggle}
-                                                    onMenuAction={handleMenuAction}
-                                                    index={visibleOrders.findIndex(o => o.id === order.id)}
-                                                />
-                                            ))}
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                        
-                        {/* Sentinel for infinite scroll */}
-                        <div ref={observerRef} style={{ height: '1px' }} />
-
-                        {/* Loading indicator at the bottom */}
-                        {isActive && !isLoading && orders.length > 0 && visibleCount < orders.length && (
-                            <div className="flex justify-center items-center p-4">
-                                <SpinnerIcon className="w-8 h-8 text-blue-500" />
+                    <div className="max-w-2xl mx-auto w-full">
+                        {groupedOrders.map(({ date, orders: dayOrders, total }) => (
+                            <div key={date} className="mb-2">
+                                <div className="sticky top-0 z-10 bg-gray-100 px-4 py-2 flex justify-between items-center border-b border-t border-gray-200">
+                                    <h3 className="font-bold text-gray-800">
+                                        {new Date(date + 'T00:00:00').toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+                                    </h3>
+                                    <span className="font-semibold text-gray-600 text-sm">{total.toLocaleString()} 원</span>
+                                </div>
+                                <div className="divide-y divide-gray-200">
+                                    {dayOrders.map((order, index) => (
+                                        <OrderRow
+                                            key={order.id}
+                                            order={order}
+                                            isHighlighted={order.id === lastModifiedOrderId}
+                                            isMenuOpen={activeMenuOrderId === order.id}
+                                            hasDraft={draftKeys.has(order.id)}
+                                            onCardClick={handleCardClick}
+                                            onMenuToggle={handleMenuToggle}
+                                            onMenuAction={handleMenuAction}
+                                            index={index}
+                                        />
+                                    ))}
+                                </div>
                             </div>
-                        )}
-                    </>
+                        ))}
+                        {/* Sentinel element for infinite scroll */}
+                        <div ref={observerRef} style={{ height: '1px' }} />
+                    </div>
                 )}
             </div>
         </div>

@@ -89,6 +89,8 @@ interface AlertState {
     onCancel?: () => void;
     confirmText?: string;
     confirmButtonClass?: string;
+    cancelText?: string;
+    onClose?: () => void;
 }
 
 interface ModalsState {
@@ -142,7 +144,7 @@ interface PWAInstallState {
     triggerInstallPrompt: () => void;
 }
 
-const AlertContext = createContext<((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => void) | undefined>(undefined);
+const AlertContext = createContext<((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void, cancelText?: string, onClose?: () => void) => void) | undefined>(undefined);
 const ToastContext = createContext<((message: string, type: 'success' | 'error') => void) | undefined>(undefined);
 const ModalsContext = createContext<(ModalsState & ModalsActions) | undefined>(undefined);
 const MiscUIContext = createContext<(MiscUIState & MiscUIActions) | undefined>(undefined);
@@ -203,13 +205,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const deferredInstallPrompt = useRef<any>(null);
 
     // --- Alert & Toast Actions ---
-    const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void) => {
-        setAlertState({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel });
+    const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void, cancelText?: string, onClose?: () => void) => {
+        setAlertState({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel, cancelText, onClose });
     }, []);
 
     const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
         setToastState({ isOpen: true, message, type });
     }, []);
+    
+    const closeAlert = useCallback(() => {
+        if (alertState.onClose) {
+            alertState.onClose();
+        }
+        setAlertState({ isOpen: false, message: '' });
+    }, [alertState]);
 
     // --- Data Actions ---
     const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'itemCount' | 'completedAt' | 'completionDetails' | 'items'> & { items: OrderItem[] }) => {
@@ -616,7 +625,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSyncProgress(65);
 
                 const finalProductKey = await syncDataTypeOp('products', lastSyncKeysRef.current?.products, 65, 95);
-                
                 setSyncStatusText("상품 실시간 연결 설정");
                 unsubscribers.push(
                     listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
@@ -625,64 +633,44 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     })
                 );
                 
-                clearTimeout(syncTimeout);
-
-                const retentionDays = loadedSettings.logRetentionDays;
-                if (typeof retentionDays === 'number' && retentionDays > 0) {
-                    Promise.all([
-                        cleanupSyncLogs('customers', retentionDays),
-                        cleanupSyncLogs('products', retentionDays)
-                    ]).catch(err => console.warn("Background log cleanup failed on startup:", err));
+                // Final automated log cleanup
+                if (loadedSettings.logRetentionDays > 0) {
+                    setSyncStatusText("오래된 로그 정리");
+                    await Promise.all([
+                        cleanupSyncLogs('customers', loadedSettings.logRetentionDays),
+                        cleanupSyncLogs('products', loadedSettings.logRetentionDays)
+                    ]).catch(e => console.warn("Log cleanup failed during init:", e));
                 }
-
+                
                 setSyncProgress(100);
                 setSyncStatusText("앱 시작 준비 완료");
+                clearTimeout(syncTimeout);
+                
+                // A tiny delay before hiding the loader for smoother UI transition.
                 setTimeout(() => {
                     setInitialSyncCompleted(true);
                     setIsSyncing(false);
                 }, 300);
-    
+
             } catch (error) {
-                console.error("Sync failed:", error);
+                console.error("Initial data sync failed:", error);
                 showAlert("데이터 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
                 clearTimeout(syncTimeout);
-                setInitialSyncCompleted(true);
+                setInitialSyncCompleted(true); // Allow app to start with cached data
                 setIsSyncing(false);
             }
         };
     
         runInitialSync();
     
+        // Cleanup listeners on component unmount or user change
         return () => {
+            unsubscribers.forEach(unsubscribe => unsubscribe());
             clearTimeout(syncTimeout);
-            unsubscribers.forEach(unsub => unsub());
         };
-    }, [user, showAlert, showToast]);
+    }, [user]);
 
-
-    // --- Modal Actions ---
-    const modalsActions = useMemo<ModalsActions>(() => ({
-        openDetailModal: (order) => setModalsState(s => ({ ...s, isDetailModalOpen: true, editingOrder: order })),
-        closeDetailModal: () => setModalsState(s => ({ ...s, isDetailModalOpen: false, editingOrder: null })),
-        openDeliveryModal: (order) => setModalsState(s => ({ ...s, isDeliveryModalOpen: true, orderToExport: order })),
-        closeDeliveryModal: () => setModalsState(s => ({ ...s, isDeliveryModalOpen: false, orderToExport: null })),
-        openAddItemModal: (props) => setModalsState(s => ({ ...s, addItemModalProps: props })),
-        closeAddItemModal: () => setModalsState(s => ({ ...s, addItemModalProps: null })),
-        openEditItemModal: (props) => setModalsState(s => ({ ...s, editItemModalProps: props })),
-        closeEditItemModal: () => setModalsState(s => ({ ...s, editItemModalProps: null })),
-        openHistoryModal: () => setModalsState(s => ({ ...s, isHistoryModalOpen: true })),
-        closeHistoryModal: () => setModalsState(s => ({ ...s, isHistoryModalOpen: false })),
-        openClearHistoryModal: () => setModalsState(s => ({ ...s, isClearHistoryModalOpen: true })),
-        closeClearHistoryModal: () => setModalsState(s => ({ ...s, isClearHistoryModalOpen: false })),
-    }), []);
-    
-    // --- Scanner Actions ---
-    const scannerActions = useMemo<ScannerActions>(() => ({
-        openScanner: (context, onScan, continuous) => setScannerState({ isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, continuousScan: continuous }),
-        closeScanner: () => setScannerState({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false }),
-    }), []);
-    
-    // --- PWA Install Effect ---
+    // --- PWA Install Prompt Logic ---
     useEffect(() => {
         const handler = (e: Event) => {
             e.preventDefault();
@@ -696,25 +684,61 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const triggerInstallPrompt = useCallback(() => {
         if (deferredInstallPrompt.current) {
             deferredInstallPrompt.current.prompt();
-            deferredInstallPrompt.current.userChoice.then((choiceResult: { outcome: 'accepted' | 'dismissed' }) => {
+            deferredInstallPrompt.current.userChoice.then((choiceResult: { outcome: string }) => {
                 if (choiceResult.outcome === 'accepted') {
-                    showToast('앱이 설치되었습니다!', 'success');
+                    console.log('User accepted the A2HS prompt');
+                } else {
+                    console.log('User dismissed the A2HS prompt');
                 }
                 setInstallPromptAvailable(false);
                 deferredInstallPrompt.current = null;
             });
         }
-    }, [showToast]);
+    }, []);
+    
 
-    // --- Context Values ---
-    const dataStateValue = useMemo(() => ({ customers, products }), [customers, products]);
-    const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData]);
-    const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);
-    const deviceSettingsValue = useMemo(() => ({ ...deviceSettings, ...deviceSettingsActions }), [deviceSettings, deviceSettingsActions]);
-    const modalsValue = useMemo(() => ({ ...modalsState, ...modalsActions }), [modalsState, modalsActions]);
-    const scannerValue = useMemo(() => ({ ...scannerState, ...scannerActions, scanSettings: deviceSettings.scanSettings, selectedCameraId: deviceSettings.selectedCameraId }), [scannerState, scannerActions, deviceSettings.scanSettings, deviceSettings.selectedCameraId]);
+    // --- Context Provider Values ---
+    const dataStateValue: DataState = useMemo(() => ({ customers, products }), [customers, products]);
+    const dataActionsValue: DataActions = useMemo(() => ({
+        addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData
+    }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData]);
+
+    const syncStateValue: SyncState = useMemo(() => ({
+        isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted
+    }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);
+    
+    const modalsValue = useMemo(() => ({
+        ...modalsState,
+        openDetailModal: (order: Order) => setModalsState(prev => ({ ...prev, isDetailModalOpen: true, editingOrder: order })),
+        closeDetailModal: () => setModalsState(prev => ({ ...prev, isDetailModalOpen: false, editingOrder: null })),
+        openDeliveryModal: (order: Order) => setModalsState(prev => ({ ...prev, isDeliveryModalOpen: true, orderToExport: order })),
+        closeDeliveryModal: () => setModalsState(prev => ({ ...prev, isDeliveryModalOpen: false, orderToExport: null })),
+        openAddItemModal: (props: AddItemModalPayload) => setModalsState(prev => ({ ...prev, addItemModalProps: props })),
+        closeAddItemModal: () => setModalsState(prev => ({ ...prev, addItemModalProps: null })),
+        openEditItemModal: (props: EditItemModalPayload) => setModalsState(prev => ({ ...prev, editItemModalProps: props })),
+        closeEditItemModal: () => setModalsState(prev => ({ ...prev, editItemModalProps: null })),
+        openHistoryModal: () => setModalsState(prev => ({ ...prev, isHistoryModalOpen: true })),
+        closeHistoryModal: () => setModalsState(prev => ({ ...prev, isHistoryModalOpen: false })),
+        openClearHistoryModal: () => setModalsState(prev => ({ ...prev, isClearHistoryModalOpen: true })),
+        closeClearHistoryModal: () => setModalsState(prev => ({ ...prev, isClearHistoryModalOpen: false })),
+    }), [modalsState]);
+
+    const scannerValue = useMemo(() => ({
+        ...scannerState,
+        selectedCameraId: deviceSettings.selectedCameraId,
+        scanSettings: deviceSettings.scanSettings,
+        openScanner: (context: ScannerContextType, onScan: (barcode: string) => void, continuous: boolean) => setScannerState({ isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, continuousScan: continuous }),
+        closeScanner: () => setScannerState({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false }),
+    }), [scannerState, deviceSettings.selectedCameraId, deviceSettings.scanSettings]);
+    
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
+    
     const pwaInstallValue = useMemo(() => ({ isInstallPromptAvailable, triggerInstallPrompt }), [isInstallPromptAvailable, triggerInstallPrompt]);
+
+    const deviceSettingsValue = useMemo(() => ({
+        ...deviceSettings,
+        ...deviceSettingsActions
+    }), [deviceSettings, deviceSettingsActions]);
 
     return (
         <DataStateContext.Provider value={dataStateValue}>
@@ -723,17 +747,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     <DeviceSettingsContext.Provider value={deviceSettingsValue}>
                         <ModalsContext.Provider value={modalsValue}>
                             <ScannerContext.Provider value={scannerValue}>
-                                <MiscUIContext.Provider value={miscUIValue}>
-                                    <AlertContext.Provider value={showAlert}>
-                                        <ToastContext.Provider value={showToast}>
+                                <AlertContext.Provider value={showAlert}>
+                                    <ToastContext.Provider value={showToast}>
+                                        <MiscUIContext.Provider value={miscUIValue}>
                                             <PWAInstallContext.Provider value={pwaInstallValue}>
                                                 {children}
-                                                <AlertModal {...alertState} onClose={() => setAlertState(s => ({ ...s, isOpen: false }))} />
-                                                <Toast {...toastState} onClose={() => setToastState(s => ({ ...s, isOpen: false }))} />
+                                                <AlertModal {...alertState} closeHandler={closeAlert} />
+                                                <Toast {...toastState} onClose={() => setToastState(prev => ({ ...prev, isOpen: false }))} />
                                             </PWAInstallContext.Provider>
-                                        </ToastContext.Provider>
-                                    </AlertContext.Provider>
-                                </MiscUIContext.Provider>
+                                        </MiscUIContext.Provider>
+                                    </ToastContext.Provider>
+                                </AlertContext.Provider>
                             </ScannerContext.Provider>
                         </ModalsContext.Provider>
                     </DeviceSettingsContext.Provider>
@@ -744,35 +768,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 };
 
 // --- Custom Hooks ---
-
-export const useDataState = (): DataState => {
+export const useDataState = () => {
     const context = useContext(DataStateContext);
     if (context === undefined) throw new Error('useDataState must be used within an AppProvider');
     return context;
 };
 
-export const useDataActions = (): DataActions => {
+export const useDataActions = () => {
     const context = useContext(DataActionsContext);
     if (context === undefined) throw new Error('useDataActions must be used within an AppProvider');
     return context;
 };
 
-export const useSyncState = (): SyncState => {
+export const useSyncState = () => {
     const context = useContext(SyncStateContext);
     if (context === undefined) throw new Error('useSyncState must be used within an AppProvider');
     return context;
 };
 
-export const useDeviceSettings = (): DeviceSettings & DeviceSettingsActions => {
+export const useDeviceSettings = () => {
     const context = useContext(DeviceSettingsContext);
     if (context === undefined) throw new Error('useDeviceSettings must be used within an AppProvider');
-    return context;
-};
-
-
-export const useModals = (): ModalsState & ModalsActions => {
-    const context = useContext(ModalsContext);
-    if (context === undefined) throw new Error('useModals must be used within an AppProvider');
     return context;
 };
 
@@ -783,19 +799,26 @@ export const useAlert = () => {
     return { showAlert, showToast };
 };
 
-export const useMiscUI = (): MiscUIState & MiscUIActions => {
+export const useModals = () => {
+    const context = useContext(ModalsContext);
+    if (context === undefined) throw new Error('useModals must be used within an AppProvider');
+    return context;
+};
+
+export const useScanner = () => {
+    const context = useContext(ScannerContext);
+    if (context === undefined) throw new Error('useScanner must be used within an AppProvider');
+    const deviceSettings = useDeviceSettings();
+    return { ...context, selectedCameraId: deviceSettings.selectedCameraId, scanSettings: deviceSettings.scanSettings };
+};
+
+export const useMiscUI = () => {
     const context = useContext(MiscUIContext);
     if (context === undefined) throw new Error('useMiscUI must be used within an AppProvider');
     return context;
 };
 
-export const useScanner = (): ScannerState & ScannerActions & { scanSettings: DeviceSettings['scanSettings'], selectedCameraId: string | null } => {
-    const context = useContext(ScannerContext);
-    if (context === undefined) throw new Error('useScanner must be used within an AppProvider');
-    return context as any;
-};
-
-export const usePWAInstall = (): PWAInstallState => {
+export const usePWAInstall = () => {
     const context = useContext(PWAInstallContext);
     if (context === undefined) throw new Error('usePWAInstall must be used within an AppProvider');
     return context;

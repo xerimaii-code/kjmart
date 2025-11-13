@@ -3,14 +3,15 @@ import React, { useState, useEffect } from 'react';
 interface AlertModalProps {
     isOpen: boolean;
     message: string;
-    onClose: () => void;
+    closeHandler: () => void;
     onConfirm?: () => void;
     onCancel?: () => void;
     confirmText?: string;
+    cancelText?: string;
     confirmButtonClass?: string;
 }
 
-const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onConfirm, onCancel, confirmText, confirmButtonClass }) => {
+const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, closeHandler, onConfirm, onCancel, confirmText, cancelText, confirmButtonClass }) => {
     const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
@@ -28,20 +29,21 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
         if (onConfirm) {
             onConfirm();
         }
-        onClose();
+        closeHandler();
     };
     
     const handleCancel = () => {
         if (onCancel) {
             onCancel();
         }
-        onClose();
+        closeHandler();
     };
 
     return (
-        <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title">
+        <div className={`fixed inset-0 bg-black z-50 flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title" onClick={closeHandler}>
             <div
                 className={`bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                onClick={e => e.stopPropagation()}
             >
                 <div className="p-8 text-center">
                     <p id="alert-dialog-title" className="text-lg text-slate-800 whitespace-pre-line font-medium leading-relaxed">{message}</p>
@@ -53,7 +55,7 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
                                 onClick={handleCancel}
                                 className="px-6 py-3 rounded-lg font-bold text-slate-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-75 transition-transform active:scale-95"
                             >
-                                취소
+                                {cancelText || '취소'}
                             </button>
                             <button
                                 onClick={handleConfirm}
@@ -64,7 +66,7 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, onClose, onCon
                         </>
                     ) : (
                         <button
-                            onClick={onClose}
+                            onClick={closeHandler}
                             className="bg-blue-500 text-white w-full px-6 py-3 rounded-lg font-bold hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-transform active:scale-95"
                         >
                             확인
