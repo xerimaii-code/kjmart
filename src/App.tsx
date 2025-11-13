@@ -1,5 +1,5 @@
 import React, { useState, lazy, Suspense, useRef, useMemo, useEffect } from 'react';
-import { AppProvider, useModals, useScanner, useSyncState, useDataState, useDataActions } from './context/AppContext';
+import { AppProvider, useModals, useScanner, useSyncState, useDataState, useDataActions, useAlert } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import Header from './components/Header';
@@ -166,6 +166,7 @@ const AppContent: React.FC = () => {
      } = useModals();
     const { isScannerOpen, onScanSuccess, closeScanner } = useScanner();
     const { updateOrderStatus } = useDataActions();
+    const { showToast } = useAlert();
     
     const swipeContainerRef = useRef<HTMLDivElement>(null);
     const activePageIndex = useMemo(() => pages.indexOf(activePage), [activePage]);
@@ -175,6 +176,7 @@ const AppContent: React.FC = () => {
             exportToXLS(orderToExport, deliveryType);
             const timestamp = new Date().toISOString();
             updateOrderStatus(orderToExport.id, { type: 'xls', timestamp });
+            showToast(`${orderToExport.customer.name} 발주서가 XLS 파일로 저장되었습니다.`, 'success');
         }
         closeDeliveryModal();
     };

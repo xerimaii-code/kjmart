@@ -379,6 +379,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                     }
                     const smsBody = exportToSMS(orderWithItems);
                     const encodedSmsBody = encodeURIComponent(smsBody);
+                    showToast('SMS 메시지가 준비되었습니다.', 'success');
                     window.location.href = `sms:?body=${encodedSmsBody}`;
                     const timestamp = new Date().toISOString();
                     updateOrderStatus(order.id, { type: 'sms', timestamp });
@@ -402,7 +403,6 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                 break;
             case 'return':
                 (async () => {
-                    showToast("반품 PDF를 생성 중입니다...", 'success');
                     try {
                         const items = await db.getOrderItems(order.id);
                         if (items.length === 0) {
@@ -411,6 +411,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                         }
                         const orderWithItems = { ...order, items };
                         await exportReturnToPDF(orderWithItems);
+                        showToast('반품 PDF가 저장되었습니다.', 'success');
                         const timestamp = new Date().toISOString();
                         updateOrderStatus(order.id, { type: 'return', timestamp });
                     } catch (error) {
