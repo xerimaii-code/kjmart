@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
 import { OrderItem, Product, EditedOrderDraft } from '../types';
-import { RemoveIcon, ChatBubbleLeftIcon, SpinnerIcon, BarcodeScannerIcon, DocumentTextIcon } from './Icons';
+import { RemoveIcon, ChatBubbleLeftIcon, SpinnerIcon, BarcodeScannerIcon } from './Icons';
 import ToggleSwitch from './ToggleSwitch';
 import { isSaleActive, useOrderManager } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';

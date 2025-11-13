@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { useDataActions, useAlert, useModals, useMiscUI } from '../context/AppContext';
 import { Order } from '../types';
-import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon, SpinnerIcon } from '../components/Icons';
-import { exportToSMS } from '../services/dataService';
+import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon, SpinnerIcon, ReturnBoxIcon } from '../components/Icons';
+import { exportToSMS, exportReturnToPDF } from '../services/dataService';
 import { getAllDraftKeys } from '../services/draftDbService';
 import * as db from '../services/dbService';
 
@@ -30,6 +30,9 @@ const getStatusIcon = (order: Order, hasDraft: boolean) => {
     }
     if (details?.type === 'xls') {
         return <XlsIcon className="w-5 h-5 text-blue-500 mr-2 flex-shrink-0" title={`XLS 완료: ${localeTimestamp}`} />;
+    }
+    if (details?.type === 'return') {
+        return <ReturnBoxIcon className="w-5 h-5 text-purple-500 mr-2 flex-shrink-0" title={`반품 PDF 완료: ${localeTimestamp}`} />;
     }
     if (order.completedAt) {
          return <ArchiveBoxIcon className="w-5 h-5 text-gray-500 mr-2 flex-shrink-0" title={`완료: ${localeTimestamp}`} />;
@@ -71,6 +74,7 @@ const OrderRow = memo(({
         } else {
             menuItems.push({ id: 'sms', label: 'SMS로 내보내기', icon: <SmsIcon className="w-5 h-5" /> });
             menuItems.push({ id: 'xls', label: 'XLS로 내보내기', icon: <XlsIcon className="w-5 h-5" /> });
+            menuItems.push({ id: 'return', label: '반품 내보내기 (PDF)', icon: <ReturnBoxIcon className="w-5 h-5" /> });
         }
         menuItems.push({ id: 'delete', label: '삭제', icon: <TrashIcon className="w-5 h-5" />, className: 'text-red-600' });
         return menuItems;
@@ -118,7 +122,7 @@ const OrderRow = memo(({
             </div>
 
             {isMenuOpen && (
-                <div className="absolute top-12 right-4 w-52 bg-white rounded-xl shadow-lg border border-gray-200/60 z-20 py-2 animate-fade-in-down" onClick={(e) => e.stopPropagation()}>
+                <div className="absolute top-12 right-4 w-56 bg-white rounded-xl shadow-lg border border-gray-200/60 z-20 py-2 animate-fade-in-down" onClick={(e) => e.stopPropagation()}>
                     {actionMenuItems.map(item => (
                         <button
                             key={item.id}
@@ -141,7 +145,7 @@ OrderRow.displayName = 'OrderRow';
 
 const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const { deleteOrder, updateOrderStatus } = useDataActions();
-    const { showAlert } = useAlert();
+    const { showAlert, showToast } = useAlert();
     const { openDetailModal, openDeliveryModal } = useModals();
     const { lastModifiedOrderId, setLastModifiedOrderId } = useMiscUI();
 
@@ -396,8 +400,27 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                     }
                 })();
                 break;
+            case 'return':
+                (async () => {
+                    showToast("반품 PDF를 생성 중입니다...", 'success');
+                    try {
+                        const items = await db.getOrderItems(order.id);
+                        if (items.length === 0) {
+                            showAlert("품목이 없어 내보낼 수 없습니다.");
+                            return;
+                        }
+                        const orderWithItems = { ...order, items };
+                        await exportReturnToPDF(orderWithItems);
+                        const timestamp = new Date().toISOString();
+                        updateOrderStatus(order.id, { type: 'return', timestamp });
+                    } catch (error) {
+                        console.error("Failed to generate return PDF:", error);
+                        showAlert("반품 PDF 생성에 실패했습니다.");
+                    }
+                })();
+                break;
         }
-    }, [ordersMap, showAlert, deleteOrder, updateOrderStatus, openDeliveryModal]);
+    }, [ordersMap, showAlert, deleteOrder, updateOrderStatus, openDeliveryModal, showToast]);
 
     return (
         <div className="h-full flex flex-col bg-white">

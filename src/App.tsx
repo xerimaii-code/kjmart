@@ -308,24 +308,26 @@ const App: React.FC = () => {
         loadScript(ZXING_CDN).catch(err => console.warn("Failed to preload scanner library:", err));
 
         // Register the service worker.
-        const registerServiceWorker = () => {
-            const swUrl = `${location.origin}/service-worker.js`;
-            navigator.serviceWorker.register(swUrl)
-              .then(registration => {
-                console.log('Service Worker registered successfully with scope:', registration.scope);
-              })
-              .catch(err => {
-                console.error('Service Worker registration failed:', err);
-              });
-        };
-        
         if ('serviceWorker' in navigator) {
-            // The 'load' event may have already fired. We check the document.readyState.
-            // Since this useEffect runs after the app is mounted, it's very likely to be 'complete'.
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-              registerServiceWorker();
+            const registerSW = () => {
+                // Construct an absolute URL for the service worker to avoid cross-origin issues
+                // that can occur in sandboxed environments like AI Studio's iframes.
+                const swUrl = `${window.location.origin}/service-worker.js`;
+                navigator.serviceWorker.register(swUrl)
+                  .then(registration => {
+                    console.log('Service Worker registered successfully with scope:', registration.scope);
+                  })
+                  .catch(err => {
+                    console.error('Service Worker registration failed:', err);
+                  });
+            };
+
+            // If the page is already loaded, register the service worker immediately.
+            // Otherwise, wait for the 'load' event. This prevents the "invalid state" error.
+            if (document.readyState === 'complete') {
+                registerSW();
             } else {
-              window.addEventListener('load', registerServiceWorker);
+                window.addEventListener('load', registerSW, { once: true });
             }
         }
     }, []);

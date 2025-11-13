@@ -34,7 +34,7 @@ export interface Order {
     total: number;
     completedAt?: string | null;
     completionDetails?: {
-        type: 'sms' | 'xls';
+        type: 'sms' | 'xls' | 'return';
         timestamp: string;
     } | null;
     // This is an optional property used to temporarily attach items after fetching them

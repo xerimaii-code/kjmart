@@ -447,7 +447,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     
         const runInitialSync = async () => {
-            const forceFullSyncFlag = localStorage.getItem('forceFullSyncOnNextLoad') === 'true';
+            let forceFullSyncFlag = false;
+            try {
+                forceFullSyncFlag = localStorage.getItem('forceFullSyncOnNextLoad') === 'true';
+            } catch (e) {
+                console.warn("Could not access localStorage to check for force sync flag:", e);
+            }
 
             if (IS_DEVELOPER_MODE && !forceFullSyncFlag) {
                 console.warn('%c[DEV MODE] Minimal data sync is active.', 'color: orange; font-weight: bold;');
@@ -507,7 +512,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
             // This is now the full sync logic
             if (forceFullSyncFlag) {
-                localStorage.removeItem('forceFullSyncOnNextLoad');
+                try {
+                    localStorage.removeItem('forceFullSyncOnNextLoad');
+                } catch (e) {
+                     console.warn("Could not remove force sync flag from localStorage:", e);
+                }
                 showToast("강제 전체 동기화를 시작합니다.", 'success');
             }
 

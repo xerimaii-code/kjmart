@@ -2,6 +2,8 @@ import { Customer, Order, Product, OrderItem } from "../types";
 
 // Assuming these libraries are loaded from CDN
 declare const XLSX: any;
+declare const jsPDF: any;
+declare const JsBarcode: any;
 
 const loadedScripts: { [src: string]: Promise<void> } = {};
 
@@ -34,6 +36,8 @@ export const loadScript = (src: string): Promise<void> => {
 };
 
 const XLSX_CDN = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+const JSPDF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+const JSBARCODE_CDN = "https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js";
 
 
 export interface ParsedResult<T> {
@@ -386,4 +390,187 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
     
     XLSX.utils.book_append_sheet(workbook, worksheet, "발주서");
     XLSX.writeFile(workbook, fileName);
+};
+
+export const exportReturnToPDF = async (order: Order) => {
+    try {
+        await Promise.all([loadScript(JSPDF_CDN), loadScript(JSBARCODE_CDN)]);
+        
+        const fontResponse = await fetch('/fonts/NanumGothic-Regular.ttf');
+        if (!fontResponse.ok) {
+            throw new Error('나눔고딕 폰트 파일을 불러오는 데 실패했습니다. public/fonts/ 폴더에 파일이 있는지 확인해주세요.');
+        }
+        const fontBuffer = await fontResponse.arrayBuffer();
+
+        const fontBase64 = btoa(
+            new Uint8Array(fontBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+
+        if (!order.items || order.items.length === 0) {
+            alert("내보낼 품목이 없습니다.");
+            return;
+        }
+    
+        const { jsPDF } = (window as any).jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+
+        doc.addFileToVFS('NanumGothic-Regular.ttf', fontBase64);
+        doc.addFont('NanumGothic-Regular.ttf', 'NanumGothic', 'normal');
+        doc.setFont('NanumGothic');
+
+        const PAGE_WIDTH = doc.internal.pageSize.getWidth();
+        const PAGE_HEIGHT = doc.internal.pageSize.getHeight();
+        const MARGIN = 10;
+        const HEADER_HEIGHT = 20;
+        const FOOTER_HEIGHT = 10;
+        const MAX_WIDTH = PAGE_WIDTH - MARGIN * 2;
+        const COL_COUNT = 3;
+        const COL_GAP = 7;
+        const COL_WIDTH = (MAX_WIDTH - (COL_GAP * (COL_COUNT - 1))) / COL_COUNT;
+        const ITEM_BLOCK_HEIGHT = 27;
+
+        // --- 1. Pre-computation Phase: Group items into pages and calculate page totals ---
+        const pages: { items: OrderItem[], total: number }[] = [];
+        let currentPageItems: OrderItem[] = [];
+        let currentPageTotal = 0;
+        let yPos = MARGIN + HEADER_HEIGHT + 2;
+        let colIndex = 0;
+        
+        for (const item of order.items) {
+            if (yPos + ITEM_BLOCK_HEIGHT > PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT) {
+                colIndex++;
+                yPos = MARGIN + HEADER_HEIGHT + 2;
+
+                if (colIndex >= COL_COUNT) {
+                    pages.push({ items: currentPageItems, total: currentPageTotal });
+                    currentPageItems = [];
+                    currentPageTotal = 0;
+                    colIndex = 0;
+                }
+            }
+            currentPageItems.push(item);
+            currentPageTotal += (item.price * item.quantity);
+            yPos += ITEM_BLOCK_HEIGHT;
+        }
+
+        if (currentPageItems.length > 0) {
+            pages.push({ items: currentPageItems, total: currentPageTotal });
+        }
+        const totalPages = pages.length;
+
+        // --- 2. Drawing Phase ---
+        pages.forEach((page, pageIndex) => {
+            if (pageIndex > 0) {
+                doc.addPage();
+            }
+
+            // --- Render Header ---
+            doc.setFontSize(22);
+            doc.setFont('NanumGothic', 'normal');
+            doc.text('경진마트반품', PAGE_WIDTH / 2, MARGIN + 8, { align: 'center' });
+            doc.setFontSize(10);
+            const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+            doc.text(`날짜: ${today}`, MARGIN, MARGIN + 12);
+            doc.text(`거래처: ${order.customer.name}`, MARGIN, MARGIN + 16);
+            
+            let totalText;
+            if (pageIndex === 0 && totalPages > 1) {
+                totalText = `페이지 합계: ${page.total.toLocaleString('ko-KR')} 원 / 총 합계: ${order.total.toLocaleString('ko-KR')} 원`;
+            } else if (totalPages > 1) {
+                 totalText = `페이지 합계: ${page.total.toLocaleString('ko-KR')} 원`;
+            } else {
+                 totalText = `합계: ${order.total.toLocaleString('ko-KR')} 원`;
+            }
+            doc.text(totalText, PAGE_WIDTH - MARGIN, MARGIN + 16, { align: 'right' });
+            
+            doc.setDrawColor(100, 100, 100);
+            doc.setLineWidth(0.2);
+            doc.line(MARGIN, MARGIN + HEADER_HEIGHT - 2, PAGE_WIDTH - MARGIN, MARGIN + HEADER_HEIGHT - 2);
+
+            // --- Render Items for the current page ---
+            let x = MARGIN;
+            let y = MARGIN + HEADER_HEIGHT + 2;
+            let currentColumn = 0;
+            
+            for (const item of page.items) {
+                 if (y + ITEM_BLOCK_HEIGHT > PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT) {
+                    currentColumn++;
+                    x += COL_WIDTH + COL_GAP;
+                    y = MARGIN + HEADER_HEIGHT + 2;
+                }
+                
+                const startOfBlockY = y;
+
+                // Pre-calculate barcode position to align quantity text
+                const canvas = document.createElement('canvas');
+                const barcodeHeight = 8;
+                let barcodeWidth = COL_WIDTH; // Default width
+                let barcodeDataUrl = '';
+                let hasBarcodeError = false;
+                try {
+                    JsBarcode(canvas, item.barcode, { format: "CODE128", width: 1.5, height: 40, displayValue: false, margin: 0 });
+                    barcodeDataUrl = canvas.toDataURL('image/png');
+                    barcodeWidth = (barcodeHeight / canvas.height) * canvas.width;
+                } catch (e) {
+                    hasBarcodeError = true;
+                    console.error(`JsBarcode error for ${item.barcode}:`, e);
+                }
+                const finalBarcodeWidth = Math.min(barcodeWidth, COL_WIDTH);
+                const centeredBarcodeX = x + (COL_WIDTH - finalBarcodeWidth) / 2;
+
+                // 1. Product Name
+                y += 4; 
+                doc.setFontSize(11);
+                doc.setFont('NanumGothic', 'normal');
+                const productName = doc.splitTextToSize(item.name, COL_WIDTH)[0];
+                doc.text(productName, x, y);
+                
+                // 2. Details line (Qty, Unit Price, Total Price)
+                y += 4;
+                doc.setFontSize(9);
+                doc.text(String(item.quantity), centeredBarcodeX, y);
+                doc.text(item.price.toLocaleString(), x + COL_WIDTH / 2, y, { align: 'center' });
+                doc.text((item.price * item.quantity).toLocaleString(), x + COL_WIDTH, y, { align: 'right' });
+                
+                // 3. Barcode Image
+                y += 1.5;
+                if (!hasBarcodeError) {
+                    doc.addImage(barcodeDataUrl, 'PNG', centeredBarcodeX, y, finalBarcodeWidth, barcodeHeight);
+                } else {
+                    doc.setFontSize(8);
+                    doc.text('[바코드 오류]', x + COL_WIDTH / 2, y + 4, { align: 'center' });
+                }
+                y += barcodeHeight;
+                
+                // 4. Barcode Number (below image)
+                y += 3;
+                doc.setFontSize(9);
+                doc.text(item.barcode, x + COL_WIDTH / 2, y, { align: 'center' });
+                
+                // 5. Dotted Separator Line
+                const separatorY = startOfBlockY + ITEM_BLOCK_HEIGHT - 2;
+                doc.setDrawColor(200, 200, 200);
+                doc.setLineDashPattern([1, 1], 0);
+                doc.line(x, separatorY, x + COL_WIDTH, separatorY);
+                doc.setLineDashPattern([], 0);
+
+                y = startOfBlockY + ITEM_BLOCK_HEIGHT;
+            }
+        });
+
+        // --- 3. Add page numbers to all pages ---
+        for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            doc.setFont('NanumGothic', 'normal');
+            doc.setFontSize(9);
+            doc.text(`- ${i} / ${totalPages} -`, PAGE_WIDTH / 2, PAGE_HEIGHT - 7, { align: 'center' });
+        }
+
+        const fileName = `반품서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.pdf`;
+        doc.save(fileName);
+
+    } catch (error) {
+        console.error("PDF 생성 중 오류 발생:", error);
+        alert(`PDF 내보내기에 실패했습니다: ${error instanceof Error ? error.message : String(error)}`);
+    }
 };

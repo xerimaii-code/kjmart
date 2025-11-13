@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/dbService';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon, CodeBracketIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, DocumentIcon, GoogleDriveIcon, LogoutIcon, TrashIcon, DatabaseIcon, HistoryIcon, UserCircleIcon, WarningIcon, SettingsIcon } from '../components/Icons';
 import { SyncSettings } from '../types';
 import ToggleSwitch from '../components/ToggleSwitch';
 import * as googleDrive from '../services/googleDriveService';
