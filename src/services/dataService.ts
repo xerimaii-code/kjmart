@@ -393,20 +393,50 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
     XLSX.writeFile(workbook, fileName);
 };
 
+
+// --- PDF 한글 폰트 처리 ---
+
+// 안정적인 CDN을 통해 폰트를 불러옵니다.
+const KOREAN_FONT_URL = 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/nanumgothic/NanumGothic-Regular.ttf';
+let koreanFontBase64: string | null = null;
+
+/**
+ * PDF 생성에 필요한 한글 폰트를 불러옵니다.
+ * 결과를 메모리에 캐싱하여 반복적인 다운로드를 방지합니다.
+ * @returns Base64로 인코딩된 폰트 데이터 Promise
+ */
+async function loadKoreanFontForPdf(): Promise<string> {
+    if (koreanFontBase64) {
+        return koreanFontBase64;
+    }
+
+    try {
+        const fontResponse = await fetch(KOREAN_FONT_URL);
+        if (!fontResponse.ok) {
+            throw new Error(`Font fetch failed with status: ${fontResponse.status}`);
+        }
+        const fontBuffer = await fontResponse.arrayBuffer();
+
+        const base64 = btoa(
+            new Uint8Array(fontBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+
+        koreanFontBase64 = base64; // 성공 시 결과 캐싱
+        return base64;
+    } catch (error) {
+        console.error("Critical: Could not load Korean font for PDF export.", error);
+        koreanFontBase64 = null; // 실패 시 캐시 초기화
+        throw new Error('PDF 생성에 필요한 한글 폰트를 불러올 수 없습니다. 인터넷 연결을 확인해주세요.');
+    }
+}
+
+
 export const exportReturnToPDF = async (order: Order) => {
     try {
         await Promise.all([loadScript(JSPDF_CDN), loadScript(JSBARCODE_CDN)]);
         
-        // This assumes the font is placed in the public/fonts directory
-        const fontResponse = await fetch('/fonts/NanumGothicLight.ttf');
-        if (!fontResponse.ok) {
-            throw new Error('나눔고딕 폰트 파일을 불러오는 데 실패했습니다. 파일이 public/fonts/ 에 있는지 확인해주세요.');
-        }
-        const fontBuffer = await fontResponse.arrayBuffer();
-
-        const fontBase64 = btoa(
-            new Uint8Array(fontBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-        );
+        // 캐싱된 폰트 로더 함수를 사용합니다.
+        const fontBase64 = await loadKoreanFontForPdf();
 
         if (!order.items || order.items.length === 0) {
             alert("내보낼 품목이 없습니다.");
@@ -416,9 +446,12 @@ export const exportReturnToPDF = async (order: Order) => {
         const { jsPDF } = (window as any).jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
 
-        doc.addFileToVFS('NanumGothicLight.ttf', fontBase64);
-        doc.addFont('NanumGothicLight.ttf', 'NanumGothic', 'normal');
-        doc.setFont('NanumGothic');
+        const FONT_VFS_NAME = 'NanumGothic-Regular.ttf';
+        const FONT_NAME_JS_PDF = 'NanumGothic';
+
+        doc.addFileToVFS(FONT_VFS_NAME, fontBase64);
+        doc.addFont(FONT_VFS_NAME, FONT_NAME_JS_PDF, 'normal');
+        doc.setFont(FONT_NAME_JS_PDF);
 
         const PAGE_WIDTH = doc.internal.pageSize.getWidth();
         const PAGE_HEIGHT = doc.internal.pageSize.getHeight();
@@ -468,7 +501,7 @@ export const exportReturnToPDF = async (order: Order) => {
 
             // --- Render Header ---
             doc.setFontSize(22);
-            doc.setFont('NanumGothic', 'normal');
+            doc.setFont(FONT_NAME_JS_PDF, 'normal');
             doc.text('경진마트반품', PAGE_WIDTH / 2, MARGIN + 8, { align: 'center' });
             doc.setFontSize(10);
             const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
@@ -523,7 +556,7 @@ export const exportReturnToPDF = async (order: Order) => {
                 // 1. Product Name
                 y += 4; 
                 doc.setFontSize(11);
-                doc.setFont('NanumGothic', 'normal');
+                doc.setFont(FONT_NAME_JS_PDF, 'normal');
                 const productName = doc.splitTextToSize(item.name, COL_WIDTH)[0];
                 doc.text(productName, x, y);
                 
@@ -563,7 +596,7 @@ export const exportReturnToPDF = async (order: Order) => {
         // --- 3. Add page numbers to all pages ---
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
-            doc.setFont('NanumGothic', 'normal');
+            doc.setFont(FONT_NAME_JS_PDF, 'normal');
             doc.setFontSize(9);
             doc.text(`- ${i} / ${totalPages} -`, PAGE_WIDTH / 2, PAGE_HEIGHT - 7, { align: 'center' });
         }
