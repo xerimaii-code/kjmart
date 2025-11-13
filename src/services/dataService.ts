@@ -7,6 +7,7 @@ declare const JsBarcode: any;
 
 const loadedScripts: { [src: string]: Promise<void> } = {};
 
+
 /**
  * Dynamically loads a script from a given URL and ensures it's only loaded once.
  * @param src The URL of the script to load.
@@ -396,9 +397,10 @@ export const exportReturnToPDF = async (order: Order) => {
     try {
         await Promise.all([loadScript(JSPDF_CDN), loadScript(JSBARCODE_CDN)]);
         
+        // This assumes the font is placed in the public/fonts directory
         const fontResponse = await fetch('/fonts/NanumGothic-Regular.ttf');
         if (!fontResponse.ok) {
-            throw new Error('나눔고딕 폰트 파일을 불러오는 데 실패했습니다. public/fonts/ 폴더에 파일이 있는지 확인해주세요.');
+            throw new Error('나눔고딕 폰트 파일을 불러오는 데 실패했습니다. 파일이 public/fonts/ 에 있는지 확인해주세요.');
         }
         const fontBuffer = await fontResponse.arrayBuffer();
 
