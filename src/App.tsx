@@ -1,5 +1,5 @@
 import React, { useState, lazy, Suspense, useRef, useMemo, useEffect } from 'react';
-import { AppProvider, useModals, useScanner, useSyncState, useDataState, useDataActions, useAlert } from './context/AppContext';
+import { AppProvider, useModals, useScanner, useSyncState, useDataState, useDataActions, useAlert, useMiscUI } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Page } from './types';
 import Header from './components/Header';
@@ -167,6 +167,7 @@ const AppContent: React.FC = () => {
     const { isScannerOpen, onScanSuccess, closeScanner } = useScanner();
     const { updateOrderStatus } = useDataActions();
     const { showToast } = useAlert();
+    const { activeMenuOrderId } = useMiscUI();
     
     const swipeContainerRef = useRef<HTMLDivElement>(null);
     const activePageIndex = useMemo(() => pages.indexOf(activePage), [activePage]);
@@ -193,8 +194,9 @@ const AppContent: React.FC = () => {
         !!addItemModalProps || 
         !!editItemModalProps || 
         isHistoryModalOpen ||
-        isClearHistoryModalOpen
-    ), [isDetailModalOpen, isDeliveryModalOpen, isScannerOpen, addItemModalProps, editItemModalProps, isHistoryModalOpen, isClearHistoryModalOpen]);
+        isClearHistoryModalOpen ||
+        activeMenuOrderId !== null
+    ), [isDetailModalOpen, isDeliveryModalOpen, isScannerOpen, addItemModalProps, editItemModalProps, isHistoryModalOpen, isClearHistoryModalOpen, activeMenuOrderId]);
 
     const { onTouchStart, onTouchMove, onTouchEnd, containerStyle } = useSwipeNavigation({
         items: pages,
@@ -207,7 +209,7 @@ const AppContent: React.FC = () => {
         <div className="h-full w-full flex flex-col bg-transparent">
             <Header />
             <TopTabBar activePage={activePage} setActivePage={handleNavigation} />
-            <main className="main-content flex-grow relative overflow-x-hidden">
+            <main className={`main-content flex-grow relative ${activeMenuOrderId !== null ? '' : 'overflow-x-hidden'}`}>
                 <div
                     ref={swipeContainerRef}
                     className="h-full w-full flex"

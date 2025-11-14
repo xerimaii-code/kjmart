@@ -147,11 +147,10 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const { deleteOrder, updateOrderStatus } = useDataActions();
     const { showAlert, showToast } = useAlert();
     const { openDetailModal, openDeliveryModal } = useModals();
-    const { lastModifiedOrderId, setLastModifiedOrderId } = useMiscUI();
+    const { lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId } = useMiscUI();
 
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
     const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
     const [visibleCount, setVisibleCount] = useState(PAGE_SIZE); // State for infinite scroll
     
@@ -240,7 +239,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             unsubscribe();
             clearTimeout(timer);
         };
-    }, [isActive, customStartDate, customEndDate]);
+    }, [isActive, customStartDate, customEndDate, setActiveMenuOrderId]);
 
     // --- Infinite Scroll Logic ---
     const visibleOrders = useMemo(() => orders.slice(0, visibleCount), [orders, visibleCount]);
@@ -252,7 +251,9 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             (entries) => {
                 // When the sentinel comes into view and there are more items to load
                 if (entries[0].isIntersecting && orders.length > visibleCount) {
-                    setVisibleCount(prev => prev + PAGE_SIZE);
+                    // FIX: The functional update form for `setVisibleCount` was causing a TypeScript error in the build environment.
+                    // Switched to a direct update. This is safe because `visibleCount` is in the dependency array, preventing stale state.
+                    setVisibleCount(visibleCount + PAGE_SIZE);
                 }
             },
             { 
@@ -319,7 +320,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         return () => {
             document.removeEventListener('click', handleClickOutside, true);
         };
-    }, [activeMenuOrderId]);
+    }, [activeMenuOrderId, setActiveMenuOrderId]);
 
     const ordersMap = useMemo(() => new Map(orders.map(o => [o.id, o])), [orders]);
 
@@ -329,7 +330,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         if (orderId) {
             setActiveMenuOrderId(prev => (prev === orderId ? null : orderId));
         }
-    }, []);
+    }, [setActiveMenuOrderId]);
 
     const handleCardClick = useCallback(async (e: React.MouseEvent) => {
         const orderId = Number((e.currentTarget as HTMLElement).dataset.orderId);
@@ -441,7 +442,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                 })();
                 break;
         }
-    }, [ordersMap, showAlert, deleteOrder, updateOrderStatus, openDeliveryModal, showToast]);
+    }, [ordersMap, showAlert, deleteOrder, updateOrderStatus, openDeliveryModal, showToast, setActiveMenuOrderId]);
 
 
     return (
@@ -468,7 +469,6 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
              <div 
                 ref={listRef} 
                 className="scrollable-content"
-                style={{ overflow: activeMenuOrderId !== null ? 'visible' : undefined }}
              >
                 {isLoading ? (
                     <div className="flex items-center justify-center h-full">

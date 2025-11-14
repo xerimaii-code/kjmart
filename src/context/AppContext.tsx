@@ -121,10 +121,12 @@ interface ModalsActions {
 
 interface MiscUIState {
     lastModifiedOrderId: number | null;
+    activeMenuOrderId: number | null;
 }
 
 interface MiscUIActions {
     setLastModifiedOrderId: (id: number | null) => void;
+    setActiveMenuOrderId: (id: number | null) => void;
 }
 
 interface ScannerState {
@@ -200,6 +202,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [toastState, setToastState] = useState<ToastState>({ isOpen: false, message: '', type: 'success' });
     const [modalsState, setModalsState] = useState<ModalsState>(initialModalsState);
     const [lastModifiedOrderId, setLastModifiedOrderId] = useState<number | null>(null);
+    const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
     const [scannerState, setScannerState] = useState<ScannerState>({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false });
     const [isInstallPromptAvailable, setInstallPromptAvailable] = useState(false);
     const deferredInstallPrompt = useRef<any>(null);
@@ -731,7 +734,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         closeScanner: () => setScannerState({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false }),
     }), [scannerState, deviceSettings.selectedCameraId, deviceSettings.scanSettings]);
     
-    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId }), [lastModifiedOrderId]);
+    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId }), [lastModifiedOrderId, activeMenuOrderId]);
     
     const pwaInstallValue = useMemo(() => ({ isInstallPromptAvailable, triggerInstallPrompt }), [isInstallPromptAvailable, triggerInstallPrompt]);
 
