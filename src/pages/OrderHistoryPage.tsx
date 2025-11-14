@@ -82,7 +82,7 @@ const OrderRow = memo(({
 
     return (
         <div 
-            className={`relative ${isMenuOpen ? 'z-10' : ''} animate-card-enter`}
+            className={`relative ${isMenuOpen ? 'z-30' : ''} animate-card-enter`}
             style={{ animationDelay: `${Math.min(index * 30, 400)}ms` }}
         >
             <div
@@ -152,7 +152,8 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [draftKeys, setDraftKeys] = useState<Set<string | number>>(new Set());
-    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE); // State for infinite scroll
+    // Fix: Explicitly type the useState to help the compiler in stricter build environments.
+    const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE); // State for infinite scroll
     
     const getLocalDateString = (date: Date) => {
         const year = date.getFullYear();
@@ -250,9 +251,10 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         const observer = new IntersectionObserver(
             (entries) => {
                 // When the sentinel comes into view and there are more items to load
-                if (entries[0].isIntersecting && orders.length > visibleCount) {
-                    // FIX: The functional update form for `setVisibleCount` was causing a TypeScript error in the build environment.
-                    // Switched to a direct update. This is safe because `visibleCount` is in the dependency array, preventing stale state.
+                // Fix: Add a check for entries[0] to prevent potential runtime errors.
+                if (entries[0] && entries[0].isIntersecting && orders.length > visibleCount) {
+                    // This direct update is correct and safe because `visibleCount` is in the dependency array,
+                    // ensuring the callback always has the latest value.
                     setVisibleCount(visibleCount + PAGE_SIZE);
                 }
             },
@@ -309,7 +311,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (activeMenuOrderId !== null && !(event.target as HTMLElement).closest('.relative.z-10')) {
+            if (activeMenuOrderId !== null && !(event.target as HTMLElement).closest('.relative.z-30')) {
                 setActiveMenuOrderId(null);
             }
         };
