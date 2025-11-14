@@ -465,7 +465,11 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                     />
                 </div>
             </div>
-             <div ref={listRef} className="scrollable-content">
+             <div 
+                ref={listRef} 
+                className="scrollable-content"
+                style={{ overflow: activeMenuOrderId !== null ? 'visible' : undefined }}
+             >
                 {isLoading ? (
                     <div className="flex items-center justify-center h-full">
                         <SpinnerIcon className="w-10 h-10 text-blue-500" />
