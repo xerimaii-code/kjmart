@@ -311,28 +311,17 @@ const App: React.FC = () => {
         // Preload scanner library for faster modal opening.
         loadScript(ZXING_CDN).catch(err => console.warn("Failed to preload scanner library:", err));
 
-        // Register the service worker.
+        // Register the service worker to enable PWA functionality (offline caching).
         if ('serviceWorker' in navigator) {
-            const registerSW = () => {
-                // Construct an absolute URL for the service worker to avoid cross-origin issues
-                // that can occur in sandboxed environments like AI Studio's iframes.
-                const swUrl = `${window.location.origin}/service-worker.js`;
-                navigator.serviceWorker.register(swUrl)
-                  .then(registration => {
-                    console.log('Service Worker registered successfully with scope:', registration.scope);
-                  })
-                  .catch(err => {
-                    console.error('Service Worker registration failed:', err);
-                  });
-            };
-
-            // If the page is already loaded, register the service worker immediately.
-            // Otherwise, wait for the 'load' event. This prevents the "invalid state" error.
-            if (document.readyState === 'complete') {
-                registerSW();
-            } else {
-                window.addEventListener('load', registerSW, { once: true });
-            }
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    })
+                    .catch(error => {
+                        console.error('ServiceWorker registration failed: ', error);
+                    });
+            });
         }
     }, []);
 

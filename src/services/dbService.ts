@@ -1,36 +1,61 @@
-// FIX: Use Firebase v8 compat imports to resolve module export errors.
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import 'firebase/compat/database';
+// src/services/dbService.ts
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { getAuth, Auth, User } from 'firebase/auth';
+import { 
+    getDatabase, Database, ref, get, set, update, push,
+    query, orderByChild, endAt, startAt, onChildAdded, onChildChanged, onChildRemoved,
+    serverTimestamp, limitToLast, orderByKey, onValue
+} from 'firebase/database';
+
 import { firebaseConfig } from '../firebaseConfig';
 import { Order, OrderItem, Customer, Product, SyncLog, DeviceSettings } from '../types';
 
-let app: firebase.app.App | null = null;
-let db: firebase.database.Database | null = null;
-let auth: firebase.auth.Auth | null = null;
-let isFirebaseInitialized = false;
+export type FirebaseUser = User;
+
+// --- Eager Initialization ---
+let app: FirebaseApp | null = null;
+export let auth: Auth | null = null;
+export let db: Database | null = null;
+let dbReady = false;
+export let isFirebaseInitialized = false;
 
 try {
+    // This top-level block initializes Firebase services as soon as this module is loaded.
     if (firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("YOUR_")) {
-        if (!firebase.apps.length) {
-            app = firebase.initializeApp(firebaseConfig);
-        } else {
-            app = firebase.app();
+        app = initializeApp(firebaseConfig);
+        isFirebaseInitialized = true; // App initialization was successful
+        
+        try {
+            auth = getAuth(app);
+            console.log("Firebase Auth service initialized eagerly.");
+        } catch (e) {
+            console.error("Firebase Auth eager initialization failed:", e);
+            auth = null; // Ensure auth is null on failure
+        }
+
+        try {
+            db = getDatabase(app);
+            dbReady = true; // Database service was successfully retrieved
+            console.log("Firebase Realtime Database service initialized eagerly.");
+        } catch (e) {
+            console.error("Firebase Realtime Database eager initialization failed:", e);
+            db = null; // Ensure db is null on failure
+            dbReady = false;
         }
         
-        db = app.database();
-        auth = app.auth();
-        isFirebaseInitialized = true;
-        console.log("Firebase initialized successfully. Offline persistence is active by default.");
     } else {
-        console.warn("Firebase config is not set. The app will not connect to a database. Please update firebaseConfig.ts");
+        console.warn("Firebase config is not set. The app will not connect to Firebase.");
     }
 } catch (e) {
-    console.error("Firebase initialization failed:", e);
+    console.error("Firebase App initialization failed catastrophically:", e);
+    isFirebaseInitialized = false;
 }
 
-export { db, auth, isFirebaseInitialized };
+/** Checks if the database service is ready for use. */
+export const isDbReady = () => dbReady;
 
+// This function is kept for legacy checks, but isDbReady is more specific for DB operations.
+export const isInitialized = () => isFirebaseInitialized;
 
 const arrayToObject = (arr: any[], keyField: string) => {
     if (!Array.isArray(arr)) return {};
@@ -42,24 +67,24 @@ const arrayToObject = (arr: any[], keyField: string) => {
     }, {});
 };
 
-export const isInitialized = () => isFirebaseInitialized;
+// --- Error Constants for Functions ---
+const DB_UNAVAILABLE_ERROR = new Error("Database service is not available.");
 
 // --- Device Settings ---
 export const getDeviceSettings = async (deviceId: string): Promise<Partial<DeviceSettings>> => {
-    if (!isFirebaseInitialized || !db) return {};
-    const snapshot = await db.ref(`settings/devices/${deviceId}`).get();
+    if (!db) return {}; // Return empty object if DB not ready
+    const settingsRef = ref(db, `settings/devices/${deviceId}`);
+    const snapshot = await get(settingsRef);
     const settings = snapshot.val() || {};
-    // Ensure nested objects exist to prevent errors during merging
     if (!settings.scanSettings) settings.scanSettings = {};
     if (!settings.googleDriveSyncSettings) settings.googleDriveSyncSettings = {};
     return settings;
 };
 
 export const setDeviceSetting = async (deviceId: string, key: string, value: any): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw new Error("Database not initialized");
-    await db.ref(`settings/devices/${deviceId}/${key}`).set(value);
+    if (!db) throw DB_UNAVAILABLE_ERROR;
+    await set(ref(db, `settings/devices/${deviceId}/${key}`), value);
 };
-
 
 // --- Listener functions for realtime updates ---
 export const listenToOrderChangesByDateRange = (
@@ -71,79 +96,65 @@ export const listenToOrderChangesByDateRange = (
     },
     startDate?: Date,
 ): (() => void) => {
-    if (!isFirebaseInitialized || !db) {
+    if (!db) {
+        console.warn("listenToOrderChangesByDateRange: DB not ready.");
         return () => {};
     }
-
     const endOfDay = new Date(endDate);
     endOfDay.setHours(23, 59, 59, 999);
-
-    let ordersQuery: firebase.database.Query = db.ref('orders').orderByChild('date').endAt(endOfDay.toISOString());
-
+    let ordersQuery = query(ref(db, 'orders'), orderByChild('date'), endAt(endOfDay.toISOString()));
+    
     if (startDate) {
         const startOfDay = new Date(startDate);
         startOfDay.setHours(0,0,0,0);
-        ordersQuery = ordersQuery.startAt(startOfDay.toISOString());
+        ordersQuery = query(ref(db, 'orders'), orderByChild('date'), startAt(startOfDay.toISOString()), endAt(endOfDay.toISOString()));
     }
 
-    const onAdd = ordersQuery.on('child_added', (snapshot) => {
-        const order = snapshot.val() as Order;
-        if (order) callbacks.onAdd(order);
-    });
-    const onChange = ordersQuery.on('child_changed', (snapshot) => {
-        const order = snapshot.val() as Order;
-        if (order) callbacks.onChange(order);
-    });
-    const onRemove = ordersQuery.on('child_removed', (snapshot) => {
-        const order = snapshot.val() as Order;
-        if (order) callbacks.onRemove(order);
-    });
+    const unsubs = [
+        onChildAdded(ordersQuery, (snapshot) => {
+            const order = snapshot.val() as Order;
+            if (order) callbacks.onAdd(order);
+        }),
+        onChildChanged(ordersQuery, (snapshot) => {
+            const order = snapshot.val() as Order;
+            if (order) callbacks.onChange(order);
+        }),
+        onChildRemoved(ordersQuery, (snapshot) => {
+            const order = snapshot.val() as Order;
+            if (order) callbacks.onRemove(order);
+        })
+    ];
     
-    return () => {
-        ordersQuery.off('child_added', onAdd);
-        ordersQuery.off('child_changed', onChange);
-        ordersQuery.off('child_removed', onRemove);
-    };
+    return () => unsubs.forEach(unsub => unsub());
 };
 
 export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[]) => void): (() => void) => {
-    if (!isFirebaseInitialized || !db) {
+    if (!db) {
         callback([]);
         return () => {};
     }
-    const itemsRef = db.ref(`order-items/${orderId}`);
-    const listener = itemsRef.on('value', (snapshot) => {
+    const itemsRef = ref(db, `order-items/${orderId}`);
+    return onValue(itemsRef, (snapshot) => {
         const data = snapshot.val();
         callback(data || []);
     }, (error) => {
         console.error(`Error listening to order items for order ${orderId}:`, error);
         callback([]);
     });
-    return () => itemsRef.off('value', listener);
 };
-
 
 // --- Data Fetching ---
 export const getStore = async <T>(storeName: string): Promise<T[]> => {
-    if (!isFirebaseInitialized || !db) return [];
+    if (!db) return [];
     try {
-        const snapshot = await db.ref(storeName).get();
+        const snapshot = await get(ref(db, storeName));
         const data = snapshot.val();
-        if (!data) {
-            return [];
-        }
+        if (!data) return [];
 
         const values = Object.values(data).filter(item => item != null);
-        
-        if (storeName === 'customers') {
-            return values.filter(item => (item as Customer).comcode) as T[];
-        }
-        if (storeName === 'products') {
-            return values.filter(item => (item as Product).barcode) as T[];
-        }
-        
+        if (storeName === 'customers') return values.filter(item => (item as Customer).comcode) as T[];
+        if (storeName === 'products') return values.filter(item => (item as Product).barcode) as T[];
         return values as T[];
-
     } catch (error) {
         console.error(`Error getting store ${storeName}:`, error);
         return [];
@@ -151,81 +162,60 @@ export const getStore = async <T>(storeName: string): Promise<T[]> => {
 };
 
 export const getValue = async <T>(path: string, defaultValue: T): Promise<T> => {
-    if (!isFirebaseInitialized || !db) return defaultValue;
-    const snapshot = await db.ref(path).get();
-    const data = snapshot.val();
-    return data ?? defaultValue;
+    if (!db) return defaultValue;
+    const snapshot = await get(ref(db, path));
+    return snapshot.val() ?? defaultValue;
 };
 
 export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
-    if (!isFirebaseInitialized || !db) return [];
-
-    let snapshot = await db.ref(`order-items/${orderId}`).get();
+    if (!db) return [];
+    let snapshot = await get(ref(db, `order-items/${orderId}`));
     let data = snapshot.val();
-
     if (!data) {
-        snapshot = await db.ref(`orders/${orderId}/items`).get();
+        snapshot = await get(ref(db, `orders/${orderId}/items`));
         data = snapshot.val();
     }
-
-    if (!data) {
-        return [];
-    }
+    if (!data) return [];
     
     const itemsArray = Array.isArray(data) ? data : Object.values(data);
     return itemsArray.filter(item => item != null);
 };
 
 // --- Data Modification ---
-const DB_UNINITIALIZED_ERROR = new Error("Database not initialized");
-
 export const addOrder = async (
     orderData: Omit<Order, 'id' | 'date' | 'createdAt' | 'updatedAt' | 'completedAt' | 'completionDetails' | 'itemCount' | 'items'>, 
     items: OrderItem[]
 ): Promise<number> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    
+    if (!db) throw DB_UNAVAILABLE_ERROR;
     const newOrderId = Date.now();
     const now = new Date().toISOString();
-
     const newOrder: Omit<Order, 'items'> = {
-        ...orderData,
-        id: newOrderId,
-        date: now,
-        createdAt: now,
-        updatedAt: now,
-        itemCount: items.length,
-        completedAt: null,
-        completionDetails: null,
+        ...orderData, id: newOrderId, date: now, createdAt: now, updatedAt: now,
+        itemCount: items.length, completedAt: null, completionDetails: null,
     };
-
     const updates: { [key: string]: any } = {};
     updates[`/orders/${newOrderId}`] = newOrder;
     updates[`/order-items/${newOrderId}`] = items;
-
-    await db.ref().update(updates);
+    await update(ref(db), updates);
     return newOrderId;
 };
 
-export const updateOrder = (order: Omit<Order, 'items'>, items: OrderItem[]): Promise<void> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
-    
+export const updateOrder = (order: Order, items: OrderItem[]): Promise<void> => {
+    if (!db) return Promise.reject(DB_UNAVAILABLE_ERROR);
     const now = new Date().toISOString();
     const updatedOrderData = { ...order, itemCount: items.length, updatedAt: now, date: now };
-    
+    delete updatedOrderData.items; // Don't store items inside the main order object
     const updates: { [key: string]: any } = {};
     updates[`/orders/${order.id}`] = updatedOrderData;
     updates[`/order-items/${order.id}`] = items;
-    
-    return db.ref().update(updates);
+    return update(ref(db), updates);
 };
 
 export const updateOrderStatus = (
     orderId: number, 
     completionDetails: Order['completionDetails']
 ): Promise<void> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
-    
+    if (!db) return Promise.reject(DB_UNAVAILABLE_ERROR);
     const now = new Date().toISOString();
     const completedAt = completionDetails ? now : null;
     const updates: { [key: string]: any } = {
@@ -234,55 +224,28 @@ export const updateOrderStatus = (
         [`/orders/${orderId}/updatedAt`]: now,
         [`/orders/${orderId}/date`]: now,
     };
-
-    return db.ref().update(updates);
+    return update(ref(db), updates);
 };
 
 export const deleteOrder = (orderId: number): Promise<void> => {
-    if (!isFirebaseInitialized || !db) return Promise.reject(DB_UNINITIALIZED_ERROR);
-    
+    if (!db) return Promise.reject(DB_UNAVAILABLE_ERROR);
     const updates: { [key: string]: null } = {};
     updates[`/orders/${orderId}`] = null;
     updates[`/order-items/${orderId}`] = null;
-    
-    return db.ref().update(updates);
+    return update(ref(db), updates);
 };
-
-export const replaceAll = async <T>(storeName: string, items: T[] | null): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    
-    let dataToSet: any = items;
-    if (items) {
-        let keyField = '';
-        if (storeName === 'customers') keyField = 'comcode';
-        else if (storeName === 'products') keyField = 'barcode';
-        dataToSet = keyField ? arrayToObject(items, keyField) : items;
-    }
-
-    await db.ref(storeName).set(dataToSet);
-};
-
 
 export const clearOrders = async (): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-
-    const updates: { [key: string]: null } = {};
-    updates['/orders'] = null;
-    updates['/order-items'] = null;
-
-    await db.ref().update(updates);
+    if (!db) throw DB_UNAVAILABLE_ERROR;
+    const updates: { [key: string]: null } = { '/orders': null, '/order-items': null };
+    await update(ref(db), updates);
 };
 
-
 export const clearOrdersBeforeDate = async (isoDateString: string): Promise<number> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-
-    const ordersQuery = db.ref('orders').orderByChild('date').endAt(isoDateString);
-    const snapshot = await ordersQuery.get();
-
-    if (!snapshot.exists()) {
-        return 0;
-    }
+    if (!db) throw DB_UNAVAILABLE_ERROR;
+    const ordersQuery = query(ref(db, 'orders'), orderByChild('date'), endAt(isoDateString));
+    const snapshot = await get(ordersQuery);
+    if (!snapshot.exists()) return 0;
 
     const updates: { [key: string]: null } = {};
     let deletedCount = 0;
@@ -294,265 +257,168 @@ export const clearOrdersBeforeDate = async (isoDateString: string): Promise<numb
             deletedCount++;
         }
     });
-
-    if (Object.keys(updates).length > 0) {
-        await db.ref().update(updates);
-    }
-    
+    if (Object.keys(updates).length > 0) await update(ref(db), updates);
     return deletedCount;
 };
 
 export const resetData = async (dataType: 'customers' | 'products') => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    await db.ref(dataType).set(null);
-    await db.ref(`sync-logs/${dataType}`).set(null);
-}
-
+    if (!db) throw DB_UNAVAILABLE_ERROR;
+    await set(ref(db, dataType), null);
+    await set(ref(db, `sync-logs/${dataType}`), null);
+};
 
 export const setValue = async (path: string, value: any): Promise<void> => {
-    if (!isFirebaseInitialized || !db) throw DB_UNINITIALIZED_ERROR;
-    await db.ref(path).set(value);
+    if (!db) throw DB_UNAVAILABLE_ERROR;
+    await set(ref(db, path), value);
 };
 
 // --- Sync Log Management ---
-
-const createComparableProduct = (item: any) => ({
-    barcode: item.barcode || '',
-    name: (item.name || '').trim(),
-    costPrice: Number(item.costPrice || 0),
-    sellingPrice: Number(item.sellingPrice || 0),
-    salePrice: item.salePrice == null ? '' : String(item.salePrice).trim(),
-    saleEndDate: item.saleEndDate || '',
-    supplierName: (item.supplierName || '').trim(),
-});
-
-const createComparableCustomer = (item: any) => ({
-    comcode: item.comcode || '',
-    name: (item.name || '').trim(),
-});
+const createComparable = (item: any, type: 'customers' | 'products') => {
+    if (type === 'products') {
+        return {
+            barcode: item.barcode || '', name: (item.name || '').trim(),
+            costPrice: Number(item.costPrice || 0), sellingPrice: Number(item.sellingPrice || 0),
+            salePrice: item.salePrice == null ? '' : String(item.salePrice).trim(),
+            saleEndDate: item.saleEndDate || '', supplierName: (item.supplierName || '').trim(),
+        };
+    }
+    return { comcode: item.comcode || '', name: (item.name || '').trim() };
+};
 
 const areObjectsEqual = (newItem: any, existingItem: any, type: 'customers' | 'products'): boolean => {
     if (!newItem || !existingItem) return false;
-
-    if (type === 'products') {
-        return JSON.stringify(createComparableProduct(newItem)) === JSON.stringify(createComparableProduct(existingItem));
-    }
-    
-    if (type === 'customers') {
-        return JSON.stringify(createComparableCustomer(newItem)) === JSON.stringify(createComparableCustomer(existingItem));
-    }
-
-    const { lastModified: lm1, ...rest1 } = newItem;
-    const { lastModified: lm2, ...rest2 } = existingItem;
-    return JSON.stringify(rest1) === JSON.stringify(rest2);
+    return JSON.stringify(createComparable(newItem, type)) === JSON.stringify(createComparable(existingItem, type));
 };
 
-
 export const smartSyncData = async (
-    storeName: 'customers' | 'products',
-    newData: (Customer | Product)[],
-    userEmail: string,
-    onProgress: (message: string) => void,
-    existingDataArray: (Customer | Product)[],
+    storeName: 'customers' | 'products', newData: (Customer | Product)[], userEmail: string,
+    onProgress: (message: string) => void, existingDataArray: (Customer | Product)[],
     options?: { bypassMassDeleteCheck?: boolean }
 ): Promise<{ additions: number; updates: number; deletions: number; }> => {
-    if (!isInitialized() || !db) throw DB_UNINITIALIZED_ERROR;
-
+    if (!db) throw DB_UNAVAILABLE_ERROR;
     const keyField = storeName === 'customers' ? 'comcode' : 'barcode';
-    
     onProgress(`기존 데이터(${existingDataArray.length}건)와 비교 시작...`);
     await new Promise(resolve => setTimeout(resolve, 0)); 
 
     const existingDataMap = new Map(existingDataArray.map(item => [(item as any)[keyField], item]));
     const newDataMap = new Map(newData.map(item => [(item as any)[keyField], item]));
-    
     const deletions = Array.from(existingDataMap.keys()).filter(key => !newDataMap.has(key));
-    const numDeletions = deletions.length;
-    const numExisting = existingDataMap.size;
-    const numNew = newDataMap.size;
-
-    if (!options?.bypassMassDeleteCheck && numExisting > 100 && numDeletions > numExisting * 0.5) {
+    if (!options?.bypassMassDeleteCheck && existingDataMap.size > 100 && deletions.length > existingDataMap.size * 0.5) {
         const error = new Error("MASS_DELETION_DETECTED");
-        const parsedResult = { valid: newData }; 
-        (error as any).details = { numExisting, numNew, numDeletions, parsedResult };
+        (error as any).details = { numExisting: existingDataMap.size, numDeletions: deletions.length, parsedResult: { valid: newData } };
         throw error;
     }
 
     const updates: { [key: string]: any } = {};
-    const timestamp = firebase.database.ServerValue.TIMESTAMP;
+    const timestamp = serverTimestamp();
     const nowISO = new Date().toISOString();
     const logUser = userEmail.split('@')[0];
-    
-    let additionsCount = 0;
-    let updatesCount = 0;
-
-    const totalNew = newData.length;
-    let processedNew = 0;
+    let additionsCount = 0, updatesCount = 0, processed = 0;
 
     for (const [key, newItem] of newDataMap.entries()) {
         const existingItem = existingDataMap.get(key);
-        
-        const normalizedNewItem = storeName === 'products'
-            ? createComparableProduct(newItem)
-            : createComparableCustomer(newItem);
-
-        const itemWithMeta = { ...normalizedNewItem, lastModified: nowISO };
-        const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
-
+        const itemWithMeta = { ...createComparable(newItem, storeName), lastModified: nowISO };
+        const logRefKey = push(ref(db, `/sync-logs/${storeName}`)).key;
         if (!existingItem) {
             additionsCount++;
             if (logRefKey) {
                 updates[`/${storeName}/${key}`] = itemWithMeta;
                 updates[`/sync-logs/${storeName}/${logRefKey}`] = { ...itemWithMeta, timestamp, user: logUser };
             }
-        } else if (!areObjectsEqual(normalizedNewItem, existingItem, storeName)) {
+        } else if (!areObjectsEqual(newItem, existingItem, storeName)) {
             updatesCount++;
             if (logRefKey) {
                 updates[`/${storeName}/${key}`] = itemWithMeta;
                 updates[`/sync-logs/${storeName}/${logRefKey}`] = { ...itemWithMeta, timestamp, user: logUser };
             }
         }
-
-        processedNew++;
-        if (processedNew % 100 === 0) { 
-            onProgress(`변경/추가 확인 중... (${processedNew}/${totalNew})`);
+        processed++;
+        if (processed % 100 === 0) { 
+            onProgress(`변경/추가 확인 중... (${processed}/${newData.length})`);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
     }
 
-    const totalExisting = deletions.length;
-    let processedExisting = 0;
+    processed = 0;
     for (const key of deletions) {
         const existingItem = existingDataMap.get(key);
-        const logRefKey = db.ref(`/sync-logs/${storeName}`).push().key;
+        const logRefKey = push(ref(db, `/sync-logs/${storeName}`)).key;
         if (logRefKey) {
             updates[`/${storeName}/${key}`] = null;
-            updates[`/sync-logs/${storeName}/${logRefKey}`] = { 
-                [keyField]: key, 
-                name: (existingItem as any)?.name,
-                _deleted: true, 
-                timestamp, 
-                user: logUser 
-            };
+            updates[`/sync-logs/${storeName}/${logRefKey}`] = { [keyField]: key, name: (existingItem as any)?.name, _deleted: true, timestamp, user: logUser };
         }
-        processedExisting++;
-        if (processedExisting % 100 === 0) {
-            onProgress(`삭제 항목 확인 중... (${processedExisting}/${totalExisting})`);
+        processed++;
+        if (processed % 100 === 0) {
+            onProgress(`삭제 항목 확인 중... (${processed}/${deletions.length})`);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
     }
 
     if (Object.keys(updates).length > 0) {
         onProgress('데이터베이스에 업로드 중...');
-        await db.ref().update(updates);
+        await update(ref(db), updates);
     }
-
-    return { additions: additionsCount, updates: updatesCount, deletions: numDeletions };
+    return { additions: additionsCount, updates: updatesCount, deletions: deletions.length };
 };
 
-export const getSyncLogChanges = async (
-    dataType: 'customers' | 'products',
-    lastKey: string | null
-): Promise<{ items: any[], newLastKey: string | null }> => {
-    if (!isFirebaseInitialized || !db) return { items: [], newLastKey: lastKey };
-
-    let query = db.ref(`sync-logs/${dataType}`).orderByKey();
-    if (lastKey) {
-        query = query.startAt(lastKey);
-    }
-    
-    const snapshot = await query.get();
-    if (!snapshot.exists()) {
-        return { items: [], newLastKey: lastKey };
-    }
+export const getSyncLogChanges = async (dataType: 'customers' | 'products', lastKey: string | null): Promise<{ items: any[], newLastKey: string | null }> => {
+    if (!db) return { items: [], newLastKey: lastKey };
+    let syncLogQuery = query(ref(db, `sync-logs/${dataType}`), orderByKey());
+    if (lastKey) syncLogQuery = query(ref(db, `sync-logs/${dataType}`), orderByKey(), startAt(lastKey));
+    const snapshot = await get(syncLogQuery);
+    if (!snapshot.exists()) return { items: [], newLastKey: lastKey };
 
     const items: any[] = [];
-    let processedLastKey: string | null = lastKey;
-    let isFirst = true;
-
+    let processedLastKey: string | null = lastKey, isFirst = true;
     snapshot.forEach(childSnapshot => {
-        if (lastKey && isFirst && childSnapshot.key === lastKey) {
-            isFirst = false; 
-            return; 
-        }
-        
+        if (lastKey && isFirst && childSnapshot.key === lastKey) { isFirst = false; return; }
         isFirst = false; 
         items.push(childSnapshot.val());
         processedLastKey = childSnapshot.key;
     });
-
     return { items, newLastKey: processedLastKey };
 };
 
 export const getLastSyncLogKey = async (dataType: 'customers' | 'products'): Promise<string | null> => {
-     if (!isFirebaseInitialized || !db) return null;
-     const snapshot = await db.ref(`sync-logs/${dataType}`).orderByKey().limitToLast(1).get();
-     if (snapshot.exists()) {
-        const val = snapshot.val();
-        const [key] = Object.keys(val);
-        return key || null;
-     }
-     return null;
-}
+     if (!db) return null;
+     const q = query(ref(db, `sync-logs/${dataType}`), orderByKey(), limitToLast(1));
+     const snapshot = await get(q);
+     if (!snapshot.exists()) return null;
+     const [key] = Object.keys(snapshot.val());
+     return key || null;
+};
 
-export const getSyncLogs = async (dataType: 'customers' | 'products', limit: number = 100): Promise<SyncLog[]> => {
-    if (!isFirebaseInitialized || !db) return [];
-    const snapshot = await db.ref(`sync-logs/${dataType}`).orderByKey().limitToLast(limit).get();
+export const getSyncLogs = async (dataType: 'customers' | 'products', limit = 100): Promise<SyncLog[]> => {
+    if (!db) return [];
+    const q = query(ref(db, `sync-logs/${dataType}`), orderByKey(), limitToLast(limit));
+    const snapshot = await get(q);
     if (!snapshot.exists()) return [];
-    
     const logs: SyncLog[] = [];
-    snapshot.forEach(child => {
-        logs.push({ ...child.val(), _key: child.key });
-    });
-    
+    snapshot.forEach(child => logs.push({ ...child.val(), _key: child.key }));
     return logs.reverse();
 };
 
 export const listenForNewLogs = (
-    dataType: 'customers' | 'products',
-    startKey: string | null,
+    dataType: 'customers' | 'products', startKey: string | null,
     callback: (newItem: any, itemKey: string) => void
 ): (() => void) => {
-    if (!isFirebaseInitialized || !db) return () => {};
-
-    // By combining orderByKey() and limitToLast(1), we create a listener
-    // that is initially called for the very last item in the log.
-    // Subsequently, it will only be triggered for NEW items added to the end of the log.
-    // This is a highly efficient way to listen for new entries without
-    // re-downloading or re-processing existing ones.
-    const query = db.ref(`sync-logs/${dataType}`).orderByKey().limitToLast(1);
-
-    const listener = query.on('child_added', (snapshot) => {
-        // The check 'snapshot.key !== startKey' is crucial.
-        // On initial attachment, the listener receives the last known item. We must
-        // ignore it to prevent processing it again. The 'startKey' holds the key
-        // of the last item processed during the initial catch-up sync.
-        // Any subsequent calls to this callback will be for truly new items.
-        if (snapshot.key && snapshot.key !== startKey) {
-            callback(snapshot.val(), snapshot.key);
-        }
+    if (!db) return () => {};
+    const logQuery = query(ref(db, `sync-logs/${dataType}`), orderByKey(), limitToLast(1));
+    return onChildAdded(logQuery, (snapshot) => {
+        if (snapshot.key && snapshot.key !== startKey) callback(snapshot.val(), snapshot.key);
     });
-
-    return () => query.off('child_added', listener);
 };
 
 export const cleanupSyncLogs = async (dataType: 'customers' | 'products', retentionDays: number): Promise<void> => {
-    if (!isFirebaseInitialized || !db || retentionDays < 0) return;
-
+    if (!db || retentionDays < 0) return;
     const cutoff = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
-    const logRef = db.ref(`sync-logs/${dataType}`);
-    
-    const snapshot = await logRef.orderByChild('timestamp').endAt(cutoff).get();
-
+    const logQuery = query(ref(db, `sync-logs/${dataType}`), orderByChild('timestamp'), endAt(cutoff));
+    const snapshot = await get(logQuery);
     if (snapshot.exists()) {
         const updates: { [key: string]: null } = {};
-        snapshot.forEach(child => {
-            if (child.key) {
-                updates[child.key] = null;
-            }
-        });
+        snapshot.forEach(child => { if (child.key) updates[`sync-logs/${dataType}/${child.key}`] = null; });
         if (Object.keys(updates).length > 0) {
-            await logRef.update(updates);
+            await update(ref(db), updates);
             console.log(`Cleaned up ${Object.keys(updates).length} old logs for ${dataType}.`);
         }
     }

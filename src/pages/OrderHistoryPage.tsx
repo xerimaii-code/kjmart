@@ -251,11 +251,11 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         const observer = new IntersectionObserver(
             (entries) => {
                 // When the sentinel comes into view and there are more items to load
-                // Fix: Add a check for entries[0] to prevent potential runtime errors.
                 if (entries[0] && entries[0].isIntersecting && orders.length > visibleCount) {
-                    // This direct update is correct and safe because `visibleCount` is in the dependency array,
-                    // ensuring the callback always has the latest value.
-                    setVisibleCount(visibleCount + PAGE_SIZE);
+                    // FIX: Revert to functional update for safer state updates in callbacks.
+                    // The original TypeScript error was likely due to a missing explicit type
+                    // on the useState hook, which has since been added.
+                    setVisibleCount(prev => prev + PAGE_SIZE);
                 }
             },
             { 

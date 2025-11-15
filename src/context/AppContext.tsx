@@ -1,7 +1,7 @@
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
 import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType, SyncLog, DeviceSettings, SyncSettings } from '../types';
 import { 
-    isInitialized, getDeviceSettings, db as firebaseDb, getStore, 
+    isDbReady, getDeviceSettings, getStore, 
     getLastSyncLogKey, getSyncLogChanges, listenForNewLogs, cleanupSyncLogs,
     addOrder as dbAddOrder, updateOrder as dbUpdateOrder, deleteOrder as dbDeleteOrder,
     updateOrderStatus as dbUpdateOrderStatus, clearOrders as dbClearOrders, 
@@ -125,8 +125,9 @@ interface MiscUIState {
 }
 
 interface MiscUIActions {
-    setLastModifiedOrderId: (id: number | null) => void;
-    setActiveMenuOrderId: (id: number | null) => void;
+    // FIX: Update type to support functional updates for useState setters.
+    setLastModifiedOrderId: React.Dispatch<React.SetStateAction<number | null>>;
+    setActiveMenuOrderId: React.Dispatch<React.SetStateAction<number | null>>;
 }
 
 interface ScannerState {
@@ -326,7 +327,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, [isSyncing, customers, products, user, showToast]);
 
     const forceFullSync = useCallback(async () => {
-        if (!isInitialized()) {
+        if (!isDbReady()) {
             showAlert("데이터베이스에 연결되지 않아 동기화할 수 없습니다.");
             return;
         }
@@ -419,8 +420,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // --- Initial Data Load and Sync Effect ---
     useEffect(() => {
-        if (!user || !isInitialized()) {
-            setInitialSyncCompleted(!user);
+        if (!user || !isDbReady()) {
+            setInitialSyncCompleted(!user); // Complete if not logged in, wait if logged in but DB not ready
             return;
         }
     
@@ -486,19 +487,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     setSyncProgress(25);
         
                     setSyncStatusText("DEV MODE: 거래처 샘플 로딩 (10개)");
-                    const customerSnapshot = await firebaseDb.ref('customers').limitToFirst(10).get();
-                    const customerData = customerSnapshot.val() || {};
-                    const limitedCustomers = Object.values(customerData) as Customer[];
-                    setCustomers(limitedCustomers);
-                    await cache.setCachedData('customers', limitedCustomers);
+                    const limitedCustomers = await getStore<Customer>('customers'); 
+                    setCustomers(limitedCustomers.slice(0, 10));
+                    await cache.setCachedData('customers', limitedCustomers.slice(0, 10));
                     setSyncProgress(50);
         
                     setSyncStatusText("DEV MODE: 상품 샘플 로딩 (50개)");
-                    const productSnapshot = await firebaseDb.ref('products').limitToFirst(50).get();
-                    const productData = productSnapshot.val() || {};
-                    const limitedProducts = Object.values(productData) as Product[];
-                    setProducts(limitedProducts);
-                    await cache.setCachedData('products', limitedProducts);
+                     const limitedProducts = await getStore<Product>('products'); 
+                    setProducts(limitedProducts.slice(0, 50));
+                    await cache.setCachedData('products', limitedProducts.slice(0, 50));
                     setSyncProgress(75);
         
                     setSyncStatusText("앱 시작 준비 완료");
@@ -511,7 +508,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 } catch (error) {
                     console.error("Dev mode sync failed:", error);
                     showAlert("개발자 모드 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
-                    // Still try to load from cache as a fallback
                     const cachedCustomers = await cache.getCachedData<Customer>('customers');
                     setCustomers(cachedCustomers);
                     const cachedProducts = await cache.getCachedData<Product>('products');
@@ -522,7 +518,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 return;
             }
 
-            // This is now the full sync logic
             if (forceFullSyncFlag) {
                 try {
                     localStorage.removeItem('forceFullSyncOnNextLoad');
@@ -550,7 +545,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     googleDriveSyncSettings: { ...defaultDeviceSettings.googleDriveSyncSettings, ...(remoteSettings.googleDriveSyncSettings || {}) },
                 };
                 setDeviceSettings(loadedSettings);
-
             } catch (e) {
                 console.warn("Could not load device settings from Firebase", e);
             }
@@ -636,7 +630,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     })
                 );
                 
-                // Final automated log cleanup
                 if (loadedSettings.logRetentionDays > 0) {
                     setSyncStatusText("오래된 로그 정리");
                     await Promise.all([
@@ -649,7 +642,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSyncStatusText("앱 시작 준비 완료");
                 clearTimeout(syncTimeout);
                 
-                // A tiny delay before hiding the loader for smoother UI transition.
                 setTimeout(() => {
                     setInitialSyncCompleted(true);
                     setIsSyncing(false);
@@ -659,14 +651,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 console.error("Initial data sync failed:", error);
                 showAlert("데이터 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
                 clearTimeout(syncTimeout);
-                setInitialSyncCompleted(true); // Allow app to start with cached data
+                setInitialSyncCompleted(true);
                 setIsSyncing(false);
             }
         };
     
         runInitialSync();
     
-        // Cleanup listeners on component unmount or user change
         return () => {
             unsubscribers.forEach(unsubscribe => unsubscribe());
             clearTimeout(syncTimeout);
