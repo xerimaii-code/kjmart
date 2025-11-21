@@ -36,7 +36,7 @@ const ModalWrapper: React.FC<{
     className?: string;
     isActive: boolean;
     title?: string;
-}> = ({ children, onClose, className = 'max-w-lg', isActive, title }) => {
+}> = ({ children, onClose, className = 'max-w-lg max-h-[90vh]', isActive, title }) => {
     const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
@@ -58,7 +58,7 @@ const ModalWrapper: React.FC<{
             aria-modal="true"
         >
             <div
-                className={`bg-white rounded-xl shadow-lg w-full ${className} flex flex-col max-h-[85vh] transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                className={`bg-white rounded-xl shadow-lg w-full ${className} flex flex-col transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
                 onClick={e => e.stopPropagation()}
             >
                 {title && (
@@ -69,7 +69,7 @@ const ModalWrapper: React.FC<{
                         </button>
                     </div>
                 )}
-                <div className="overflow-y-auto p-4">
+                <div className="overflow-y-auto p-4 flex-grow">
                     {children}
                 </div>
             </div>
@@ -393,19 +393,19 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         <div className="h-full flex flex-col bg-gray-50">
             <div className="p-3 bg-white border-b border-gray-200 z-10 flex flex-col gap-3 flex-shrink-0">
                 <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <div className="flex items-center gap-1.5 flex-wrap pb-1">
                         <button 
                             onMouseDown={handleTableButtonStart} onMouseUp={handleTableButtonEnd} onMouseLeave={handleTableButtonEnd}
                             onTouchStart={handleTableButtonStart} onTouchEnd={handleTableButtonEnd}
-                            className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 border rounded-lg font-semibold text-sm active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                            className={`flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border rounded-lg font-semibold text-xs active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                         >
-                            <TableCellsIcon className="w-5 h-5"/> 
+                            <TableCellsIcon className="w-4 h-4"/> 
                             <span>{useSelectedTablesOnly ? `선택 테이블 (${selectedTables.length})` : '전체 테이블'}</span>
                         </button>
-                        <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm active:scale-95 transition"><BookmarkSquareIcon className="w-5 h-5"/> <span>쿼리</span></button>
-                        <button onClick={() => setAiModalOpen(true)} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm active:scale-95 transition"><SparklesIcon className="w-5 h-5 text-purple-500"/> <span>AI학습</span></button>
-                        {savedQueries.some(q => q.isQuickRun) && <div className="w-px h-6 bg-gray-300 mx-1 flex-shrink-0"></div>}
-                        {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => handleQuickRun(q)} className="flex-shrink-0 px-3 py-2 bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-sm font-bold hover:bg-blue-200 active:scale-95 transition">{q.name}</button>))}
+                        <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><BookmarkSquareIcon className="w-4 h-4"/> <span>쿼리</span></button>
+                        <button onClick={() => setAiModalOpen(true)} className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><SparklesIcon className="w-4 h-4 text-purple-500"/> <span>AI학습</span></button>
+                        {savedQueries.some(q => q.isQuickRun) && <div className="w-px h-5 bg-gray-300 mx-1 flex-shrink-0"></div>}
+                        {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => handleQuickRun(q)} className="flex-shrink-0 px-2 py-1.5 bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold hover:bg-blue-200 active:scale-95 transition">{q.name}</button>))}
                     </div>
                     <textarea 
                         ref={textareaRef} value={queryInput} onChange={(e) => setQueryInput(e.target.value)} rows={3} 
@@ -431,7 +431,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         <h3 className="font-bold text-lg">결과</h3>
                         {status === 'success' && result && (<div className="flex items-center gap-2"><button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button><button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button></div>)}
                     </div>
-                    <div className="flex-grow overflow-auto">
+                    <div className="flex-grow overflow-auto select-text" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
                         {status === 'loading' && <div className="flex justify-center items-center h-full"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>}
                         {status === 'error' && <div className="p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 font-medium">{error}</div>}
                         {status === 'success' && result && (
@@ -491,20 +491,20 @@ const EditQueryModal: React.FC<{
     };
 
     return (
-        <ModalWrapper isActive={!!query} onClose={onClose} title="쿼리 수정" className="max-w-2xl">
-            <div className="space-y-4">
+        <ModalWrapper isActive={!!query} onClose={onClose} title="쿼리 수정" className="w-[95vw] max-w-4xl h-[95vh]">
+            <div className="space-y-4 flex flex-col h-full">
                 <div>
                     <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 이름</label>
                     <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="쿼리 이름" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
                 </div>
-                <div>
+                <div className="flex-grow flex flex-col">
                     <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 내용</label>
-                    <textarea value={content} onChange={e => setContent(e.target.value)} rows={10} placeholder="쿼리 내용" className="w-full p-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
+                    <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="쿼리 내용" className="w-full p-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 flex-grow" />
                 </div>
-            </div>
-            <div className="mt-4 pt-4 border-t flex justify-end gap-2">
-                <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300">취소</button>
-                <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">저장</button>
+                <div className="pt-3 border-t flex justify-end gap-2 flex-shrink-0">
+                    <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300">취소</button>
+                    <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">저장</button>
+                </div>
             </div>
         </ModalWrapper>
     );
@@ -530,20 +530,20 @@ const EditLearningItemModal: React.FC<{
     };
 
     return (
-        <ModalWrapper isActive={!!item} onClose={onClose} title="AI 학습 규칙 수정" className="max-w-2xl">
-            <div className="space-y-4">
+        <ModalWrapper isActive={!!item} onClose={onClose} title="AI 학습 규칙 수정" className="w-[95vw] max-w-4xl h-[95vh]">
+            <div className="space-y-4 flex flex-col h-full">
                 <div>
                     <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 제목</label>
                     <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="규칙 제목" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
                 </div>
-                <div>
+                <div className="flex-grow flex flex-col">
                     <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 내용</label>
-                    <textarea value={content} onChange={e => setContent(e.target.value)} rows={10} placeholder="규칙 내용" className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
+                    <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="규칙 내용" className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 flex-grow" />
                 </div>
-            </div>
-            <div className="mt-4 pt-4 border-t flex justify-end gap-2">
-                <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300">취소</button>
-                <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">확인</button>
+                <div className="pt-3 border-t flex justify-end gap-2 flex-shrink-0">
+                    <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300">취소</button>
+                    <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">확인</button>
+                </div>
             </div>
         </ModalWrapper>
     );
