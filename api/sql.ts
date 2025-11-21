@@ -80,6 +80,29 @@ function formatSchemaForAI(schema: Record<string, any>): string {
     return schemaString;
 }
 
+// Helper to fetch context
+async function getLearningContext(clientContext: string | undefined) {
+    let learningContext = clientContext;
+    // Fallback to fetch from Firebase if context is not provided by the client
+    if (!learningContext) {
+        try {
+          const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
+          if (snapshot.exists()) {
+            const data = snapshot.val();
+            if (typeof data === 'string') {
+                learningContext = data;
+            } else if (typeof data === 'object' && data !== null) {
+                // Handle new list-based learning context
+                learningContext = Object.values(data).map((item: any) => `Title: ${item.title}\nContent: ${item.content}`).join('\n\n');
+            }
+          }
+        } catch (fbError) {
+          console.warn('Could not fetch learning context from Firebase:', fbError);
+        }
+    }
+    return learningContext || 'No additional context provided.';
+}
+
 
 // Main API handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -145,26 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         const schemaString = formatSchemaForAI(clientSchema || {});
-        
-        let learningContext = clientContext;
-        // Fallback to fetch from Firebase if context is not provided by the client
-        if (!learningContext) {
-            try {
-              const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
-              if (snapshot.exists()) {
-                const data = snapshot.val();
-                if (typeof data === 'string') {
-                    learningContext = data;
-                } else if (typeof data === 'object' && data !== null) {
-                    // Handle new list-based learning context
-                    learningContext = Object.values(data).map((item: any) => `Title: ${item.title}\nContent: ${item.content}`).join('\n\n');
-                }
-              }
-            } catch (fbError) {
-              console.warn('Could not fetch learning context from Firebase:', fbError);
-            }
-        }
-        if (!learningContext) learningContext = 'No additional context provided.';
+        const learningContext = await getLearningContext(clientContext);
 
         const prompt = `
           You are an expert T-SQL assistant. Based on the provided database schema and additional context, convert the user's natural language request into a valid T-SQL query.
@@ -191,6 +195,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const generatedSql = geminiResponse.text?.trim().replace(/```sql|```/g, '') || '';
         res.status(200).json({ sql: generatedSql });
+        break;
+
+      case 'aiChat':
+        if (!naturalLanguagePrompt) {
+          return res.status(400).json({ error: 'Prompt is required' });
+        }
+        const chatSchemaString = formatSchemaForAI(clientSchema || {});
+        const chatContext = await getLearningContext(clientContext);
+        
+        const chatPrompt = `
+          You are a helpful database assistant. Answer the user's question based on the provided database schema and context.
+          
+          **Database Schema:**
+          ${chatSchemaString}
+          
+          **Context:**
+          ${chatContext}
+          
+          **User Question:**
+          "${naturalLanguagePrompt}"
+          
+          Provide a clear, concise text answer. You can explain table structures, relationships, or suggest how to query data, but provide a descriptive answer, not just code.
+        `;
+        
+        const chatResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: chatPrompt,
+        });
+        
+        res.status(200).json({ answer: chatResponse.text });
         break;
 
       default:

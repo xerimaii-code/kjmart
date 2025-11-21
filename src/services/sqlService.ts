@@ -69,3 +69,12 @@ export async function naturalLanguageToSql(naturalLanguagePrompt: string, schema
         context
     });
 }
+
+export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, context: string): Promise<{ answer: string }> {
+    return fetchApi({
+        type: 'aiChat',
+        naturalLanguagePrompt,
+        schema,
+        context
+    });
+}

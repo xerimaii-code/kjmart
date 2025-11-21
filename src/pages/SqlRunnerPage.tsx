@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useAlert, useScanner } from '../context/AppContext';
-import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, BarcodeScannerIcon, SparklesIcon, StarIcon } from '../components/Icons';
-import { querySql, naturalLanguageToSql } from '../services/sqlService';
+import { useAlert } from '../context/AppContext';
+import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, SparklesIcon, StarIcon } from '../components/Icons';
+import { querySql, naturalLanguageToSql, aiChat } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
@@ -11,8 +11,9 @@ import { getLearningContext } from '../services/learningService';
 type QueryStatus = 'idle' | 'loading' | 'success' | 'error';
 
 interface QueryResult {
-    recordset: any[];
-    rowsAffected: number;
+    recordset?: any[];
+    rowsAffected?: number;
+    answer?: string;
 }
 interface SavedQuery {
     id: string;
@@ -81,7 +82,6 @@ const ModalWrapper: React.FC<{
 // --- MAIN PAGE COMPONENT ---
 const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { showAlert, showToast } = useAlert();
-    const { openScanner } = useScanner();
     
     const [queryInput, setQueryInput] = useState('');
     const [lastSuccessfulQuery, setLastSuccessfulQuery] = useState('');
@@ -99,6 +99,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [isAiModalOpen, setAiModalOpen] = useState(false);
     const [learningItems, setLearningItems] = useState<LearningItem[]>([]);
     
+    // AI Mode State
+    const [isAiMode, setIsAiMode] = useState(false);
+    
     const abortControllerRef = useRef<AbortController | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -109,6 +112,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     // Long press logic for execute button
     const executeLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isExecuteLongPress = useRef(false);
+    
+    // Long press logic for AI button
+    const aiLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isAiLongPress = useRef(false);
 
     useEffect(() => {
         if (isActive) {
@@ -165,6 +172,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const processNaturalLanguageQuery = useCallback(async (prompt: string) => {
         setStatus('loading');
         setError(null);
+        setResult(null);
+        
         try {
             const schema = await getCachedSchema();
             if (!schema) {
@@ -178,20 +187,29 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 );
             }
             const context = await getLearningContext();
-            const { sql } = await naturalLanguageToSql(prompt, schemaForQuery, context);
-            
-            if (sql) {
-                showToast('AI가 SQL 쿼리를 생성했습니다.', 'success');
-                setQueryInput(sql); // Show generated SQL in input
-                executeQuery(sql, prompt);
+
+            if (isAiMode) {
+                // Pure AI Mode
+                const response = await aiChat(prompt, schemaForQuery, context);
+                setResult({ answer: response.answer });
+                setStatus('success');
+                setLastSuccessfulQuery(prompt);
             } else {
-                throw new Error('AI가 유효한 SQL을 생성하지 못했습니다.');
+                // Text to SQL Mode
+                const { sql } = await naturalLanguageToSql(prompt, schemaForQuery, context);
+                if (sql) {
+                    showToast('AI가 SQL 쿼리를 생성했습니다.', 'success');
+                    setQueryInput(sql); 
+                    executeQuery(sql, prompt);
+                } else {
+                    throw new Error('AI가 유효한 SQL을 생성하지 못했습니다.');
+                }
             }
         } catch (err: any) {
-            setError(err.message || 'AI 쿼리 생성 중 오류 발생');
+            setError(err.message || 'AI 처리 중 오류 발생');
             setStatus('error');
         }
-    }, [executeQuery, selectedTables, useSelectedTablesOnly, showToast]);
+    }, [executeQuery, selectedTables, useSelectedTablesOnly, showToast, isAiMode]);
 
     const processAndExecute = useCallback(async (input: string) => {
         const currentInput = input.trim();
@@ -228,12 +246,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
         const isLikelySql = /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(currentInput);
 
-        if (isLikelySql) {
+        if (isLikelySql && !isAiMode) {
             executeQuery(currentInput);
         } else {
             processNaturalLanguageQuery(currentInput);
         }
-    }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery]);
+    }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery, isAiMode]);
 
     // --- Table Button Handlers ---
     const handleTableButtonStart = () => {
@@ -266,7 +284,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         isExecuteLongPress.current = false;
         executeLongPressTimer.current = setTimeout(() => {
             isExecuteLongPress.current = true;
-            setQueryInput('');
+            setQueryInput(''); // Clear the input
             if (navigator.vibrate) navigator.vibrate(50);
             showToast('입력창이 초기화되었습니다.', 'success');
         }, 600);
@@ -285,6 +303,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const handleExecuteClickWrapped = () => {
         if (isExecuteLongPress.current) {
             isExecuteLongPress.current = false;
+            // Do nothing else, as long press handled the clear
             return;
         }
         
@@ -292,10 +311,38 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (status === 'loading') {
             abortControllerRef.current?.abort();
             setStatus('idle');
-            showToast('쿼리 실행이 중단되었습니다.', 'error');
+            showToast('실행이 중단되었습니다.', 'error');
             return;
         }
         processAndExecute(queryInput);
+    };
+    
+    // --- AI Button Handlers ---
+    const handleAiButtonStart = () => {
+        isAiLongPress.current = false;
+        aiLongPressTimer.current = setTimeout(() => {
+            isAiLongPress.current = true;
+            setIsAiMode(prev => {
+                const next = !prev;
+                if (navigator.vibrate) navigator.vibrate(50);
+                showToast(next ? '완전 생성형 AI 모드 활성화' : '기본(Text-to-SQL) 모드 활성화', 'success');
+                return next;
+            });
+        }, 600);
+    };
+
+    const handleAiButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
+        if (aiLongPressTimer.current) {
+            clearTimeout(aiLongPressTimer.current);
+            aiLongPressTimer.current = null;
+        }
+        if (!isAiLongPress.current) {
+            // Short press: Trigger execution as AI/NL request
+            if (status === 'loading') return;
+            processAndExecute(queryInput);
+        } else {
+            if(e.cancelable && e.type !== 'touchend') e.preventDefault();
+        }
     };
 
     const handleSaveQuery = () => {
@@ -333,22 +380,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
     
     const handleQuickRun = (query: SavedQuery) => {
-        setQueryInput(query.query);
+        // Execute directly without setting input box
         if (query.type === 'sql') {
             executeQuery(query.query, `@${query.name}`);
         } else {
             processNaturalLanguageQuery(query.query);
         }
-    };
-
-    const handleScan = () => {
-        openScanner('modal', (barcode) => {
-            setQueryInput(prev => {
-                const prefix = prev ? prev + " " : "";
-                return prefix + barcode;
-            });
-            showToast('바코드가 입력되었습니다.', 'success');
-        }, false);
     };
     
     // AI Learning Modal Handlers
@@ -381,33 +418,42 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
     
     const handleCopyResults = () => {
-        if (!result || !result.recordset || result.recordset.length === 0) return;
-        
-        const headers = Object.keys(result.recordset[0]);
-        const tsv = [
-            headers.join('\t'),
-            ...result.recordset.map(row => 
-                headers.map(header => {
-                    const value = row[header];
-                    if (value === null || value === undefined) return '';
-                    return String(value).replace(/\t|\n|\r/g, ' ');
-                }).join('\t')
-            )
-        ].join('\n');
+        let textToCopy = '';
+        if (result?.answer) {
+            textToCopy = result.answer;
+        } else if (result?.recordset && result.recordset.length > 0) {
+            const headers = Object.keys(result.recordset[0]);
+            textToCopy = [
+                headers.join('\t'),
+                ...result.recordset.map(row => 
+                    headers.map(header => {
+                        const value = row[header];
+                        if (value === null || value === undefined) return '';
+                        return String(value).replace(/\t|\n|\r/g, ' ');
+                    }).join('\t')
+                )
+            ].join('\n');
+        }
 
-        navigator.clipboard.writeText(tsv).then(() => {
-            showToast('결과가 클립보드에 복사되었습니다.', 'success');
-        }, () => {
-            showToast('복사에 실패했습니다.', 'error');
-        });
+        if (textToCopy) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                showToast('결과가 클립보드에 복사되었습니다.', 'success');
+            }, () => {
+                showToast('복사에 실패했습니다.', 'error');
+            });
+        }
     };
     
     const sortedTables = useMemo(() => {
         const selectedSet = new Set(selectedTables);
-        const alphaSorted = [...allTables].sort((a, b) => a.localeCompare(b, 'ko', { sensitivity: 'base' }));
+        // Separate selected and unselected
+        const selected = [...allTables].filter(t => selectedSet.has(t));
+        const unselected = [...allTables].filter(t => !selectedSet.has(t));
         
-        const selected = alphaSorted.filter(t => selectedSet.has(t));
-        const unselected = alphaSorted.filter(t => !selectedSet.has(t));
+        // Sort each group alphabetically
+        selected.sort((a, b) => a.localeCompare(b, 'ko', { sensitivity: 'base' }));
+        unselected.sort((a, b) => a.localeCompare(b, 'ko', { sensitivity: 'base' }));
+
         return [...selected, ...unselected];
     }, [allTables, selectedTables]);
 
@@ -463,8 +509,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         value={queryInput} 
                         onChange={(e) => setQueryInput(e.target.value)}
                         rows={3} 
-                        placeholder="자연어나 SQL 쿼리를 입력하세요... (예: @오늘매출)"
-                        className="w-full p-2 border border-gray-300 rounded-lg font-mono text-base text-gray-900 bg-white select-text focus:ring-blue-500 focus:border-blue-500"
+                        placeholder={isAiMode ? "AI에게 자유롭게 질문하세요... (예: 이번 달 매출 분석해줘)" : "자연어나 SQL 쿼리를 입력하세요... (예: @오늘매출)"}
+                        className={`w-full p-2 border rounded-lg font-mono text-base text-gray-900 bg-white select-text transition-colors ${isAiMode ? 'border-purple-400 ring-1 ring-purple-400 focus:ring-purple-500 focus:border-purple-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                         style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
                         autoComplete="off"
                         autoCapitalize="none"
@@ -480,16 +526,21 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             onTouchStart={handleExecuteStart}
                             onTouchEnd={handleExecuteEnd}
                             onClick={handleExecuteClickWrapped}
-                            className="flex-grow h-12 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 text-lg transition active:scale-95 shadow-lg shadow-blue-500/30 select-none"
+                            className={`flex-grow h-12 text-white font-bold rounded-lg flex items-center justify-center gap-2 text-lg transition active:scale-95 shadow-lg select-none ${isAiMode ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/30' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'}`}
                         >
                             {status === 'loading' ? <><StopCircleIcon className="w-7 h-7"/> <span>중지</span></> : <><PlayCircleIcon className="w-7 h-7"/> <span>실행</span></>}
                         </button>
                          <button 
-                            onClick={handleScan} 
-                            className="w-16 flex items-center justify-center bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition shadow-sm"
-                            aria-label="바코드 스캔"
+                            onMouseDown={handleAiButtonStart}
+                            onMouseUp={handleAiButtonEnd}
+                            onMouseLeave={handleAiButtonEnd}
+                            onTouchStart={handleAiButtonStart}
+                            onTouchEnd={handleAiButtonEnd}
+                            className={`w-16 flex items-center justify-center border rounded-lg font-semibold hover:opacity-90 active:scale-95 transition shadow-sm ${isAiMode ? 'bg-purple-100 border-purple-300 text-purple-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                            aria-label="AI 모드"
+                            title="짧게 누르면 AI 실행, 길게 누르면 AI 모드 전환"
                         >
-                            <BarcodeScannerIcon className="w-7 h-7"/>
+                            <SparklesIcon className="w-7 h-7"/>
                         </button>
                     </div>
                 </div>
@@ -502,7 +553,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         {status === 'success' && result && (
                              <div className="flex items-center gap-2">
                                 <button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button>
-                                {result.recordset?.length > 0 && <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>}
+                                <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>
                             </div>
                         )}
                     </div>
@@ -512,18 +563,31 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         {status === 'error' && <div className="p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 font-medium">{error}</div>}
                         {status === 'success' && result && (
                             <div>
-                                <p className="text-sm text-green-600 font-semibold mb-2 flex items-center gap-2"><CheckCircleIcon className="w-5 h-5"/>쿼리 성공! (영향 받은 행: {result.rowsAffected})</p>
-                                {result.recordset?.length > 0 ? (
-                                    <div className="border border-gray-200 rounded-lg overflow-auto">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="bg-gray-100 sticky top-0 z-10"><tr className="border-b">{Object.keys(result.recordset[0]).map(key => <th key={key} className="p-2 font-bold whitespace-nowrap">{key}</th>)}</tr></thead>
-                                            <tbody>{result.recordset.map((row, i) => (<tr key={i} className="border-b last:border-b-0 hover:bg-gray-50">{Object.values(row).map((val: any, j) => <td key={j} className="p-2 whitespace-nowrap">{val === null ? 'NULL' : String(val)}</td>)}</tr>))}</tbody>
-                                        </table>
+                                {result.answer ? (
+                                    <div className="prose prose-sm max-w-none bg-purple-50 p-4 rounded-lg border border-purple-100">
+                                        <p className="whitespace-pre-wrap text-gray-800 leading-relaxed">{result.answer}</p>
                                     </div>
-                                ) : <p className="text-gray-500">결과 데이터가 없습니다.</p>}
+                                ) : (
+                                    <>
+                                        <p className="text-sm text-green-600 font-semibold mb-2 flex items-center gap-2"><CheckCircleIcon className="w-5 h-5"/>쿼리 성공! (영향 받은 행: {result.rowsAffected})</p>
+                                        {result.recordset && result.recordset.length > 0 ? (
+                                            <div className="border border-gray-200 rounded-lg overflow-auto">
+                                                <table className="w-full text-sm text-left">
+                                                    <thead className="bg-gray-100 sticky top-0 z-10"><tr className="border-b">{Object.keys(result.recordset[0]).map(key => <th key={key} className="p-2 font-bold whitespace-nowrap">{key}</th>)}</tr></thead>
+                                                    <tbody>{result.recordset.map((row, i) => (<tr key={i} className="border-b last:border-b-0 hover:bg-gray-50">{Object.values(row).map((val: any, j) => <td key={j} className="p-2 whitespace-nowrap">{val === null ? 'NULL' : String(val)}</td>)}</tr>))}</tbody>
+                                                </table>
+                                            </div>
+                                        ) : <p className="text-gray-500">결과 데이터가 없습니다.</p>}
+                                    </>
+                                )}
                             </div>
                         )}
-                         {status === 'idle' && !result && <div className="flex justify-center items-center h-full text-gray-400">쿼리를 실행하여 결과를 확인하세요.<br/>실행 버튼을 길게 누르면 입력창이 초기화됩니다.</div>}
+                         {status === 'idle' && !result && (
+                             <div className="flex flex-col justify-center items-center h-full text-gray-400 text-center p-4">
+                                <p className="mb-2">쿼리를 실행하여 결과를 확인하세요.</p>
+                                <p className="text-xs bg-gray-100 px-2 py-1 rounded">Tip: 실행 버튼을 길게 누르면 입력창이 초기화됩니다.</p>
+                             </div>
+                         )}
                     </div>
                 </div>
             </main>
