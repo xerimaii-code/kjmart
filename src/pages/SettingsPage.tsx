@@ -293,12 +293,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         setGoogleDriveSyncSettings,
     } = useDeviceSettings();
 
-    const { resetData, forceFullSync } = useDataActions();
+    const { resetData, forceFullSync, syncWithDb } = useDataActions();
     const { showAlert, showToast } = useAlert();
     const { logout, user } = useAuth();
     const { openHistoryModal, openClearHistoryModal } = useModals();
     const { isInstallPromptAvailable, triggerInstallPrompt } = usePWAInstall();
-    const { isSyncing } = useSyncState();
+    const { isSyncing, syncDataType, syncStatusText } = useSyncState();
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [isCleaning, setIsCleaning] = useState(false);
     
@@ -392,6 +392,21 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         );
     };
 
+    const handleDbSync = () => {
+        showAlert(
+            "데이터베이스에서 직접 데이터를 동기화하시겠습니까?\n이 작업은 시간이 걸릴 수 있습니다.",
+            async () => {
+                try {
+                    await syncWithDb();
+                } catch (e) {
+                    // error is already handled by syncWithDb
+                }
+            },
+            "동기화 실행",
+            'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+        );
+    };
+
     return (
         <div className="h-full flex flex-col bg-gray-50">
             <div className="scrollable-content">
@@ -446,6 +461,28 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     </CollapsibleCard>
 
                     <CollapsibleCard title="데이터 동기화" icon={<DatabaseIcon className="w-6 h-6 text-gray-500" />}>
+                        <div className="p-4 border border-blue-200 rounded-xl bg-blue-50/50 mb-4">
+                            <div className="space-y-3">
+                                <p className="text-sm text-center text-blue-800 font-semibold">버튼 하나로 데이터베이스의 모든 상품/거래처 데이터를 한번에 동기화합니다.</p>
+                                <button
+                                    onClick={handleDbSync}
+                                    disabled={isSyncing}
+                                    className="relative w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30"
+                                >
+                                    {isSyncing && syncDataType === 'full' ? (
+                                        <div className="absolute inset-0 flex items-center justify-center gap-2">
+                                            <SpinnerIcon className="w-5 h-5" />
+                                            <span>{syncStatusText}</span>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <DatabaseIcon className="w-6 h-6" />
+                                            <span>데이터베이스 직접 동기화</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
                         <SyncSection 
                             dataType="customers" 
                             settings={googleDriveSyncSettings.customers}

@@ -78,3 +78,7 @@ export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, co
         context
     });
 }
+
+export async function syncAllDataFromDb(): Promise<any[]> {
+    return fetchApi({ type: 'syncAllData' });
+}

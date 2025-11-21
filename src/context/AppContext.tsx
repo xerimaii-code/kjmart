@@ -17,6 +17,7 @@ import * as googleDrive from '../services/googleDriveService';
 import { getDeviceId } from '../services/deviceService';
 import Toast, { ToastState } from '../components/Toast';
 import { processExcelFileInWorker } from '../services/dataService';
+import { syncAllDataFromDb } from '../services/sqlService';
 import { IS_DEVELOPER_MODE } from '../config';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 
@@ -51,6 +52,7 @@ interface DataActions {
     clearOrders: () => Promise<void>;
     clearOrdersBeforeDate: (date: Date) => Promise<number>;
     syncWithFile: (file: File | Blob, dataType: 'customers' | 'products', source: 'local' | 'drive') => Promise<void>;
+    syncWithDb: () => Promise<void>;
     forceFullSync: () => Promise<void>;
     resetData: (dataType: 'customers' | 'products') => Promise<void>;
 }
@@ -176,6 +178,19 @@ const defaultDeviceSettings: DeviceSettings = {
     },
 };
 
+const formatDate = (date: any): string | undefined => {
+    if (!date) return undefined;
+    try {
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return undefined;
+        const year = d.getFullYear();
+        const month = (d.getMonth() + 1).toString().padStart(2, '0');
+        const day = d.getDate().toString().padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    } catch (e) {
+        return undefined;
+    }
+};
 
 // --- AppProvider Component ---
 
@@ -325,6 +340,83 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setSyncStatusText("");
         }
     }, [isSyncing, customers, products, user, showToast]);
+
+    const syncWithDb = useCallback(async () => {
+        if (isSyncing) {
+            showToast("이미 다른 동기화가 진행 중입니다.", 'error');
+            throw new Error("Sync already in progress");
+        }
+    
+        setIsSyncing(true);
+        setSyncDataType('full');
+        setSyncSource('drive'); // conceptually similar to a remote source
+        setSyncProgress(0);
+        setSyncStatusText("DB에서 데이터 다운로드 중...");
+    
+        try {
+            const rawData = await syncAllDataFromDb();
+            setSyncProgress(30);
+            setSyncStatusText(`데이터 처리 중 (${rawData.length}건)`);
+            
+            // 1. Process Customers
+            const customerMap = new Map<string, Customer>();
+            rawData.forEach(row => {
+                if (row.comcode && row.comname) {
+                    if (!customerMap.has(row.comcode)) {
+                        customerMap.set(row.comcode, { comcode: row.comcode, name: row.comname });
+                    }
+                }
+            });
+            const newCustomers = Array.from(customerMap.values());
+    
+            // 2. Process Products
+            const newProducts: Product[] = rawData.map((row: any) => {
+                const product: Product = {
+                    barcode: String(row.barcode || '').trim(),
+                    name: String(row.name || '').trim(),
+                    costPrice: parseFloat(String(row.costPrice || 0)),
+                    sellingPrice: parseFloat(String(row.sellingPrice || 0)),
+                    supplierName: String(row.comname || '').trim(),
+                };
+                const salePriceRaw = row.salePrice;
+                if (salePriceRaw !== null && salePriceRaw !== undefined) {
+                    product.salePrice = String(salePriceRaw).trim();
+                }
+                const saleEndDateFormatted = formatDate(row.saleEndDate);
+                if (saleEndDateFormatted) {
+                    product.saleEndDate = saleEndDateFormatted;
+                }
+                return product;
+            }).filter((p: Product) => p.barcode && p.name);
+    
+            // 3. Sync Customers
+            setSyncStatusText(`거래처 데이터 동기화...`);
+            setSyncProgress(50);
+            const customerSyncResult = await smartSyncData('customers', newCustomers, user?.email || 'unknown', (msg) => setSyncStatusText(`거래처: ${msg}`), customers);
+            setCustomers(newCustomers);
+            await cache.setCachedData('customers', newCustomers);
+            
+            // 4. Sync Products
+            setSyncStatusText(`상품 데이터 동기화...`);
+            setSyncProgress(75);
+            const productSyncResult = await smartSyncData('products', newProducts, user?.email || 'unknown', (msg) => setSyncStatusText(`상품: ${msg}`), products);
+            setProducts(newProducts);
+            await cache.setCachedData('products', newProducts);
+            
+            setSyncProgress(100);
+            showToast("DB 동기화 완료!", 'success');
+            
+        } catch (error: any) {
+            console.error(`Sync from DB failed:`, error);
+            showToast(`DB 동기화 실패: ${error.message}`, 'error');
+            throw error;
+        } finally {
+            setIsSyncing(false);
+            setSyncDataType(null);
+            setSyncSource(null);
+            setSyncStatusText("");
+        }
+    }, [isSyncing, user, showToast, customers, products]);
 
     const forceFullSync = useCallback(async () => {
         if (!isDbReady()) {
@@ -694,8 +786,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Context Provider Values ---
     const dataStateValue: DataState = useMemo(() => ({ customers, products }), [customers, products]);
     const dataActionsValue: DataActions = useMemo(() => ({
-        addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData
-    }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, forceFullSync, resetData]);
+        addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, syncWithDb, forceFullSync, resetData
+    }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithFile, syncWithDb, forceFullSync, resetData]);
 
     const syncStateValue: SyncState = useMemo(() => ({
         isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted

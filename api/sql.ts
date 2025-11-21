@@ -161,6 +161,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           rowsAffected: result.rowsAffected[0],
         });
         break;
+      
+      case 'syncAllData':
+        const syncQuery = `
+            SELECT
+                c.comcode AS comcode,
+                c.comname AS comname,
+                p.barcode AS barcode,
+                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END AS name,
+                p.money0vat AS costPrice,
+                p.money1 AS sellingPrice,
+                p.salemoney0 AS salePrice,
+                p.saleendday AS saleEndDate
+            FROM
+                comp AS c
+            INNER JOIN
+                parts AS p ON c.comcode = p.comcode
+            WHERE
+                (
+                    (
+                        c.comname NOT LIKE '%야채%'
+                    AND c.comname NOT LIKE '%과일%'
+                    AND c.comname NOT LIKE '%생선%'
+                    AND c.comname NOT LIKE '%정육%'
+                    AND c.comname NOT LIKE '%식품%'
+                    AND c.comname NOT LIKE '%비식품%'
+                    AND c.comname NOT LIKE '%기획%'
+                    AND c.comname NOT LIKE '%경진청과%'
+                    )
+                AND p.barcode IS NOT NULL
+                AND (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END) NOT LIKE '%---%'
+                AND p.money0vat <> 0
+                AND p.isuse <> '0'
+                )
+            OR
+                (p.barcode NOT LIKE '0000000%')
+            ORDER BY
+                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END;
+        `;
+        const syncResult = await pool.request().query(syncQuery);
+        res.status(200).json(syncResult.recordset);
+        break;
 
       case 'naturalLanguageToSql':
         if (!naturalLanguagePrompt) {
