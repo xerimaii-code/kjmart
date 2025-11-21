@@ -326,7 +326,18 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     const handleDeleteLearningItem = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        setLearningItems(learningItems.filter(item => item.id !== id));
+        const itemToDelete = learningItems.find(item => item.id === id);
+        if (!itemToDelete) return;
+
+        showAlert(
+            `'${itemToDelete.title}' 규칙을 삭제하시겠습니까?`,
+            () => {
+                setLearningItems(prevItems => prevItems.filter(item => item.id !== id));
+                showToast('규칙이 목록에서 제거되었습니다.\n"저장" 버튼을 눌러야 최종 반영됩니다.', 'success');
+            },
+            '삭제',
+            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+        );
     };
 
     const saveAiContext = async () => {
@@ -491,7 +502,7 @@ const EditQueryModal: React.FC<{
     };
 
     return (
-        <ModalWrapper isActive={!!query} onClose={onClose} title="쿼리 수정" className="w-[95vw] max-w-4xl h-[95vh]">
+        <ModalWrapper isActive={!!query} onClose={onClose} title="쿼리 수정" className="w-[95vw] max-w-4xl max-h-[90vh]">
             <div className="space-y-4 flex flex-col h-full">
                 <div>
                     <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 이름</label>
@@ -530,7 +541,7 @@ const EditLearningItemModal: React.FC<{
     };
 
     return (
-        <ModalWrapper isActive={!!item} onClose={onClose} title="AI 학습 규칙 수정" className="w-[95vw] max-w-4xl h-[95vh]">
+        <ModalWrapper isActive={!!item} onClose={onClose} title="AI 학습 규칙 수정" className="w-[95vw] max-w-4xl max-h-[90vh]">
             <div className="space-y-4 flex flex-col h-full">
                 <div>
                     <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 제목</label>
