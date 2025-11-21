@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage';
 import DeliveryTypeModal from './components/DeliveryTypeModal';
 import { exportToXLS, loadScript } from './services/dataService';
 import { useSwipeNavigation } from './hooks/useSwipeNavigation';
+import { syncAndCacheDbSchema } from './services/schemaService';
 
 // Lazy load pages and heavy modals
 const NewOrderPage = lazy(() => import('./pages/NewOrderPage'));
@@ -289,6 +290,18 @@ const AccessDeniedPage: React.FC = () => {
 const AppRouter: React.FC = () => {
     const { user, loading, isAdmin } = useAuth();
     const { initialSyncCompleted } = useSyncState();
+    const { showToast } = useAlert();
+
+    useEffect(() => {
+        // Run schema sync after user is authenticated and initial sync has started/is in progress
+        if (user && isAdmin) {
+            syncAndCacheDbSchema().catch(err => {
+                console.error("Failed to sync DB schema:", err);
+                showToast("DB 스키마 동기화 실패.", 'error');
+            });
+        }
+    }, [user, isAdmin, showToast]);
+
 
     if (loading) {
         return <PageSuspenseFallback />;
@@ -301,6 +314,8 @@ const AppRouter: React.FC = () => {
     if (!isAdmin) {
         return <AccessDeniedPage />;
     }
+
+
 
     if (!initialSyncCompleted) {
         return <InitialSyncLoader />;

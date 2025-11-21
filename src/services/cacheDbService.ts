@@ -1,11 +1,12 @@
 import { Customer, Product } from '../types';
 
 const DB_NAME = 'KJMartCacheDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented version for schema change
 const CUSTOMERS_STORE = 'customers';
 const PRODUCTS_STORE = 'products';
+const SETTINGS_STORE = 'settings'; // New store for generic key-value settings
 
-type StoreName = typeof CUSTOMERS_STORE | typeof PRODUCTS_STORE;
+type StoreName = typeof CUSTOMERS_STORE | typeof PRODUCTS_STORE | typeof SETTINGS_STORE;
 
 let db: IDBDatabase;
 
@@ -30,18 +31,57 @@ function openDB(): Promise<IDBDatabase> {
         request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result;
             if (!db.objectStoreNames.contains(CUSTOMERS_STORE)) {
-                // keyPath must match the unique identifier of the Customer interface
                 db.createObjectStore(CUSTOMERS_STORE, { keyPath: 'comcode' });
             }
             if (!db.objectStoreNames.contains(PRODUCTS_STORE)) {
-                // keyPath must match the unique identifier of the Product interface
                 db.createObjectStore(PRODUCTS_STORE, { keyPath: 'barcode' });
+            }
+            if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
+                db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
             }
         };
     });
 }
 
-export async function getCachedData<T>(storeName: StoreName): Promise<T[]> {
+// --- Generic Settings Store Functions ---
+
+export async function getSetting<T>(key: string): Promise<T | undefined> {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(SETTINGS_STORE, 'readonly');
+        const store = transaction.objectStore(SETTINGS_STORE);
+        const request = store.get(key);
+
+        request.onsuccess = () => {
+            resolve(request.result ? request.result.value : undefined);
+        };
+        request.onerror = (event) => {
+            console.error(`Error getting setting '${key}':`, (event.target as IDBRequest).error);
+            reject((event.target as IDBRequest).error);
+        };
+    });
+}
+
+export async function setSetting(key: string, value: any): Promise<void> {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(SETTINGS_STORE, 'readwrite');
+        const store = transaction.objectStore(SETTINGS_STORE);
+        const request = store.put({ key, value });
+
+        request.onsuccess = () => {
+            resolve();
+        };
+        request.onerror = (event) => {
+            console.error(`Error setting '${key}':`, (event.target as IDBRequest).error);
+            reject((event.target as IDBRequest).error);
+        };
+    });
+}
+
+// --- Data Store Functions ---
+
+export async function getCachedData<T>(storeName: 'customers' | 'products'): Promise<T[]> {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readonly');
@@ -58,25 +98,22 @@ export async function getCachedData<T>(storeName: StoreName): Promise<T[]> {
     });
 }
 
-export async function setCachedData(storeName: StoreName, data: Customer[] | Product[]): Promise<void> {
+export async function setCachedData(storeName: 'customers' | 'products', data: Customer[] | Product[]): Promise<void> {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
         
-        // Clear old data first
         const clearRequest = store.clear();
         clearRequest.onerror = () => {
              console.error(`Error clearing cache for ${storeName}:`, clearRequest.error);
              reject(clearRequest.error);
         }
         
-        // Add new data
         data.forEach(item => {
             const addRequest = store.put(item);
             addRequest.onerror = () => {
                  console.error(`Error adding item to cache for ${storeName}:`, addRequest.error);
-                 // Don't reject here, try to add as many as possible
             }
         });
 
@@ -91,33 +128,7 @@ export async function setCachedData(storeName: StoreName, data: Customer[] | Pro
     });
 }
 
-export async function appendCachedData(storeName: StoreName, data: (Customer | Product)[]): Promise<void> {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        if (data.length === 0) {
-            return resolve();
-        }
-
-        const transaction = db.transaction(storeName, 'readwrite');
-        const store = transaction.objectStore(storeName);
-
-        // Chain put requests
-        data.forEach(item => {
-            store.put(item);
-        });
-
-        transaction.oncomplete = () => {
-            resolve();
-        };
-
-        transaction.onerror = () => {
-            console.error(`Error appending cached data to ${storeName}:`, transaction.error);
-            reject(transaction.error);
-        };
-    });
-}
-
-export async function addOrUpdateCachedItem(storeName: StoreName, item: Customer | Product): Promise<void> {
+export async function addOrUpdateCachedItem(storeName: 'customers' | 'products', item: Customer | Product): Promise<void> {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
@@ -132,7 +143,7 @@ export async function addOrUpdateCachedItem(storeName: StoreName, item: Customer
     });
 }
 
-export async function removeCachedItem(storeName: StoreName, key: string): Promise<void> {
+export async function removeCachedItem(storeName: 'customers' | 'products', key: string): Promise<void> {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');

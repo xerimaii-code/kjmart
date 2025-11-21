@@ -43,27 +43,22 @@ const config: sql.config = {
 // Gemini AI Configuration
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Helper to get DB Schema for AI context
-async function getDbSchema(pool: sql.ConnectionPool, tables: string[] = []): Promise<string> {
-    let schema = 'Database Schema:\n';
-    let tablesToQuery = tables;
-
-    if (tablesToQuery.length === 0) {
-        const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
-        tablesToQuery = tableResult.recordset.map((row: any) => row.TABLE_NAME);
-    }
+// Helper to get structured DB Schema for caching
+async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
+    const schema: Record<string, { columns: { name: string; type: string }[] }> = {};
+    const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
+    const tablesToQuery = tableResult.recordset.map((row: any) => row.TABLE_NAME);
 
     for (const tableName of tablesToQuery) {
         try {
             const columnResult = await pool.request().query(`
                 SELECT COLUMN_NAME, DATA_TYPE 
                 FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_NAME = '${tableName}'
+                WHERE TABLE_NAME = N'${tableName}'
             `);
-            schema += `Table: ${tableName}\nColumns:\n`;
-            columnResult.recordset.forEach((col: any) => {
-                schema += `  - ${col.COLUMN_NAME} (${col.DATA_TYPE})\n`;
-            });
+            schema[tableName] = {
+                columns: columnResult.recordset.map((col: any) => ({ name: col.COLUMN_NAME, type: col.DATA_TYPE }))
+            };
         } catch (err) {
             console.warn(`Could not get schema for table ${tableName}:`, err);
         }
@@ -71,13 +66,28 @@ async function getDbSchema(pool: sql.ConnectionPool, tables: string[] = []): Pro
     return schema;
 }
 
+// Helper to format a structured schema object into a string for the AI prompt
+function formatSchemaForAI(schema: Record<string, any>): string {
+    let schemaString = 'Database Schema:\n';
+    for (const tableName in schema) {
+        if (schema[tableName] && schema[tableName].columns) {
+            schemaString += `Table: ${tableName}\nColumns:\n`;
+            schema[tableName].columns.forEach((col: any) => {
+                schemaString += `  - ${col.name} (${col.type})\n`;
+            });
+        }
+    }
+    return schemaString;
+}
+
+
 // Main API handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { type, query, naturalLanguagePrompt, selectedTables, context } = req.body;
+  const { type, query, naturalLanguagePrompt, schema: clientSchema, context: clientContext } = req.body;
   let pool: sql.ConnectionPool | undefined;
   
   // Log the connection details for debugging, excluding the password
@@ -113,6 +123,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json(tablesResult.recordset.map((row: any) => row.TABLE_NAME));
         break;
 
+      case 'getDatabaseSchema':
+        const fullSchema = await getFullDbSchema(pool);
+        res.status(200).json(fullSchema);
+        break;
+
       case 'query':
         if (!query || typeof query !== 'string') {
           return res.status(400).json({ error: 'Query is required' });
@@ -129,24 +144,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(400).json({ error: 'Natural language prompt is required' });
         }
         
-        // Fetch schema and learning context
-        const schema = await getDbSchema(pool, selectedTables);
+        const schemaString = formatSchemaForAI(clientSchema || {});
         
-        let learningContext = 'No additional context provided.';
-        try {
-          const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
-          if (snapshot.exists()) {
-            learningContext = snapshot.val();
-          }
-        } catch (fbError) {
-          console.warn('Could not fetch learning context from Firebase:', fbError);
+        let learningContext = clientContext;
+        if (!learningContext) {
+            try {
+              const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
+              if (snapshot.exists()) {
+                const data = snapshot.val();
+                if (typeof data === 'string') {
+                    learningContext = data;
+                } else if (typeof data === 'object' && data !== null) {
+                    learningContext = Object.values(data).map((item: any) => `Title: ${item.title}\nContent: ${item.content}`).join('\n\n');
+                }
+              }
+            } catch (fbError) {
+              console.warn('Could not fetch learning context from Firebase:', fbError);
+            }
         }
+        if (!learningContext) learningContext = 'No additional context provided.';
 
         const prompt = `
           You are an expert T-SQL assistant. Based on the provided database schema and additional context, convert the user's natural language request into a valid T-SQL query.
 
           **Database Schema:**
-          ${schema}
+          ${schemaString || 'No schema provided. Make your best guess.'}
 
           **Additional Context/Instructions:**
           ${learningContext}
@@ -158,7 +180,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           1.  Generate ONLY the T-SQL query. Do not include any explanation, comments, or markdown formatting.
           2.  If the user's request is ambiguous, make a reasonable assumption based on the schema and context.
           3.  If a query cannot be formed, return an empty response.
-          4.  If specific tables are mentioned in the schema, prioritize using them in your query.
         `;
 
         const geminiResponse = await ai.models.generateContent({
@@ -166,7 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           contents: prompt,
         });
 
-        const generatedSql = geminiResponse.text?.trim() || '';
+        const generatedSql = geminiResponse.text?.trim().replace(/```sql|```/g, '') || '';
         res.status(200).json({ sql: generatedSql });
         break;
 
