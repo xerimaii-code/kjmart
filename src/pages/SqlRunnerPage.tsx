@@ -276,7 +276,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </button>
             </div>
             
-            <main className="flex-grow overflow-hidden p-3 flex">
+            <main className="flex-grow p-3 flex">
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm w-full flex flex-col h-full">
                     <div className="flex justify-between items-center mb-2 flex-shrink-0">
                         <h3 className="font-bold text-lg">결과</h3>
