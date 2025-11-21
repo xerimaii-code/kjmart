@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAlert } from '../context/AppContext';
-import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, SparklesIcon, StarIcon } from '../components/Icons';
+import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, SparklesIcon, StarIcon, ChevronDownIcon, MoreVerticalIcon } from '../components/Icons';
 import { querySql, naturalLanguageToSql, aiChat } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
@@ -99,6 +99,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [isAiModalOpen, setAiModalOpen] = useState(false);
     const [learningItems, setLearningItems] = useState<LearningItem[]>([]);
     
+    // Expanded states
+    const [expandedQueryId, setExpandedQueryId] = useState<string | null>(null);
+    const [expandedLearningId, setExpandedLearningId] = useState<string | null>(null);
+
     // AI Mode State
     const [isAiMode, setIsAiMode] = useState(false);
     
@@ -116,6 +120,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     // Long press logic for AI button
     const aiLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isAiLongPress = useRef(false);
+    
+    // Drag and Drop state for Learning Items
+    const dragIndex = useRef<number | null>(null);
+    const [dropIndex, setDropIndex] = useState<number | null>(null);
+
 
     useEffect(() => {
         if (isActive) {
@@ -138,11 +147,19 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 } else if (typeof data === 'string') {
                      setLearningItems([{ id: Date.now().toString(), title: '기본 컨텍스트', content: data }]);
                 } else {
-                    const items = Object.entries(data).map(([key, val]: [string, any]) => ({
-                        id: key,
-                        title: val.title || '제목 없음',
-                        content: val.content || ''
-                    }));
+                    // If it's an object, we assume it's keyed by ID, but we want to respect an order if possible.
+                    // Since Firebase Realtime DB keys are sorted strings, they often preserve insertion order if using push(),
+                    // but here we might have saved an array-like object or map. 
+                    // If we saved as an array (indices), Object.values works. 
+                    // If we saved as a map, we might need a sort field. 
+                    // For now, we treat it as a list.
+                    const items = Array.isArray(data) 
+                        ? data 
+                        : Object.entries(data).map(([key, val]: [string, any]) => ({
+                            id: key,
+                            title: val.title || '제목 없음',
+                            content: val.content || ''
+                        }));
                     setLearningItems(items);
                 }
             });
@@ -358,7 +375,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
 
-    const handleDeleteSavedQuery = (id: string) => {
+    const handleDeleteSavedQuery = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
         showAlert(
             '이 쿼리를 삭제하시겠습니까?',
             () => {
@@ -369,7 +387,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         );
     };
 
-    const handleLoadSavedQuery = (query: SavedQuery) => {
+    const handleLoadSavedQuery = (e: React.MouseEvent, query: SavedQuery) => {
+        e.stopPropagation();
         setQueryInput(query.query);
         setSavedQueriesModalOpen(false);
     };
@@ -388,34 +407,82 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
     
-    // AI Learning Modal Handlers
+    const toggleQueryExpand = (id: string) => {
+        setExpandedQueryId(prev => prev === id ? null : id);
+    };
+
+    // --- AI Learning Modal Handlers ---
     const handleAddLearningItem = () => {
         const id = 'item_' + Date.now();
-        setLearningItems([...learningItems, { id, title: '새 규칙', content: '' }]);
+        const newItem = { id, title: '새 규칙', content: '' };
+        setLearningItems([newItem, ...learningItems]);
+        setExpandedLearningId(id); // Automatically expand new item
     };
     
     const handleUpdateLearningItem = (id: string, field: 'title' | 'content', value: string) => {
         setLearningItems(learningItems.map(item => item.id === id ? { ...item, [field]: value } : item));
     };
     
-    const handleDeleteLearningItem = (id: string) => {
+    const handleDeleteLearningItem = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
         setLearningItems(learningItems.filter(item => item.id !== id));
     };
     
+    const toggleLearningExpand = (id: string) => {
+        setExpandedLearningId(prev => prev === id ? null : id);
+    };
+
     const saveAiContext = async () => {
-        const dataMap = learningItems.reduce((acc, item) => {
-            acc[item.id] = { title: item.title, content: item.content };
-            return acc;
-        }, {} as any);
-        
+        // We just save the array as is. Firebase handles array-like objects well, 
+        // or we can save it as an object keyed by index if we want strict ordering.
+        // To ensure order is preserved easily, we save as an array.
         try {
-            await setValue('learning/sqlContext', dataMap);
+            await setValue('learning/sqlContext', learningItems);
             showToast('AI 학습 데이터가 저장되었습니다.', 'success');
             setAiModalOpen(false);
         } catch(e) {
             showAlert('저장에 실패했습니다.');
         }
     };
+    
+    // --- Drag and Drop for Learning Items ---
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+        dragIndex.current = index;
+        e.dataTransfer.effectAllowed = 'move';
+        (e.currentTarget as HTMLElement).classList.add('dragging');
+    };
+    
+    const handleDragEnter = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        if (dragIndex.current === index) return;
+        setDropIndex(index);
+    };
+    
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+    };
+    
+    const handleDragEnd = (e: React.DragEvent) => {
+        (e.currentTarget as HTMLElement).classList.remove('dragging');
+        dragIndex.current = null;
+        setDropIndex(null);
+    };
+    
+    const handleDrop = () => {
+        if (dragIndex.current !== null && dropIndex !== null) {
+            const fromIndex = dragIndex.current;
+            const toIndex = dropIndex > fromIndex ? dropIndex - 1 : dropIndex;
+            if (fromIndex !== toIndex) {
+                setLearningItems(prev => {
+                    const result = Array.from(prev);
+                    const [removed] = result.splice(fromIndex, 1);
+                    result.splice(toIndex, 0, removed);
+                    return result;
+                });
+            }
+        }
+    };
+
     
     const handleCopyResults = () => {
         let textToCopy = '';
@@ -477,7 +544,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             onTouchEnd={handleTableButtonEnd}
                             className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 border rounded-lg font-semibold text-sm active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                         >
-                            <TableCellsIcon className="w-5 h-5"/> <span>테이블 ({selectedTables.length})</span>
+                            <TableCellsIcon className="w-5 h-5"/> 
+                            <span>
+                                {useSelectedTablesOnly 
+                                    ? `선택 테이블 (${selectedTables.length})` 
+                                    : '전체 테이블'
+                                }
+                            </span>
                         </button>
                         
                         <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm active:scale-95 transition">
@@ -536,11 +609,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             onMouseLeave={handleAiButtonEnd}
                             onTouchStart={handleAiButtonStart}
                             onTouchEnd={handleAiButtonEnd}
-                            className={`w-16 flex items-center justify-center border rounded-lg font-semibold hover:opacity-90 active:scale-95 transition shadow-sm ${isAiMode ? 'bg-purple-100 border-purple-300 text-purple-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                            className={`flex items-center justify-center border rounded-lg font-semibold hover:opacity-90 active:scale-95 transition shadow-sm ${isAiMode ? 'bg-purple-100 border-purple-300 text-purple-600 px-3 w-auto' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 w-16'}`}
                             aria-label="AI 모드"
                             title="짧게 누르면 AI 실행, 길게 누르면 AI 모드 전환"
                         >
                             <SparklesIcon className="w-7 h-7"/>
+                            {isAiMode && <span className="ml-1 text-sm whitespace-nowrap">AI 모드</span>}
                         </button>
                     </div>
                 </div>
@@ -629,41 +703,55 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 {savedQueries.length === 0 ? (
                     <p className="text-center text-gray-500 py-8">저장된 쿼리가 없습니다.</p>
                 ) : (
-                    <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-                        {savedQueries.map(q => (
-                            <div key={q.id} className="p-3 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
-                                <div className="flex justify-between items-start mb-1">
-                                    <div className="flex items-center gap-2">
-                                        <button 
-                                            onClick={(e) => handleToggleQuickRun(e, q)} 
-                                            className={`p-1 rounded-md transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-50' : 'text-gray-300 hover:text-yellow-400'}`}
-                                            title={q.isQuickRun ? "빠른 실행 해제" : "빠른 실행 등록"}
-                                        >
-                                            <StarIcon className={`w-5 h-5 ${q.isQuickRun ? 'fill-current' : ''}`} />
-                                        </button>
-                                        <h4 className="font-bold text-gray-800">{q.name}</h4>
+                    <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                        {savedQueries.map(q => {
+                            const isExpanded = expandedQueryId === q.id;
+                            return (
+                                <div key={q.id} className="border border-gray-200 rounded-lg overflow-hidden transition-colors hover:border-blue-300">
+                                    <div 
+                                        onClick={() => toggleQueryExpand(q.id)}
+                                        className="flex justify-between items-center p-3 bg-white cursor-pointer hover:bg-gray-50"
+                                    >
+                                        <div className="flex items-center gap-3 flex-grow min-w-0">
+                                            <button 
+                                                onClick={(e) => handleToggleQuickRun(e, q)} 
+                                                className={`p-1 rounded-md transition-colors flex-shrink-0 ${q.isQuickRun ? 'text-yellow-500 bg-yellow-50' : 'text-gray-300 hover:text-yellow-400'}`}
+                                                title={q.isQuickRun ? "빠른 실행 해제" : "빠른 실행 등록"}
+                                            >
+                                                <StarIcon className={`w-5 h-5 ${q.isQuickRun ? 'fill-current' : ''}`} />
+                                            </button>
+                                            <h4 className="font-bold text-gray-800 truncate">{q.name}</h4>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                            <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                        </div>
                                     </div>
-                                    <div className="flex gap-1">
-                                         <button onClick={() => handleLoadSavedQuery(q)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md" title="불러오기">
-                                            <PencilSquareIcon className="w-4 h-4"/>
-                                        </button>
-                                        <button onClick={() => handleDeleteSavedQuery(q.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-md" title="삭제">
-                                            <TrashIcon className="w-4 h-4"/>
-                                        </button>
-                                    </div>
+                                    
+                                    {isExpanded && (
+                                        <div className="p-3 bg-gray-50 border-t border-gray-100 animate-fade-in-down">
+                                            <p className="text-sm text-gray-600 font-mono bg-white p-2 rounded border border-gray-200 mb-3 break-all whitespace-pre-wrap max-h-32 overflow-y-auto">{q.query}</p>
+                                            <div className="flex gap-2">
+                                                 <button onClick={(e) => handleLoadSavedQuery(e, q)} className="flex-1 py-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200">
+                                                    입력창으로 불러오기
+                                                </button>
+                                                <button onClick={(e) => handleDeleteSavedQuery(e, q.id)} className="px-3 py-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200" title="삭제">
+                                                    <TrashIcon className="w-5 h-5"/>
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        handleQuickRun(q);
+                                                        setSavedQueriesModalOpen(false);
+                                                    }}
+                                                    className="flex-1 py-2 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm"
+                                                >
+                                                    바로 실행
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                                <p className="text-sm text-gray-600 line-clamp-2 font-mono bg-gray-50 p-1.5 rounded mb-2 break-all">{q.query}</p>
-                                <button 
-                                    onClick={() => {
-                                        handleQuickRun(q);
-                                        setSavedQueriesModalOpen(false);
-                                    }}
-                                    className="w-full py-2 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 flex items-center justify-center gap-1"
-                                >
-                                    <PlayCircleIcon className="w-4 h-4" /> 바로 실행
-                                </button>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </ModalWrapper>
@@ -676,43 +764,70 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <SparklesIcon className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5"/>
                             <div className="text-sm text-gray-700">
                                 <p className="font-semibold">자연어 질의 시 AI가 참고할 규칙 목록입니다.</p>
-                                <p className="text-xs text-gray-500 mt-1">예: '매출'의 정의, 특정 테이블 조인 방법 등</p>
+                                <p className="text-xs text-gray-500 mt-1">목록을 드래그하여 우선순위를 변경할 수 있습니다.</p>
                             </div>
                          </div>
                          <button onClick={handleAddLearningItem} className="flex-shrink-0 text-sm bg-white border border-blue-200 text-blue-600 px-3 py-1.5 rounded-lg font-bold hover:bg-blue-50 transition shadow-sm">추가</button>
                     </div>
                     
-                    <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+                    <div className="space-y-2 max-h-[50vh] overflow-y-auto" onDragOver={handleDragOver} onDrop={handleDrop}>
                         {learningItems.length === 0 ? (
                             <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50">
                                 <p className="text-gray-400">등록된 규칙이 없습니다.</p>
                                 <button onClick={handleAddLearningItem} className="mt-2 text-sm font-bold text-blue-500 hover:underline">새 규칙 추가하기</button>
                             </div>
                         ) : (
-                            learningItems.map((item, index) => (
-                                <div key={item.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
-                                    <div className="flex justify-between items-center mb-2 gap-2 border-b border-gray-100 pb-2">
-                                         <div className="flex items-center gap-2 flex-grow">
-                                            <span className="text-xs font-bold text-gray-400 w-6">#{index + 1}</span>
-                                            <input 
-                                                className="font-bold text-gray-800 bg-transparent border-none focus:ring-0 p-0 w-full placeholder-gray-300"
-                                                value={item.title}
-                                                onChange={(e) => handleUpdateLearningItem(item.id, 'title', e.target.value)}
-                                                placeholder="규칙 제목 (예: 매출 정의)"
-                                            />
-                                         </div>
-                                         <button onClick={() => handleDeleteLearningItem(item.id)} className="text-gray-400 hover:text-red-500 p-1 transition-colors"><TrashIcon className="w-4 h-4"/></button>
-                                    </div>
-                                    <textarea
-                                        className="w-full text-sm text-gray-700 bg-gray-50 rounded p-2 border border-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
-                                        rows={3}
-                                        value={item.content}
-                                        onChange={(e) => handleUpdateLearningItem(item.id, 'content', e.target.value)}
-                                        placeholder="규칙 내용 (예: '매출'은 orders 테이블의 total 합계입니다.)"
-                                    />
-                                </div>
-                            ))
+                            learningItems.map((item, index) => {
+                                const isExpanded = expandedLearningId === item.id;
+                                return (
+                                    <React.Fragment key={item.id}>
+                                        {dropIndex === index && <div className="drag-over-placeholder" />}
+                                        <div 
+                                            draggable
+                                            onDragStart={(e) => handleDragStart(e, index)}
+                                            onDragEnter={(e) => handleDragEnter(e, index)}
+                                            onDragEnd={handleDragEnd}
+                                            className="border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden cursor-move"
+                                        >
+                                            <div 
+                                                onClick={() => toggleLearningExpand(item.id)}
+                                                className="flex items-center p-3 gap-2 hover:bg-gray-50 cursor-pointer"
+                                            >
+                                                <div className="text-gray-400 cursor-grab active:cursor-grabbing p-1">
+                                                    <MoreVerticalIcon className="w-5 h-5"/>
+                                                </div>
+                                                <div className="flex-grow">
+                                                    <input 
+                                                        className="font-bold text-gray-800 bg-transparent border-none focus:ring-0 p-0 w-full placeholder-gray-300 cursor-pointer hover:underline focus:no-underline"
+                                                        value={item.title}
+                                                        onChange={(e) => handleUpdateLearningItem(item.id, 'title', e.target.value)}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        placeholder="규칙 제목 (예: 매출 정의)"
+                                                    />
+                                                </div>
+                                                <button onClick={(e) => handleDeleteLearningItem(e, item.id)} className="text-gray-400 hover:text-red-500 p-1 transition-colors mr-1">
+                                                    <TrashIcon className="w-4 h-4"/>
+                                                </button>
+                                                <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                            </div>
+
+                                            {isExpanded && (
+                                                <div className="p-3 bg-gray-50 border-t border-gray-100 animate-fade-in-down cursor-auto" onMouseDown={e => e.stopPropagation()}>
+                                                    <textarea
+                                                        className="w-full text-sm text-gray-700 bg-white rounded p-2 border border-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                                                        rows={4}
+                                                        value={item.content}
+                                                        onChange={(e) => handleUpdateLearningItem(item.id, 'content', e.target.value)}
+                                                        placeholder="규칙 내용 (예: '매출'은 orders 테이블의 total 합계입니다.)"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </React.Fragment>
+                                );
+                            })
                         )}
+                        {dropIndex === learningItems.length && <div className="drag-over-placeholder" />}
                     </div>
                     
                     <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
