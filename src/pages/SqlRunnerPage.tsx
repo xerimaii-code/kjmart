@@ -439,9 +439,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     </div>
                 </div>
                 <textarea 
-                    ref={textareaRef} value={queryInput} onChange={(e) => setQueryInput(e.target.value)} rows={3} 
+                    ref={textareaRef} value={queryInput} onChange={(e) => setQueryInput(e.target.value)}
                     placeholder={isAiMode ? "AI에게 자유롭게 질문하세요..." : "자연어나 SQL 쿼리를 입력하세요..."}
-                    className={`w-full p-2 border rounded-lg font-mono text-base text-gray-900 bg-white select-text transition-colors ${isAiMode ? 'border-purple-400 ring-1 ring-purple-400 focus:ring-purple-500 focus:border-purple-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
+                    className={`w-full h-12 p-2 border rounded-lg font-mono text-base text-gray-900 bg-white select-text transition-colors resize-none ${isAiMode ? 'border-purple-400 ring-1 ring-purple-400 focus:ring-purple-500 focus:border-purple-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                     style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
                     autoComplete="off" autoCapitalize="none" spellCheck={false}
                 />
@@ -456,9 +456,22 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             </div>
             <main className="flex-grow p-3 flex overflow-hidden">
-                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm w-full flex flex-col h-full">
-                    <div className="flex justify-between items-center mb-2 flex-shrink-0">
-                        <h3 className="font-bold text-lg">결과</h3>
+                <div className="relative bg-white p-4 rounded-xl border border-gray-200 shadow-sm w-full flex flex-col h-full">
+                    {(status === 'success' || status === 'error') && (
+                        <button
+                            onClick={() => {
+                                setResult(null);
+                                setError(null);
+                                setStatus('idle');
+                            }}
+                            className="absolute top-2 right-2 z-10 p-1 text-gray-400 hover:bg-gray-100 rounded-full transition-colors"
+                            aria-label="결과 지우기"
+                            title="결과 지우기"
+                        >
+                            <RemoveIcon className="w-4 h-4" />
+                        </button>
+                    )}
+                    <div className="flex justify-end items-center mb-2 flex-shrink-0 h-8">
                         {status === 'success' && result && (<div className="flex items-center gap-2"><button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button><button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button></div>)}
                     </div>
                     <div className="flex-grow overflow-auto select-text" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
@@ -474,7 +487,17 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 )}
                             </div>
                         )}
-                        {status === 'idle' && !result && (<div className="flex flex-col justify-center items-center h-full text-gray-400 text-center p-4"><p className="mb-2">쿼리를 실행하여 결과를 확인하세요.</p><p className="text-xs bg-gray-100 px-2 py-1 rounded">Tip: 실행 버튼을 길게 누르면 입력창이 초기화됩니다.</p></div>)}
+                        {status === 'idle' && !result && !error && (
+                            <div className="flex flex-col justify-center items-center h-full text-gray-400 text-center p-4">
+                                <div className="text-left text-xs space-y-2 bg-gray-100 p-4 rounded-lg text-gray-500 max-w-md w-full">
+                                    <h4 className="font-bold text-gray-600 mb-1">💡 숨겨진 기능 팁</h4>
+                                    <p><strong>- 실행 버튼 (길게 누르기):</strong> 입력창 내용을 초기화합니다.</p>
+                                    <p><strong>- 테이블 버튼 (길게 누르기):</strong> '선택/전체 테이블' 모드를 전환합니다.</p>
+                                    <p><strong>- AI 버튼 (길게 누르기):</strong> 'AI 모드'를 활성화/비활성화합니다.</p>
+                                    <p><strong>- 빠른 실행:</strong> '쿼리 관리'에서 별표(★)를 눌러 단축 버튼을 만들 수 있습니다.</p>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </main>
