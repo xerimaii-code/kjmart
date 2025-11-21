@@ -116,10 +116,69 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, []);
 
+    const processNaturalLanguageQuery = useCallback(async (prompt: string) => {
+        setStatus('loading');
+        setError(null);
+        try {
+            const schema = await getCachedSchema();
+            if (!schema) {
+                throw new Error("데이터베이스 스키마 정보를 로드할 수 없습니다.");
+            }
+
+            let schemaForQuery = schema;
+            if (useSelectedTablesOnly && selectedTables.length > 0) {
+                schemaForQuery = Object.fromEntries(
+                    Object.entries(schema).filter(([tableName]) => selectedTables.includes(tableName))
+                );
+            }
+            const context = await getLearningContext();
+            const { sql } = await naturalLanguageToSql(prompt, schemaForQuery, context);
+            
+            if (sql) {
+                showToast('AI가 SQL 쿼리를 생성했습니다.', 'success');
+                setQueryInput(sql); // Show generated SQL in input
+                executeQuery(sql, prompt);
+            } else {
+                throw new Error('AI가 유효한 SQL을 생성하지 못했습니다.');
+            }
+        } catch (err: any) {
+            setError(err.message || 'AI 쿼리 생성 중 오류 발생');
+            setStatus('error');
+        }
+    }, [executeQuery, selectedTables, useSelectedTablesOnly, showToast]);
+
     const processAndExecute = useCallback(async (input: string) => {
         const currentInput = input.trim();
         if (!currentInput) {
             showAlert('실행할 내용을 입력해주세요.');
+            return;
+        }
+
+        // Handle '@' shortcut for saved queries
+        if (currentInput.startsWith('@')) {
+            const parts = currentInput.slice(1).split(/\s+/);
+            const queryName = parts[0];
+            const additionalPrompt = parts.slice(1).join(' ');
+
+            const savedQuery = savedQueries.find(q => q.name.toLowerCase() === queryName.toLowerCase());
+
+            if (!savedQuery) {
+                showAlert(`'${queryName}' 이름으로 저장된 쿼리를 찾을 수 없습니다.`);
+                return;
+            }
+
+            // If there's additional context, treat it as a combined natural language query
+            if (additionalPrompt) {
+                const combinedPrompt = `Based on the query or concept named "${savedQuery.name}" (which is: "${savedQuery.query}"), please perform the following additional request: "${additionalPrompt}"`;
+                processNaturalLanguageQuery(combinedPrompt);
+            } else {
+                // Execute the saved query directly
+                if (savedQuery.type === 'sql') {
+                    executeQuery(savedQuery.query, `@${savedQuery.name}`);
+                } else {
+                    processNaturalLanguageQuery(savedQuery.query);
+                }
+            }
             return;
         }
 
@@ -128,36 +187,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (isLikelySql) {
             executeQuery(currentInput);
         } else {
-            setStatus('loading');
-            setError(null);
-            try {
-                const schema = await getCachedSchema();
-                if (!schema) {
-                    throw new Error("데이터베이스 스키마 정보를 로드할 수 없습니다.");
-                }
-
-                let schemaForQuery = schema;
-                if (useSelectedTablesOnly && selectedTables.length > 0) {
-                    schemaForQuery = Object.fromEntries(
-                        Object.entries(schema).filter(([tableName]) => selectedTables.includes(tableName))
-                    );
-                }
-                const context = await getLearningContext();
-                const { sql } = await naturalLanguageToSql(currentInput, schemaForQuery, context);
-                
-                if (sql) {
-                    showToast('AI가 SQL 쿼리를 생성했습니다.', 'success');
-                    setQueryInput(sql); // Show generated SQL in input
-                    executeQuery(sql, currentInput);
-                } else {
-                    throw new Error('AI가 유효한 SQL을 생성하지 못했습니다.');
-                }
-            } catch (err: any) {
-                setError(err.message || 'AI 쿼리 생성 중 오류 발생');
-                setStatus('error');
-            }
+            processNaturalLanguageQuery(currentInput);
         }
-    }, [executeQuery, selectedTables, useSelectedTablesOnly, showAlert, showToast]);
+    }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery]);
 
     const handleExecuteClick = () => {
         if (status === 'loading') {
@@ -206,8 +238,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     const sortedTables = useMemo(() => {
         const selectedSet = new Set(selectedTables);
-        const selected = allTables.filter(t => selectedSet.has(t));
-        const unselected = allTables.filter(t => !selectedSet.has(t));
+        const selected = allTables.filter(t => selectedSet.has(t)).sort((a, b) => a.localeCompare(b));
+        const unselected = allTables.filter(t => !selectedSet.has(t)).sort((a, b) => a.localeCompare(b));
         return [...selected, ...unselected];
     }, [allTables, selectedTables]);
 
@@ -233,7 +265,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         }
                     }}
                     rows={3} 
-                    placeholder="자연어나 SQL 쿼리를 입력하세요..."
+                    placeholder="자연어나 SQL 쿼리를 입력하세요... (예: @오늘매출)"
                     className="w-full p-2 border border-gray-300 rounded-lg font-mono text-base focus:ring-blue-500 focus:border-blue-500"
                 />
                 <button 
