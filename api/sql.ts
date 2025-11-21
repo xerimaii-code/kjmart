@@ -165,10 +165,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'syncAllData':
         const syncQuery = `
             SELECT
-                c.comcode AS comcode,
-                c.comname AS comname,
-                p.barcode AS barcode,
-                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END AS name,
+                LTRIM(RTRIM(c.comcode)) AS comcode,
+                LTRIM(RTRIM(c.comname)) AS comname,
+                LTRIM(RTRIM(p.barcode)) AS barcode,
+                LTRIM(RTRIM(CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END)) AS name,
                 p.money0vat AS costPrice,
                 p.money1 AS sellingPrice,
                 p.salemoney0 AS salePrice,

@@ -192,6 +192,14 @@ const formatDate = (date: any): string | undefined => {
     }
 };
 
+const sanitizeFirebaseKey = (key: string): string => {
+    if (typeof key !== 'string') return '';
+    // Firebase keys can't contain ., #, $, /, [, or ]
+    // We replace them with an underscore.
+    return key.replace(/[.#$[\]/]/g, '_');
+};
+
+
 // --- AppProvider Component ---
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -361,9 +369,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             // 1. Process Customers
             const customerMap = new Map<string, Customer>();
             rawData.forEach(row => {
-                if (row.comcode && row.comname) {
-                    if (!customerMap.has(row.comcode)) {
-                        customerMap.set(row.comcode, { comcode: row.comcode, name: row.comname });
+                const comcode = String(row.comcode || '').trim();
+                const name = String(row.comname || '').trim();
+                if (comcode && name) {
+                    const sanitizedComcode = sanitizeFirebaseKey(comcode);
+                    if (sanitizedComcode && !customerMap.has(sanitizedComcode)) {
+                        customerMap.set(sanitizedComcode, { comcode: sanitizedComcode, name });
                     }
                 }
             });
@@ -371,8 +382,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
             // 2. Process Products
             const newProducts: Product[] = rawData.map((row: any) => {
+                const sanitizedBarcode = sanitizeFirebaseKey(String(row.barcode || '').trim());
                 const product: Product = {
-                    barcode: String(row.barcode || '').trim(),
+                    barcode: sanitizedBarcode,
                     name: String(row.name || '').trim(),
                     costPrice: parseFloat(String(row.costPrice || 0)),
                     sellingPrice: parseFloat(String(row.sellingPrice || 0)),
