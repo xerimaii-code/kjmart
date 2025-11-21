@@ -103,8 +103,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Long press logic for table button
-    const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const isLongPress = useRef(false);
+    const tableLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isTableLongPress = useRef(false);
+
+    // Long press logic for execute button
+    const executeLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isExecuteLongPress = useRef(false);
 
     useEffect(() => {
         if (isActive) {
@@ -231,7 +235,60 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery]);
 
-    const handleExecuteClick = () => {
+    // --- Table Button Handlers ---
+    const handleTableButtonStart = () => {
+        isTableLongPress.current = false;
+        tableLongPressTimer.current = setTimeout(() => {
+            isTableLongPress.current = true;
+            setUseSelectedTablesOnly(prev => {
+                 const next = !prev;
+                 if (navigator.vibrate) navigator.vibrate(50);
+                 showToast(next ? '선택된 테이블만 사용합니다.' : '전체 테이블을 사용합니다.', 'success');
+                 return next;
+            });
+        }, 600);
+    };
+
+    const handleTableButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
+        if (tableLongPressTimer.current) {
+            clearTimeout(tableLongPressTimer.current);
+            tableLongPressTimer.current = null;
+        }
+        if (!isTableLongPress.current) {
+             setTableModalOpen(true);
+        } else {
+            if(e.cancelable && e.type !== 'touchend') e.preventDefault();
+        }
+    };
+
+    // --- Execute Button Handlers ---
+    const handleExecuteStart = () => {
+        isExecuteLongPress.current = false;
+        executeLongPressTimer.current = setTimeout(() => {
+            isExecuteLongPress.current = true;
+            setQueryInput('');
+            if (navigator.vibrate) navigator.vibrate(50);
+            showToast('입력창이 초기화되었습니다.', 'success');
+        }, 600);
+    };
+
+    const handleExecuteEnd = (e: React.MouseEvent | React.TouchEvent) => {
+        if (executeLongPressTimer.current) {
+            clearTimeout(executeLongPressTimer.current);
+            executeLongPressTimer.current = null;
+        }
+        if (isExecuteLongPress.current) {
+             if (e.cancelable && e.type !== 'touchend') e.preventDefault();
+        }
+    };
+
+    const handleExecuteClickWrapped = () => {
+        if (isExecuteLongPress.current) {
+            isExecuteLongPress.current = false;
+            return;
+        }
+        
+        // Original click logic
         if (status === 'loading') {
             abortControllerRef.current?.abort();
             setStatus('idle');
@@ -347,8 +404,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     const sortedTables = useMemo(() => {
         const selectedSet = new Set(selectedTables);
-        const selected = allTables.filter(t => selectedSet.has(t)).sort((a, b) => a.localeCompare(b));
-        const unselected = allTables.filter(t => !selectedSet.has(t)).sort((a, b) => a.localeCompare(b));
+        const alphaSorted = [...allTables].sort((a, b) => a.localeCompare(b, 'ko', { sensitivity: 'base' }));
+        
+        const selected = alphaSorted.filter(t => selectedSet.has(t));
+        const unselected = alphaSorted.filter(t => !selectedSet.has(t));
         return [...selected, ...unselected];
     }, [allTables, selectedTables]);
 
@@ -356,31 +415,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setSelectedTables(prev => 
             prev.includes(table) ? prev.filter(t => t !== table) : [...prev, table]
         );
-    };
-    
-    // Button Long Press Handlers
-    const handleTableButtonStart = () => {
-        isLongPress.current = false;
-        longPressTimer.current = setTimeout(() => {
-            isLongPress.current = true;
-            setUseSelectedTablesOnly(prev => {
-                 const next = !prev;
-                 showToast(next ? '선택된 테이블만 사용합니다.' : '전체 테이블을 사용합니다.', 'success');
-                 return next;
-            });
-        }, 600);
-    };
-
-    const handleTableButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
-        if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
-        }
-        if (!isLongPress.current) {
-             setTableModalOpen(true);
-        } else {
-            if(e.cancelable && e.type !== 'touchend') e.preventDefault();
-        }
     };
 
     return (
@@ -440,8 +474,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     {/* Execution Controls */}
                     <div className="flex gap-2">
                         <button 
-                            onClick={handleExecuteClick}
-                            className="flex-grow h-12 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 text-lg transition active:scale-95 shadow-lg shadow-blue-500/30"
+                            onMouseDown={handleExecuteStart}
+                            onMouseUp={handleExecuteEnd}
+                            onMouseLeave={handleExecuteEnd}
+                            onTouchStart={handleExecuteStart}
+                            onTouchEnd={handleExecuteEnd}
+                            onClick={handleExecuteClickWrapped}
+                            className="flex-grow h-12 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 text-lg transition active:scale-95 shadow-lg shadow-blue-500/30 select-none"
                         >
                             {status === 'loading' ? <><StopCircleIcon className="w-7 h-7"/> <span>중지</span></> : <><PlayCircleIcon className="w-7 h-7"/> <span>실행</span></>}
                         </button>
@@ -484,7 +523,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 ) : <p className="text-gray-500">결과 데이터가 없습니다.</p>}
                             </div>
                         )}
-                         {status === 'idle' && !result && <div className="flex justify-center items-center h-full text-gray-400">쿼리를 실행하여 결과를 확인하세요.</div>}
+                         {status === 'idle' && !result && <div className="flex justify-center items-center h-full text-gray-400">쿼리를 실행하여 결과를 확인하세요.<br/>실행 버튼을 길게 누르면 입력창이 초기화됩니다.</div>}
                     </div>
                 </div>
             </main>
@@ -509,6 +548,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                     className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
                                 />
                                 <span className="ml-3 font-medium text-gray-700">{table}</span>
+                                {selectedTables.includes(table) && <span className="ml-auto text-xs text-blue-600 font-bold">선택됨</span>}
                             </label>
                         ))}
                     </div>
