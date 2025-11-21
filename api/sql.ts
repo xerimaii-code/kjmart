@@ -147,6 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const schemaString = formatSchemaForAI(clientSchema || {});
         
         let learningContext = clientContext;
+        // Fallback to fetch from Firebase if context is not provided by the client
         if (!learningContext) {
             try {
               const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
@@ -155,6 +156,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (typeof data === 'string') {
                     learningContext = data;
                 } else if (typeof data === 'object' && data !== null) {
+                    // Handle new list-based learning context
                     learningContext = Object.values(data).map((item: any) => `Title: ${item.title}\nContent: ${item.content}`).join('\n\n');
                 }
               }

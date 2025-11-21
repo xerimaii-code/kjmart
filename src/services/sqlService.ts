@@ -19,14 +19,30 @@ async function fetchApi(body: object, signal?: AbortSignal) {
                 errorDetails = errorData.details || errorData.error || errorDetails;
             } catch (e) {
                 // If not JSON, try to get text content
-                errorDetails = await response.text();
+                try {
+                    errorDetails = await response.text();
+                } catch (textErr) {
+                    // Fallback if text() also fails
+                }
             }
             throw new Error(errorDetails);
         }
+        
+        // Check if response has content before trying to parse JSON
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            return await response.json();
+        } else {
+            // Handle cases where the server might return a non-JSON success response
+            return { success: true, message: await response.text() };
+        }
 
-        return await response.json();
     } catch (err: any) {
         // Re-throw network errors or errors from the above block
+        if (err instanceof SyntaxError) {
+            // This happens if response.json() fails
+            throw new Error(`Failed to parse server response as JSON. The server may have returned an error page. Raw message: ${err.message}`);
+        }
         throw new Error(err.message || 'API 요청에 실패했습니다.');
     }
 }
@@ -37,7 +53,8 @@ export async function checkSqlConnection(): Promise<{ success: boolean; message:
 }
 
 export async function getDatabaseSchema(): Promise<DbSchema> {
-    return fetchApi({ type: 'getDatabaseSchema' });
+    const response = await fetchApi({ type: 'getDatabaseSchema' });
+    return response as DbSchema;
 }
 
 export async function querySql(query: string, signal: AbortSignal): Promise<{ recordset: any[], rowsAffected: number }> {

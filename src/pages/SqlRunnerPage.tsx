@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAlert } from '../context/AppContext';
-import { SpinnerIcon, BarcodeScannerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, SparklesIcon, StopCircleIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StarIcon, DocumentIcon } from '../components/Icons';
+import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, SparklesIcon, StopCircleIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StarIcon, DocumentIcon } from '../components/Icons';
 import { querySql, naturalLanguageToSql } from '../services/sqlService';
-import { subscribeToSavedQueries, addSavedQuery, updateSavedQuery, deleteSavedQuery } from '../services/dbService';
+import { subscribeToSavedQueries, addSavedQuery, updateSavedQuery, deleteSavedQuery, set as setFirebase, ref, getDatabase } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
 import ToggleSwitch from '../components/ToggleSwitch';
@@ -49,7 +49,7 @@ const ModalWrapper: React.FC<{
 
     return (
         <div
-            className={`absolute inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`}
+            className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`}
             onClick={onClose}
             role="dialog"
             aria-modal="true"
@@ -88,7 +88,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (isActive) {
             getCachedSchema().then(schema => {
                 if (schema) {
-                    setAllTables(Object.keys(schema));
+                    setAllTables(Object.keys(schema).sort());
                 }
             });
         }
@@ -203,11 +203,18 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             showToast('복사에 실패했습니다.', 'error');
         });
     };
+    
+    const sortedTables = useMemo(() => {
+        const selectedSet = new Set(selectedTables);
+        const selected = allTables.filter(t => selectedSet.has(t));
+        const unselected = allTables.filter(t => !selectedSet.has(t));
+        return [...selected, ...unselected];
+    }, [allTables, selectedTables]);
 
     return (
         <div className="h-full flex flex-col bg-gray-50">
-            <div className="p-3 bg-white border-b border-gray-200 z-10 flex flex-col gap-3">
-                <div className="flex items-center justify-center gap-2">
+            <div className="p-3 bg-white border-b border-gray-200 z-10 flex flex-col gap-3 flex-shrink-0">
+                <div className="flex items-center justify-center gap-2 flex-wrap">
                     <button onClick={() => setTableModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm">
                         <TableCellsIcon className="w-5 h-5"/> <span>테이블 선택 ({selectedTables.length})</span>
                     </button>
@@ -218,7 +225,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
                 <textarea 
                     value={queryInput} 
-                    onChange={(e) => setQueryInput(e.target.value)} 
+                    onChange={(e) => setQueryInput(e.target.value)}
+                    onClick={(e) => {
+                        const target = e.currentTarget;
+                        if (target.selectionStart === target.selectionEnd) {
+                            window.getSelection()?.removeAllRanges();
+                        }
+                    }}
                     rows={3} 
                     placeholder="자연어나 SQL 쿼리를 입력하세요..."
                     className="w-full p-2 border border-gray-300 rounded-lg font-mono text-base focus:ring-blue-500 focus:border-blue-500"
@@ -232,13 +245,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </div>
             
             <main className="flex-grow overflow-hidden p-3 flex">
-                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm w-full flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
+                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm w-full flex flex-col h-full">
+                    <div className="flex justify-between items-center mb-2 flex-shrink-0">
                         <h3 className="font-bold text-lg">결과</h3>
                         {status === 'success' && result && (
                              <div className="flex items-center gap-2">
                                 <button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button>
-                                <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>
+                                {result.recordset?.length > 0 && <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>}
                             </div>
                         )}
                     </div>
