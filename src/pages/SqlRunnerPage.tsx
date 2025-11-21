@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAlert, useScanner } from '../context/AppContext';
 import { SpinnerIcon, BarcodeScannerIcon, CheckCircleIcon, WarningIcon, TrashIcon, PencilSquareIcon, SparklesIcon, StopCircleIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StarIcon } from '../components/Icons';
@@ -27,13 +28,20 @@ const ModalWrapper: React.FC<{
     children: React.ReactNode;
     onClose: () => void;
     className?: string;
-}> = ({ children, onClose, className = 'max-w-lg' }) => {
+    isActive: boolean;
+}> = ({ children, onClose, className = 'max-w-lg', isActive }) => {
     const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
-        const timer = setTimeout(() => setIsRendered(true), 10);
-        return () => clearTimeout(timer);
-    }, []);
+        if (isActive) {
+            const timer = setTimeout(() => setIsRendered(true), 10);
+            return () => clearTimeout(timer);
+        } else {
+            setIsRendered(false);
+        }
+    }, [isActive]);
+
+    if (!isActive) return null;
 
     return (
         <div
@@ -250,10 +258,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const longPressTimer = useRef<number | null>(null);
     const longPressFired = useRef(false);
     
-    // For drag and drop of quick run buttons
-    const dragIndex = useRef<number | null>(null);
-    const dragOverIndex = useRef<number | null>(null);
-
     // Subscribe to saved queries from Firebase
     useEffect(() => {
         const unsubscribe = subscribeToSavedQueries((queries) => {
@@ -295,8 +299,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             return;
         }
 
-        // If we are not showing in input (Quick Run), we might still want to process it.
-        // But for simplicity, Quick Run usually executes immediate SQL or converts then executes.
         if (showInInput) {
              setQueryInput(currentInput);
         }
@@ -330,8 +332,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         showToast('AI가 SQL 쿼리를 생성했습니다. 확인 후 다시 실행해주세요.', 'success');
                         setStatus('idle');
                     } else {
-                        // For quick run natural language, we execute immediately
-                        showToast('AI 변환 후 실행합니다...', 'success');
+                        showToast(`✅ '${currentInput}' 쿼리를 실행했습니다.`, 'success');
                         executeQuery(sql);
                     }
                 } else {
@@ -344,7 +345,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 setStatus('error');
             }
         }
-    }, [executeQuery, naturalLanguageToSql, selectedTables, showAlert, showToast]);
+    }, [executeQuery, selectedTables, showAlert, showToast]);
 
     const handleExecuteClick = () => {
         if (longPressFired.current) {
@@ -360,9 +361,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         processAndExecute(queryInput, true);
     };
 
-    const handleQuickRun = (queryText: string) => {
-        showToast('쿼리를 실행합니다...', 'success');
-        processAndExecute(queryText, false);
+    const handleQuickRun = (query: SavedQuery) => {
+        showToast(`✅ '${query.name}' 쿼리를 실행했습니다.`, 'success');
+        processAndExecute(query.query, false);
     };
 
     const handlePressStart = useCallback(() => {
@@ -401,30 +402,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         });
     };
     
-    // --- Drag and Drop Handlers for Quick Run Buttons ---
-    const handleDragStart = (index: number) => {
-        dragIndex.current = index;
-    };
-    const handleDragEnter = (index: number) => {
-        dragOverIndex.current = index;
-    };
-    const handleDragEnd = async () => {
-        if (dragIndex.current !== null && dragOverIndex.current !== null && dragIndex.current !== dragOverIndex.current) {
-            // Drag and drop reordering is purely visual/local for now as we don't store sort order in DB yet.
-            // To properly support this, we would need an 'order' field in Firebase.
-            // For now, we can just reorder the local display temporarily or disable it.
-            // Given the user request, I'll just reorder locally but warn it won't persist without DB schema change.
-            // Or better, since it's a quick run list, users might expect it to save. 
-            // I will skip implementing persistent reordering to keep it simple as per current scope,
-            // but keep the interaction logic if they want to rearrange for the session.
-            
-            // However, since savedQueries comes from a subscription, local modification will be overwritten by next sync.
-            // So I will disable drag/drop reordering for now as it conflicts with the realtime subscription without an order field.
-        }
-        dragIndex.current = null;
-        dragOverIndex.current = null;
-    };
-
     const quickRunQueries = savedQueries.filter(q => q.isQuickRun);
 
     return (
@@ -453,7 +430,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             {quickRunQueries.map((sq) => (
                                 <button
                                     key={sq.id}
-                                    onClick={() => handleQuickRun(sq.query)}
+                                    onClick={() => handleQuickRun(sq)}
                                     className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md font-semibold text-xs hover:bg-indigo-100 transition active:scale-95 flex items-center gap-1"
                                     title={sq.query}
                                 >
@@ -519,33 +496,27 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             </main>
             
-            {isActive && isTableModalOpen && (
-                <ModalWrapper onClose={() => setTableModalOpen(false)} className="max-w-md">
-                    <TableSelectionModalContent 
-                        onClose={() => setTableModalOpen(false)} 
-                        allTables={tables} 
-                        selectedTables={selectedTables} 
-                        onSelectionChange={toggleTableSelection}
-                    />
-                </ModalWrapper>
-            )}
-            {isActive && isSavedQueriesModalOpen && (
-                <ModalWrapper onClose={() => setSavedQueriesModalOpen(false)} className="max-w-2xl h-[80vh]">
-                    <SavedQueriesModalContent 
-                        onClose={() => setSavedQueriesModalOpen(false)} 
-                        savedQueries={savedQueries || []} 
-                        onRun={(q) => { 
-                            setQueryInput(q);
-                            setSavedQueriesModalOpen(false); 
-                        }} 
-                    />
-                </ModalWrapper>
-            )}
-            {isActive && isLearningModalOpen && (
-                <ModalWrapper onClose={() => setIsLearningModalOpen(false)} className="max-w-lg">
-                    <LearningModalContent onClose={() => setIsLearningModalOpen(false)} />
-                </ModalWrapper>
-            )}
+            <ModalWrapper onClose={() => setTableModalOpen(false)} className="max-w-md" isActive={isActive && isTableModalOpen}>
+                <TableSelectionModalContent 
+                    onClose={() => setTableModalOpen(false)} 
+                    allTables={tables} 
+                    selectedTables={selectedTables} 
+                    onSelectionChange={toggleTableSelection}
+                />
+            </ModalWrapper>
+            <ModalWrapper onClose={() => setSavedQueriesModalOpen(false)} className="max-w-2xl h-[80vh]" isActive={isActive && isSavedQueriesModalOpen}>
+                <SavedQueriesModalContent 
+                    onClose={() => setSavedQueriesModalOpen(false)} 
+                    savedQueries={savedQueries || []} 
+                    onRun={(q) => { 
+                        setQueryInput(q);
+                        setSavedQueriesModalOpen(false); 
+                    }} 
+                />
+            </ModalWrapper>
+            <ModalWrapper onClose={() => setIsLearningModalOpen(false)} className="max-w-lg" isActive={isActive && isLearningModalOpen}>
+                <LearningModalContent onClose={() => setIsLearningModalOpen(false)} />
+            </ModalWrapper>
         </div>
     );
 };
