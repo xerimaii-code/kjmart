@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useAlert } from '../context/AppContext';
-import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, SparklesIcon, StopCircleIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StarIcon, DocumentIcon } from '../components/Icons';
+import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon } from '../components/Icons';
 import { querySql, naturalLanguageToSql } from '../services/sqlService';
-import { subscribeToSavedQueries, addSavedQuery, updateSavedQuery, deleteSavedQuery, set as setFirebase, ref, getDatabase } from '../services/dbService';
+import { subscribeToSavedQueries, addSavedQuery, updateSavedQuery, deleteSavedQuery } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
 import ToggleSwitch from '../components/ToggleSwitch';
@@ -21,11 +22,6 @@ interface SavedQuery {
     type: 'sql' | 'natural';
     isQuickRun?: boolean;
 }
-interface LearningItem {
-    id: string;
-    title: string;
-    content: string;
-}
 
 // --- REUSABLE MODAL WRAPPER ---
 const ModalWrapper: React.FC<{
@@ -33,7 +29,8 @@ const ModalWrapper: React.FC<{
     onClose: () => void;
     className?: string;
     isActive: boolean;
-}> = ({ children, onClose, className = 'max-w-lg', isActive }) => {
+    title?: string;
+}> = ({ children, onClose, className = 'max-w-lg', isActive, title }) => {
     const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
@@ -47,20 +44,31 @@ const ModalWrapper: React.FC<{
 
     if (!isActive) return null;
 
-    return (
+    return createPortal(
         <div
-            className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`}
+            className={`fixed inset-0 z-[100] flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`}
             onClick={onClose}
             role="dialog"
             aria-modal="true"
         >
             <div
-                className={`bg-white rounded-xl shadow-lg w-full ${className} flex flex-col overflow-hidden transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                className={`bg-white rounded-xl shadow-lg w-full ${className} flex flex-col max-h-[85vh] transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
                 onClick={e => e.stopPropagation()}
             >
-                {children}
+                {title && (
+                    <div className="p-4 border-b border-gray-200 flex justify-between items-center flex-shrink-0">
+                        <h3 className="font-bold text-lg text-gray-800">{title}</h3>
+                        <button onClick={onClose} className="p-1 text-gray-500 hover:bg-gray-100 rounded-full">
+                            <RemoveIcon className="w-6 h-6" />
+                        </button>
+                    </div>
+                )}
+                <div className="overflow-y-auto p-4">
+                    {children}
+                </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 
@@ -213,6 +221,22 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             }).then(() => showToast('쿼리가 저장되었습니다.', 'success'));
         }
     };
+
+    const handleDeleteSavedQuery = (id: string) => {
+        showAlert(
+            '이 쿼리를 삭제하시겠습니까?',
+            () => {
+                deleteSavedQuery(id).then(() => showToast('쿼리가 삭제되었습니다.', 'success'));
+            },
+            '삭제',
+            'bg-red-500 hover:bg-red-600'
+        );
+    };
+
+    const handleLoadSavedQuery = (query: SavedQuery) => {
+        setQueryInput(query.query);
+        setSavedQueriesModalOpen(false);
+    };
     
     const handleCopyResults = () => {
         if (!result || !result.recordset || result.recordset.length === 0) return;
@@ -243,14 +267,20 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         return [...selected, ...unselected];
     }, [allTables, selectedTables]);
 
+    const toggleTable = (table: string) => {
+        setSelectedTables(prev => 
+            prev.includes(table) ? prev.filter(t => t !== table) : [...prev, table]
+        );
+    };
+
     return (
         <div className="h-full flex flex-col bg-gray-50">
             <div className="p-3 bg-white border-b border-gray-200 z-10 flex flex-col gap-3 flex-shrink-0">
                 <div className="flex items-center justify-center gap-2 flex-wrap">
-                    <button onClick={() => setTableModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm">
+                    <button onClick={() => setTableModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm active:scale-95 transition">
                         <TableCellsIcon className="w-5 h-5"/> <span>테이블 선택 ({selectedTables.length})</span>
                     </button>
-                    <button onClick={() => setSavedQueriesModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm">
+                    <button onClick={() => setSavedQueriesModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm active:scale-95 transition">
                         <BookmarkSquareIcon className="w-5 h-5"/> <span>쿼리 관리</span>
                     </button>
                     <ToggleSwitch id="ai-scope" label="선택된 테이블만 참고" checked={useSelectedTablesOnly} onChange={setUseSelectedTablesOnly} />
@@ -258,15 +288,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 <textarea 
                     value={queryInput} 
                     onChange={(e) => setQueryInput(e.target.value)}
-                    onClick={(e) => {
-                        const target = e.currentTarget;
-                        if (target.selectionStart === target.selectionEnd) {
-                            window.getSelection()?.removeAllRanges();
-                        }
-                    }}
+                    onClick={(e) => e.currentTarget.focus()}
                     rows={3} 
                     placeholder="자연어나 SQL 쿼리를 입력하세요... (예: @오늘매출)"
-                    className="w-full p-2 border border-gray-300 rounded-lg font-mono text-base focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full p-2 border border-gray-300 rounded-lg font-mono text-base text-gray-900 bg-white select-text focus:ring-blue-500 focus:border-blue-500"
+                    style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
                 />
                 <button 
                     onClick={handleExecuteClick}
@@ -276,7 +302,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </button>
             </div>
             
-            <main className="flex-grow p-3 flex">
+            <main className="flex-grow p-3 flex overflow-hidden">
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm w-full flex flex-col h-full">
                     <div className="flex justify-between items-center mb-2 flex-shrink-0">
                         <h3 className="font-bold text-lg">결과</h3>
@@ -308,6 +334,71 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     </div>
                 </div>
             </main>
+
+            {/* Table Selection Modal */}
+            <ModalWrapper isActive={isTableModalOpen} onClose={() => setTableModalOpen(false)} title="테이블 선택">
+                <div className="space-y-1">
+                    <div className="flex gap-2 mb-3">
+                         <button onClick={() => setSelectedTables([...allTables])} className="flex-1 py-2 text-sm bg-blue-50 text-blue-600 font-bold rounded-lg">전체 선택</button>
+                         <button onClick={() => setSelectedTables([])} className="flex-1 py-2 text-sm bg-gray-100 text-gray-600 font-bold rounded-lg">전체 해제</button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto">
+                        {sortedTables.map(table => (
+                            <label key={table} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${selectedTables.includes(table) ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50 border-gray-200'}`}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={selectedTables.includes(table)} 
+                                    onChange={() => toggleTable(table)}
+                                    className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <span className="ml-3 font-medium text-gray-700">{table}</span>
+                            </label>
+                        ))}
+                    </div>
+                    <div className="mt-4 pt-2 border-t border-gray-100 flex justify-end">
+                        <button onClick={() => setTableModalOpen(false)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 active:scale-95">
+                            완료 ({selectedTables.length})
+                        </button>
+                    </div>
+                </div>
+            </ModalWrapper>
+
+            {/* Saved Queries Modal */}
+            <ModalWrapper isActive={isSavedQueriesModalOpen} onClose={() => setSavedQueriesModalOpen(false)} title="저장된 쿼리">
+                {savedQueries.length === 0 ? (
+                    <p className="text-center text-gray-500 py-8">저장된 쿼리가 없습니다.</p>
+                ) : (
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                        {savedQueries.map(q => (
+                            <div key={q.id} className="p-3 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
+                                <div className="flex justify-between items-start mb-1">
+                                    <h4 className="font-bold text-gray-800">{q.name}</h4>
+                                    <div className="flex gap-1">
+                                         <button onClick={() => handleLoadSavedQuery(q)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md" title="불러오기">
+                                            <PencilSquareIcon className="w-4 h-4"/>
+                                        </button>
+                                        <button onClick={() => handleDeleteSavedQuery(q.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-md" title="삭제">
+                                            <TrashIcon className="w-4 h-4"/>
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-sm text-gray-600 line-clamp-2 font-mono bg-gray-50 p-1.5 rounded mb-2">{q.query}</p>
+                                <button 
+                                    onClick={() => {
+                                        setQueryInput(q.query);
+                                        setSavedQueriesModalOpen(false);
+                                        if (q.type === 'sql') executeQuery(q.query);
+                                        else processAndExecute(q.query);
+                                    }}
+                                    className="w-full py-2 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 flex items-center justify-center gap-1"
+                                >
+                                    <PlayCircleIcon className="w-4 h-4" /> 바로 실행
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </ModalWrapper>
         </div>
     );
 };
