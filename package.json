@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
+    "@vercel/node": "^5.5.8",
     "firebase": "^10.12.2",
     "mssql": "^10.0.2",
     "react": "^18.2.0",
@@ -19,7 +20,6 @@
     "@types/mssql": "^9.1.5",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
-    "@vercel/node": "^5.5.8",
     "@vitejs/plugin-react": "^4.2.0",
     "typescript": "^5.2.2",
     "vite": "^5.0.0"
