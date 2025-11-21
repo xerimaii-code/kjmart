@@ -1,5 +1,3 @@
-
-
 // src/services/dbService.ts
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, User } from 'firebase/auth';
@@ -11,6 +9,9 @@ import {
 
 import { firebaseConfig } from '../firebaseConfig';
 import { Order, OrderItem, Customer, Product, SyncLog, DeviceSettings } from '../types';
+
+// Fix: Export firebase db functions for use in other components like SqlRunnerPage
+export { getDatabase, ref, push, update, set };
 
 export type FirebaseUser = User;
 

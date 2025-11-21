@@ -1,11 +1,11 @@
 
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAlert, useScanner } from '../context/AppContext';
-import { SpinnerIcon, BarcodeScannerIcon, CheckCircleIcon, WarningIcon, TrashIcon, PencilSquareIcon, SparklesIcon, StopCircleIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StarIcon } from '../components/Icons';
+import { SpinnerIcon, BarcodeScannerIcon, CheckCircleIcon, WarningIcon, TrashIcon, PencilSquareIcon, SparklesIcon, StopCircleIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StarIcon, ChevronDownIcon } from '../components/Icons';
 import { querySql, checkSqlConnection, getSqlTables, naturalLanguageToSql } from '../services/sqlService';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { getValue, setValue, subscribeToSavedQueries, addSavedQuery, updateSavedQuery, deleteSavedQuery } from '../services/dbService';
+import { getValue, setValue, subscribeToSavedQueries, addSavedQuery, updateSavedQuery, deleteSavedQuery, getDatabase, ref, push, update, set } from '../services/dbService';
 
 // --- TYPE DEFINITIONS ---
 type QueryStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -21,6 +21,11 @@ interface SavedQuery {
     query: string;
     type: 'sql' | 'natural';
     isQuickRun?: boolean;
+}
+interface LearningItem {
+    id: string;
+    title: string;
+    content: string;
 }
 
 // --- REUSABLE MODAL WRAPPER ---
@@ -63,25 +68,52 @@ const ModalWrapper: React.FC<{
 
 // --- MODAL CONTENT COMPONENTS ---
 const LearningModalContent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-    const [context, setContext] = useState('');
+    const [items, setItems] = useState<LearningItem[]>([]);
+    const [editingItem, setEditingItem] = useState<LearningItem | 'new' | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
-    const { showToast } = useAlert();
+    const { showToast, showAlert } = useAlert();
 
-    useEffect(() => {
+    const db = getDatabase();
+    const dbRef = ref(db, 'learning/sqlContext');
+
+    const loadData = useCallback(async () => {
         setIsLoading(true);
-        getValue<string>('learning/sqlContext', '기본값: 데이터는 되도록 보기 좋게 가공해서 보여주세요.').then(data => {
-            setContext(data);
-            setIsLoading(false);
-        });
+        const data = await getValue<string | { [key: string]: Omit<LearningItem, 'id'> }>('learning/sqlContext', '');
+        if (typeof data === 'string') {
+            // Handle migration from old string format
+            const migratedItem = { id: 'default', title: '기본 학습 내용', content: data };
+            setItems([migratedItem]);
+        } else if (data) {
+            const loadedItems = Object.entries(data).map(([id, value]) => ({ id, ...value }));
+            setItems(loadedItems);
+        } else {
+            setItems([]);
+        }
+        setIsLoading(false);
     }, []);
+    
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
 
-    const handleSave = async () => {
+    const handleSave = async (itemToSave: LearningItem) => {
+        if (!itemToSave.title.trim()) {
+            showToast('제목을 입력해주세요.', 'error');
+            return;
+        }
         setIsSaving(true);
         try {
-            await setValue('learning/sqlContext', context);
+            if (itemToSave.id && itemToSave.id !== 'new') {
+                const itemRef = ref(db, `learning/sqlContext/${itemToSave.id}`);
+                await update(itemRef, { title: itemToSave.title, content: itemToSave.content });
+            } else {
+                const newItemRef = push(dbRef);
+                await set(newItemRef, { title: itemToSave.title, content: itemToSave.content });
+            }
             showToast('학습 내용이 저장되었습니다.', 'success');
-            onClose();
+            setEditingItem(null);
+            await loadData();
         } catch (err) {
             showToast('저장에 실패했습니다.', 'error');
         } finally {
@@ -89,43 +121,133 @@ const LearningModalContent: React.FC<{ onClose: () => void }> = ({ onClose }) =>
         }
     };
 
+    const handleDelete = (id: string) => {
+        showAlert(
+            '이 학습 내용을 삭제하시겠습니까?',
+            async () => {
+                try {
+                    const itemRef = ref(db, `learning/sqlContext/${id}`);
+                    await set(itemRef, null);
+                    showToast('삭제되었습니다.', 'success');
+                    setEditingItem(null);
+                    await loadData();
+                } catch (err) {
+                    showToast('삭제에 실패했습니다.', 'error');
+                }
+            },
+            '삭제',
+            'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
+        );
+    };
+
+    const EditView: React.FC<{ item: LearningItem | 'new' }> = ({ item }) => {
+        const isNew = item === 'new';
+        const [currentItem, setCurrentItem] = useState(isNew ? { id: 'new', title: '', content: '' } : item);
+
+        return (
+            <div className="p-5 flex flex-col flex-grow">
+                <input
+                    type="text"
+                    placeholder="제목"
+                    value={currentItem.title}
+                    onChange={e => setCurrentItem(prev => ({...prev, title: e.target.value}))}
+                    className="w-full p-2 border border-gray-300 rounded-lg font-bold text-lg mb-3"
+                />
+                <textarea
+                    placeholder="AI에게 알려줄 내용을 입력하세요..."
+                    value={currentItem.content}
+                    onChange={e => setCurrentItem(prev => ({...prev, content: e.target.value}))}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-base flex-grow"
+                    rows={10}
+                />
+                <div className="mt-4 flex justify-between items-center">
+                    <div>
+                        {!isNew && (
+                            <button onClick={() => handleDelete(currentItem.id)} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200">
+                                삭제
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={() => setEditingItem(null)} className="px-4 py-2 bg-gray-200 rounded-lg font-semibold">
+                            취소
+                        </button>
+                        <button onClick={() => handleSave(currentItem)} disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold flex items-center justify-center w-24">
+                            {isSaving ? <SpinnerIcon className="w-5 h-5" /> : '저장'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <>
-            <div className="p-5">
-                <h3 className="text-xl font-bold text-gray-800 text-center mb-4">AI 학습 내용 관리</h3>
-                <p className="text-sm text-gray-600 mb-4">자연어 쿼리 생성 시 AI가 참고할 추가 정보를 입력하세요. (예: 'SALES_TBL은 매출 테이블이다', '특정 상품 조회 시에는 LIKE 검색을 사용해라')</p>
-                {isLoading ? <SpinnerIcon className="w-8 h-8 mx-auto text-blue-500" /> : (
-                    <textarea value={context} onChange={(e) => setContext(e.target.value)} rows={10} className="w-full p-2 border border-gray-300 rounded-lg text-base" placeholder="AI에게 알려줄 내용을 입력하세요..."/>
+            <div className="p-5 border-b flex justify-between items-center">
+                <h3 className="text-xl font-bold text-gray-800">AI 학습 내용 관리</h3>
+                 {!editingItem && (
+                    <button onClick={() => setEditingItem('new')} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-bold">
+                        새로 추가
+                    </button>
                 )}
             </div>
-            <div className="bg-gray-50 p-3 grid grid-cols-2 gap-3 mt-auto">
-                <button onClick={onClose} className="py-2 px-4 bg-gray-200 rounded-lg font-semibold">취소</button>
-                <button onClick={handleSave} disabled={isLoading || isSaving} className="py-2 px-4 bg-blue-600 text-white rounded-lg font-bold disabled:bg-gray-400 flex items-center justify-center">
-                    {isSaving ? <SpinnerIcon className="w-5 h-5" /> : '저장'}
+            {editingItem ? <EditView item={editingItem} /> : (
+                 <div className="p-5 max-h-[60vh] overflow-y-auto flex-grow">
+                    {isLoading ? <SpinnerIcon className="w-8 h-8 mx-auto text-blue-500" /> :
+                     items.length === 0 ? <p className="text-center text-gray-500 py-8">학습 내용이 없습니다.</p> :
+                     <ul className="space-y-2">
+                        {items.map(item => (
+                            <li key={item.id}>
+                                <button onClick={() => setEditingItem(item)} className="w-full text-left p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <p className="font-bold text-gray-800 truncate">{item.title}</p>
+                                    <p className="text-sm text-gray-500 truncate mt-1">{item.content || "내용 없음"}</p>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>}
+                 </div>
+            )}
+            <div className="bg-gray-50 p-3 text-right mt-auto border-t">
+                <button onClick={onClose} className="px-6 py-2 bg-gray-700 text-white rounded-lg font-bold">
+                    닫기
                 </button>
             </div>
         </>
     );
 };
 
+
 const TableSelectionModalContent: React.FC<{
     onClose: () => void; allTables: string[]; selectedTables: string[]; onSelectionChange: (table: string) => void;
 }> = ({ onClose, allTables, selectedTables, onSelectionChange }) => {
+    
+    const sortedAndGroupedTables = useMemo(() => {
+        const selectedSet = new Set(selectedTables);
+        const selected = allTables.filter(t => selectedSet.has(t)).sort();
+        const unselected = allTables.filter(t => !selectedSet.has(t)).sort();
+        return [...selected, ...unselected];
+    }, [allTables, selectedTables]);
+    
     return (
         <>
             <div className="p-5 border-b">
                 <h3 className="text-xl font-bold text-gray-800">테이블 선택</h3>
                 <p className="text-sm text-gray-500 mt-1">AI 쿼리 생성 시 참고할 테이블을 최대 3개까지 선택하세요.</p>
             </div>
-            <div className="p-5 max-h-80 overflow-y-auto space-y-2">
-                {allTables.map(table => (
-                    <label key={table} className="flex items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
-                        <input type="checkbox" checked={selectedTables.includes(table)} onChange={() => onSelectionChange(table)} className="h-5 w-5 rounded text-blue-600 focus:ring-blue-500"/>
-                        <span className="ml-3 font-medium text-gray-700">{table}</span>
-                    </label>
-                ))}
+            <div className="p-5 max-h-[60vh] overflow-y-auto">
+                <div className="grid grid-cols-3 gap-2">
+                    {sortedAndGroupedTables.map(table => {
+                        const isSelected = selectedTables.includes(table);
+                        return (
+                            <label key={table} className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors border ${isSelected ? 'bg-blue-50 border-blue-400' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'}`}>
+                                <input type="checkbox" checked={isSelected} onChange={() => onSelectionChange(table)} className="h-4 w-4 rounded text-blue-600 focus:ring-blue-500"/>
+                                <span className={`ml-2 font-medium truncate ${isSelected ? 'text-blue-800' : 'text-gray-700'}`}>{table}</span>
+                            </label>
+                        );
+                    })}
+                </div>
             </div>
-            <div className="bg-gray-50 p-3 text-right mt-auto">
+            <div className="bg-gray-50 p-3 text-right mt-auto border-t">
                 <button onClick={onClose} className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold">확인</button>
             </div>
         </>
@@ -495,7 +617,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             </main>
             
-            <ModalWrapper onClose={() => setTableModalOpen(false)} className="max-w-md" isActive={isActive && isTableModalOpen}>
+            <ModalWrapper onClose={() => setTableModalOpen(false)} className="max-w-xl" isActive={isActive && isTableModalOpen}>
                 <TableSelectionModalContent 
                     onClose={() => setTableModalOpen(false)} 
                     allTables={tables} 
@@ -513,7 +635,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     }} 
                 />
             </ModalWrapper>
-            <ModalWrapper onClose={() => setIsLearningModalOpen(false)} className="max-w-lg" isActive={isActive && isLearningModalOpen}>
+            <ModalWrapper onClose={() => setIsLearningModalOpen(false)} className="max-w-2xl h-[80vh]" isActive={isActive && isLearningModalOpen}>
                 <LearningModalContent onClose={() => setIsLearningModalOpen(false)} />
             </ModalWrapper>
         </div>
