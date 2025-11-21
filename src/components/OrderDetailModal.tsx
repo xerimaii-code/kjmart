@@ -7,7 +7,7 @@ import { isSaleActive, useOrderManager } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from './SearchDropdown';
-import ProductSearchResultItem from './ProductSearchResultItem';
+import ProductSearchResultItem from '../context/ProductSearchResultItem';
 
 const MAX_SEARCH_RESULTS = 50;
 

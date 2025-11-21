@@ -1,0 +1,16 @@
+
+{
+  "version": 2,
+  "functions": {
+    "src/api/**/*.ts": {
+      "memory": 1024,
+      "maxDuration": 15
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/src/api/$1"
+    }
+  ]
+}

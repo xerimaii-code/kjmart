@@ -1,6 +1,6 @@
 // src/services/sqlService.ts
 
-const API_ENDPOINT = '/src/api/sql';
+const API_ENDPOINT = '/api/sql';
 
 async function fetchApi(body: object, signal?: AbortSignal) {
     const response = await fetch(API_ENDPOINT, {

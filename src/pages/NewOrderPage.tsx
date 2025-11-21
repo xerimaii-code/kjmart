@@ -7,7 +7,7 @@ import { useOrderManager, isSaleActive } from '../hooks/useOrderManager';
 import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from '../components/SearchDropdown';
-import ProductSearchResultItem from '../components/ProductSearchResultItem';
+import ProductSearchResultItem from '../context/ProductSearchResultItem';
 
 const DRAFT_KEY = 'new-order-draft';
 const MAX_SEARCH_RESULTS = 50;
