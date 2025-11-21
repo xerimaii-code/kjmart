@@ -3,7 +3,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from 'mssql';
 import { GoogleGenAI } from '@google/genai';
 import { getDatabase, ref, get } from 'firebase/database';
-// FIX: The 'App' type is not exported from 'firebase/app'. Use 'FirebaseApp' instead.
 import { initializeApp, getApp, FirebaseApp } from 'firebase/app';
 
 // Firebase config (should be same as frontend)
@@ -18,7 +17,6 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase App
-// FIX: The 'App' type is not exported from 'firebase/app'. Use 'FirebaseApp' instead.
 let firebaseApp: FirebaseApp;
 try {
   firebaseApp = getApp();
@@ -82,6 +80,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { type, query, naturalLanguagePrompt, selectedTables, context } = req.body;
   let pool: sql.ConnectionPool | undefined;
   
+  // Log the connection details for debugging, excluding the password
+  console.log('Attempting to connect to SQL Server with config:', {
+    server: config.server,
+    port: config.port,
+    user: config.user,
+    database: config.database,
+    encrypt: config.options.encrypt
+  });
+
   try {
     pool = new sql.ConnectionPool(config);
     await pool.connect();
