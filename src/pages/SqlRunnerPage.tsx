@@ -453,9 +453,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         >
                             {status === 'loading' ? <><StopCircleIcon className="w-7 h-7"/> <span>중지</span></> : <><PlayCircleIcon className="w-7 h-7"/> <span>AI 실행</span></>}
                         </button>
-                         <button onClick={handleScan} className="h-12 w-36 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center gap-2 font-bold hover:bg-gray-200 transition active:scale-95 flex-shrink-0">
+                         <button onClick={handleScan} className="h-12 w-18 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center gap-2 font-bold hover:bg-gray-200 transition active:scale-95 flex-shrink-0">
                              <BarcodeScannerIcon className="w-7 h-7" />
-                             <span>스캔</span>
                          </button>
                         <button onClick={() => setIsLearningModalOpen(true)} className="h-12 w-12 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center font-bold hover:bg-indigo-200 transition active:scale-95 flex-shrink-0"><SparklesIcon className="w-7 h-7" /></button>
                     </div>

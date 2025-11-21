@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
 import { ExitFullscreenIcon, SpinnerIcon, DatabaseIcon } from './Icons';
 import { useSyncState } from '../context/AppContext';
@@ -12,6 +12,22 @@ const Header: React.FC = () => {
     const { isSyncing } = useSyncState();
     const [currentTime, setCurrentTime] = useState(new Date());
     const [sqlStatus, setSqlStatus] = useState<SqlServerStatus>('unknown');
+    const isCheckingSql = useRef(false);
+
+    const checkSql = useCallback(async () => {
+        if (isCheckingSql.current) return;
+        isCheckingSql.current = true;
+        setSqlStatus('checking');
+        try {
+            await checkSqlConnection();
+            setSqlStatus('connected');
+        } catch (err) {
+            console.error("SQL Connection Check Failed:", err);
+            setSqlStatus('error');
+        } finally {
+            isCheckingSql.current = false;
+        }
+    }, []);
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -22,16 +38,6 @@ const Header: React.FC = () => {
 
         const timeTimerId = setInterval(() => setCurrentTime(new Date()), 10000);
 
-        const checkSql = async () => {
-            setSqlStatus('checking');
-            try {
-                await checkSqlConnection();
-                setSqlStatus('connected');
-            } catch {
-                setSqlStatus('error');
-            }
-        };
-        
         checkSql(); // Initial check
         const sqlTimerId = setInterval(checkSql, 60000); // Check every 60 seconds
 
@@ -41,7 +47,7 @@ const Header: React.FC = () => {
             clearInterval(timeTimerId);
             clearInterval(sqlTimerId);
         };
-    }, []);
+    }, [checkSql]);
 
     const handleExitFullscreen = async () => {
         const exitFullscreen =
@@ -62,10 +68,10 @@ const Header: React.FC = () => {
     const StatusIndicator = () => {
         const getSqlStatusProps = () => {
             switch (sqlStatus) {
-                case 'connected': return { color: 'bg-sky-500', title: 'SQL 서버 온라인', ping: true };
-                case 'error': return { color: 'bg-red-500', title: 'SQL 서버 연결 실패', ping: false };
+                case 'connected': return { color: 'bg-sky-500', title: 'SQL 서버 온라인 (클릭하여 재연결)', ping: true };
+                case 'error': return { color: 'bg-red-500', title: 'SQL 서버 연결 실패 (클릭하여 재연결)', ping: false };
                 case 'checking': return { color: 'bg-yellow-500', title: 'SQL 서버 확인 중...', ping: false };
-                default: return { color: 'bg-gray-400', title: 'SQL 서버 상태 알 수 없음', ping: false };
+                default: return { color: 'bg-gray-400', title: 'SQL 서버 상태 알 수 없음 (클릭하여 연결)', ping: false };
             }
         };
         const sqlProps = getSqlStatusProps();
@@ -87,19 +93,27 @@ const Header: React.FC = () => {
                     )}
                 </div>
                 {/* SQL Server Status Indicator */}
-                 <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
-                    {sqlStatus === 'checking' ? (
-                        <SpinnerIcon className="w-4 h-4 text-yellow-500" title={sqlProps.title} />
-                    ) : (
-                        <div 
-                            className={`relative w-2.5 h-2.5 rounded-full transition-colors duration-500 ${sqlProps.color}`}
-                            title={sqlProps.title}
-                            aria-label={sqlProps.title}
-                        >
-                            {sqlProps.ping && <div className={`absolute inset-0 w-full h-full ${sqlProps.color} rounded-full animate-ping opacity-75`}></div>}
-                        </div>
-                    )}
-                 </div>
+                 <button
+                    type="button"
+                    onClick={checkSql}
+                    disabled={sqlStatus === 'checking'}
+                    className="p-1.5 rounded-full transition-colors hover:bg-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-wait"
+                    aria-label={sqlProps.title}
+                    title={sqlProps.title}
+                 >
+                    <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                        {sqlStatus === 'checking' ? (
+                            <SpinnerIcon className="w-4 h-4 text-yellow-500" />
+                        ) : (
+                            <div 
+                                className={`relative w-2.5 h-2.5 rounded-full transition-colors duration-500 ${sqlProps.color}`}
+                                aria-hidden="true"
+                            >
+                                {sqlProps.ping && <div className={`absolute inset-0 w-full h-full ${sqlProps.color} rounded-full animate-ping opacity-75`}></div>}
+                            </div>
+                        )}
+                    </div>
+                 </button>
             </div>
         );
     };
