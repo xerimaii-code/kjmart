@@ -248,7 +248,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             const context = await getLearningContext();
 
             if (isAiMode) {
-                const response = await aiChat(prompt, schemaForQuery, context);
+                const userCurrentDate = new Date().toLocaleString('ko-KR', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    weekday: 'long',
+                });
+                const response = await aiChat(prompt, schemaForQuery, context, userCurrentDate);
                 setResult({ answer: response.answer });
                 setStatus('success');
                 setLastSuccessfulQuery(prompt);
@@ -922,8 +928,8 @@ const EditLearningItemModal: React.FC<{
     };
 
     return (
-        <ModalWrapper isActive={!!item} onClose={onClose} title="AI 학습 규칙" className="w-[95vw] max-w-4xl">
-            <div className="space-y-4 flex flex-col h-full">
+        <FullScreenModal isOpen={!!item} onClose={onClose} title="AI 학습 규칙">
+            <div className="space-y-4 flex flex-col h-full bg-white p-4 rounded-xl border">
                 <div>
                     <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 제목</label>
                     <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="규칙 제목" className="w-full p-2 py-1.5 border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
@@ -940,7 +946,7 @@ const EditLearningItemModal: React.FC<{
                     </button>
                 </div>
             </div>
-        </ModalWrapper>
+        </FullScreenModal>
     );
 };
 

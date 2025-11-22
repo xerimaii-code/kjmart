@@ -160,19 +160,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'naturalLanguageToSql':
       case 'aiChat': {
         if (!ai) return res.status(503).json({ error: "AI service is not configured." });
-        const { naturalLanguagePrompt, schema, context } = req.body;
+        const { naturalLanguagePrompt, schema, context, userCurrentDate } = req.body;
         const schemaString = Object.entries(schema).map(([name, table]: [string, any]) => 
             `Table ${name}: columns(${table.columns.map((c: any) => `${c.name} ${c.type}`).join(', ')})`
         ).join('\n');
         
-        let systemInstruction = `You are a helpful assistant that converts natural language queries into SQL Server (T-SQL) queries. The user is Korean. Always respond in Korean. Use the provided schema. ${context ? `\n\nAdditional context and rules:\n${context}` : ''}`;
+        const dateContext = userCurrentDate 
+            ? ` When answering questions about dates or times, assume the user's current local date is ${userCurrentDate}.`
+            : '';
+
+        let systemInstruction = `You are a helpful assistant that converts natural language queries into SQL Server (T-SQL) queries. The user is Korean. Always respond in Korean. Use the provided schema.${dateContext} ${context ? `\n\nAdditional context and rules:\n${context}` : ''}`;
+        
         if(type === 'aiChat') {
-            systemInstruction = `You are a helpful assistant that answers questions based on a database schema. The user is Korean. Always respond in Korean. Do not generate SQL unless specifically asked. Use the provided schema to inform your answer. ${context ? `\n\nAdditional context and rules:\n${context}` : ''}`;
+            systemInstruction = `You are a helpful assistant that answers questions based on a database schema. The user is Korean. Always respond in Korean. Do not generate SQL unless specifically asked. Use the provided schema to inform your answer.${dateContext} ${context ? `\n\nAdditional context and rules:\n${context}` : ''}`;
         }
         
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: [{ role: 'user', parts: [{ text: `${systemInstruction}\n\nSchema:\n${schemaString}\n\nQuestion: ${naturalLanguagePrompt}` }] }],
+          contents: `Schema:\n${schemaString}\n\nQuestion: ${naturalLanguagePrompt}`,
           config: { systemInstruction }
         });
 

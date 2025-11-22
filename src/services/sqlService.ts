@@ -70,12 +70,13 @@ export async function naturalLanguageToSql(naturalLanguagePrompt: string, schema
     });
 }
 
-export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, context: string): Promise<{ answer: string }> {
+export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, context: string, userCurrentDate?: string): Promise<{ answer: string }> {
     return await fetchApi({
         type: 'aiChat',
         naturalLanguagePrompt,
         schema,
-        context
+        context,
+        userCurrentDate,
     });
 }
 
