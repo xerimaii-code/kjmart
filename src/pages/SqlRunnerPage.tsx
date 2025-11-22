@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { useAlert, useMiscUI } from '../context/AppContext';
 import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, SparklesIcon, StarIcon, ChevronDownIcon, MoreVerticalIcon } from '../components/Icons';
-import { querySql, naturalLanguageToSql, aiChat } from '../services/sqlService';
+import { querySql, naturalLanguageToSql, aiChat, sqlToNaturalLanguage, generateQueryName } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
@@ -10,6 +10,7 @@ import ToggleSwitch from '../components/ToggleSwitch';
 
 // --- TYPE DEFINITIONS ---
 type QueryStatus = 'idle' | 'loading' | 'success' | 'error';
+type QuerySaveType = 'sql' | 'natural';
 
 interface QueryResult {
     recordset?: any[];
@@ -137,7 +138,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { sqlQueryInput, setSqlQueryInput } = useMiscUI();
     
     const [generatedSql, setGeneratedSql] = useState<string | null>(null);
+    const [generatedNaturalLanguage, setGeneratedNaturalLanguage] = useState<string | null>(null);
     const [lastSuccessfulQuery, setLastSuccessfulQuery] = useState('');
+    const [queryFormForSave, setQueryFormForSave] = useState('');
+    const [querySaveType, setQuerySaveType] = useState<QuerySaveType>('sql');
+
     const [result, setResult] = useState<QueryResult | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [status, setStatus] = useState<QueryStatus>('idle');
@@ -165,6 +170,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Long press logic
+    const tableButtonLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isTableButtonLongPress = useRef(false);
     const executeLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isExecuteLongPress = useRef(false);
     const aiLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,14 +210,17 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setStatus('loading');
         setResult(null);
         setError(null);
-        setLastSuccessfulQuery('');
+        setGeneratedNaturalLanguage(null);
         abortControllerRef.current = new AbortController();
 
         try {
             const data = await querySql(sql, abortControllerRef.current.signal);
             setResult(data);
             setStatus('success');
-            setLastSuccessfulQuery(naturalLang || sql);
+            const queryToSave = naturalLang || sql;
+            setLastSuccessfulQuery(queryToSave);
+            setQueryFormForSave(queryToSave);
+            setQuerySaveType(naturalLang ? 'natural' : 'sql');
             setVisibleResultCount(INITIAL_VISIBLE_ROWS);
         } catch (err: any) {
             if (err.name !== 'AbortError') {
@@ -224,6 +234,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setStatus('loading');
         setError(null);
         setResult(null);
+        setGeneratedSql(null);
+        setGeneratedNaturalLanguage(null);
         
         try {
             const schema = await getCachedSchema();
@@ -240,6 +252,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 setResult({ answer: response.answer });
                 setStatus('success');
                 setLastSuccessfulQuery(prompt);
+                setQueryFormForSave(prompt);
+                setQuerySaveType('natural');
             } else {
                 const { sql } = await naturalLanguageToSql(prompt, schemaForQuery, context);
                 if (sql) {
@@ -329,24 +343,87 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
 
-    const handleSaveQuery = () => {
-        const name = prompt('저장할 쿼리의 이름을 입력하세요:', '');
-        if (name && lastSuccessfulQuery) {
-            const isNatural = !/^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(lastSuccessfulQuery);
-            const queryData: Omit<SavedQuery, 'id'> = {
-                name,
-                query: lastSuccessfulQuery,
-                type: isNatural ? 'natural' : 'sql',
-                isQuickRun: false,
-            };
-            if (isNatural && generatedSql) {
-                (queryData as any).generatedSql = generatedSql;
+    const handleTableButtonStart = () => {
+        isTableButtonLongPress.current = false;
+        tableButtonLongPressTimer.current = setTimeout(() => {
+            isTableButtonLongPress.current = true;
+            setUseSelectedTablesOnly(prev => {
+                const next = !prev;
+                if(navigator.vibrate) navigator.vibrate(50);
+                showToast(next ? '선택된 테이블만 사용' : '모든 테이블 사용', 'success');
+                return next;
+            });
+        }, 600);
+    };
+
+    const handleTableButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
+        if (tableButtonLongPressTimer.current) clearTimeout(tableButtonLongPressTimer.current);
+        if (isTableButtonLongPress.current && e.cancelable && e.type !== 'touchend') e.preventDefault();
+    };
+
+    const handleTableButtonClick = () => {
+        if (isTableButtonLongPress.current) {
+            isTableButtonLongPress.current = false; return;
+        }
+        setTableModalOpen(true);
+    };
+
+
+    const handleSaveQuery = async () => {
+        if (!queryFormForSave) return;
+    
+        const summary = result?.answer
+            ? `AI Answer: ${result.answer.substring(0, 100)}...`
+            : `Result: ${result?.recordset?.length ?? result?.rowsAffected ?? 0} rows. Columns: ${result?.recordset?.[0] ? Object.keys(result.recordset[0]).join(', ') : 'N/A'}`;
+    
+        try {
+            const { name: suggestedName } = await generateQueryName(queryFormForSave, summary);
+            const name = prompt('저장할 쿼리의 이름을 입력하세요:', suggestedName || '');
+    
+            if (name) {
+                const queryData: Omit<SavedQuery, 'id'> = {
+                    name,
+                    query: queryFormForSave,
+                    type: querySaveType,
+                    isQuickRun: false,
+                };
+                if (querySaveType === 'natural' && generatedSql) {
+                    (queryData as any).generatedSql = generatedSql;
+                }
+                await addSavedQuery(queryData);
+                showToast('쿼리가 저장되었습니다.', 'success');
             }
-            addSavedQuery(queryData)
-                .then(() => showToast('쿼리가 저장되었습니다.', 'success'));
+        } catch (err: any) {
+            showToast(`이름 생성 실패: ${err.message}`, 'error');
+            // Fallback to simple prompt if AI fails
+            const name = prompt('저장할 쿼리의 이름을 입력하세요:');
+            if (name) {
+                // ... same save logic as above ...
+            }
         }
     };
     
+    const handleConvertToSql = () => {
+        if (generatedSql) {
+            setQueryFormForSave(generatedSql);
+            setQuerySaveType('sql');
+            showToast('저장할 쿼리가 SQL로 설정되었습니다.', 'success');
+        }
+    };
+    
+    const handleConvertToNaturalLanguage = async () => {
+        if (!lastSuccessfulQuery) return;
+        try {
+            const { naturalLanguage } = await sqlToNaturalLanguage(lastSuccessfulQuery);
+            setGeneratedNaturalLanguage(naturalLanguage);
+            setQueryFormForSave(naturalLanguage);
+            setQuerySaveType('natural');
+            showToast('저장할 쿼리가 자연어로 설정되었습니다.', 'success');
+        } catch (err: any) {
+            showToast('자연어 변환에 실패했습니다.', 'error');
+        }
+    };
+
     const handleQuickRun = (query: SavedQuery) => {
         setSavedQueriesModalOpen(false);
         if (query.type === 'sql') executeQuery(query.query, `@${query.name}`);
@@ -464,12 +541,19 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const hasRecordset = result?.recordset && result.recordset.length > 0;
     const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result?.rowsAffected ?? 0}`}`;
 
+    const isOriginalQuerySql = lastSuccessfulQuery && /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(lastSuccessfulQuery);
+
     return (
         <div className="h-full flex flex-col bg-gray-50">
             <div className="p-2 bg-white border-b border-gray-200 z-10 flex flex-col gap-2 flex-shrink-0">
                  <div className="flex items-center gap-2 flex-wrap">
                     <button 
-                        onClick={() => setTableModalOpen(true)}
+                        onMouseDown={handleTableButtonStart}
+                        onMouseUp={handleTableButtonEnd}
+                        onMouseLeave={handleTableButtonEnd}
+                        onTouchStart={handleTableButtonStart}
+                        onTouchEnd={handleTableButtonEnd}
+                        onClick={handleTableButtonClick}
                         className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 border rounded-lg font-semibold text-sm active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                     >
                         <TableCellsIcon className="w-5 h-5"/> 
@@ -509,6 +593,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 setError(null);
                                 setStatus('idle');
                                 setGeneratedSql(null);
+                                setGeneratedNaturalLanguage(null);
+                                setQueryFormForSave('');
                             }}
                             className="absolute top-2 right-2 z-10 p-1 text-gray-400 hover:bg-gray-100 rounded-full transition-colors"
                             aria-label="결과 지우기"
@@ -518,7 +604,14 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         </button>
                     )}
                     <div className="flex justify-end items-center mb-2 flex-shrink-0 h-8 pr-8">
-                        {status === 'success' && result && (<div className="flex items-center gap-2"><button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button><button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>{generatedSql && !isAiMode && (<button onClick={() => setSqlQueryInput(generatedSql)} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL로 변환</button>)}</div>)}
+                        {status === 'success' && result && (
+                            <div className="flex items-center gap-2">
+                                <button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button>
+                                <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>
+                                {generatedSql && !isAiMode && (<button onClick={handleConvertToSql} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL로 저장 설정</button>)}
+                                {isOriginalQuerySql && !result.answer && (<button onClick={handleConvertToNaturalLanguage} className="text-xs font-semibold px-2 py-1 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200">자연어로 저장 설정</button>)}
+                            </div>
+                        )}
                     </div>
                     <div className="flex-grow overflow-auto select-text" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
                         {status === 'loading' && <div className="flex justify-center items-center h-full"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>}
@@ -579,15 +672,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
             <ModalWrapper isActive={isTableModalOpen} onClose={() => setTableModalOpen(false)} title="테이블 선택">
                 <div className="space-y-1">
-                    <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg mb-3 flex items-center justify-between gap-4">
-                        <p>AI가 참고할 테이블 범위를 설정합니다.</p>
-                        <ToggleSwitch 
-                            id="use-selected-tables" 
-                            label="선택만 사용" 
-                            checked={useSelectedTablesOnly} 
-                            onChange={setUseSelectedTablesOnly} 
-                            color="blue" 
-                        />
+                    <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg mb-3">
+                        <p>AI가 참고할 테이블 범위를 설정합니다. 길게 눌러 빠르게 전체/선택 모드를 전환할 수 있습니다.</p>
                     </div>
                     <div className="flex gap-2 mb-3">
                         <button onClick={() => setSelectedTables([...allTables])} className="flex-1 py-2 text-sm bg-blue-50 text-blue-600 font-bold rounded-lg">전체 선택</button>

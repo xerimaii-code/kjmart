@@ -185,6 +185,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
 
+      case 'sqlToNaturalLanguage': {
+        if (!ai) return res.status(503).json({ error: "AI service is not configured." });
+        const { sqlQuery } = req.body;
+        const systemInstruction = "You are a helpful assistant that explains SQL Server (T-SQL) queries in simple, natural Korean. Explain what the query does.";
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [{ role: 'user', parts: [{ text: `Explain this SQL query in Korean:\n\n${sqlQuery}` }] }],
+          config: { systemInstruction }
+        });
+        res.status(200).json({ naturalLanguage: response.text });
+        break;
+      }
+
+      case 'generateQueryName': {
+        if (!ai) return res.status(503).json({ error: "AI service is not configured." });
+        const { query, resultSummary } = req.body;
+        const systemInstruction = "You are a helpful assistant that creates a short, descriptive name in Korean for a given query and its result summary. The name should be concise and reflect the purpose of the query. Do not add any extra text, just the name.";
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [{ role: 'user', parts: [{ text: `Query: ${query}\nResult: ${resultSummary}\n\nGenerate a short, descriptive name for this query in Korean.` }] }],
+          config: { systemInstruction }
+        });
+        res.status(200).json({ name: response.text?.replace(/["'“‘”’]/g, '').trim() });
+        break;
+      }
+
       case 'syncCustomersAndProducts': {
         const [customersResult, productsResult] = await Promise.all([
           pool.request().query(customerQuery),
