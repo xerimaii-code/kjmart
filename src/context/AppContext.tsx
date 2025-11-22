@@ -542,7 +542,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const rawProducts = await syncProductsIncrementally(lastSyncDate);
 
                 // Process and merge changes
-                const productMap = new Map(products.map(p => [p.barcode, p]));
+                // Get current products from cache to avoid stale closure state from useEffect
+                const currentProducts = await cache.getCachedData<Product>('products');
+                const productMap = new Map(currentProducts.map(p => [p.barcode, p]));
                 
                 rawProducts.forEach((row: any) => {
                     const isUsed = String(row.isuse).trim() !== '0';
@@ -627,7 +629,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         startup();
 
-    }, [user, showToast, products]);
+    }, [user, showToast]);
 
     // --- PWA Install Prompt Logic ---
     useEffect(() => {

@@ -81,7 +81,7 @@ const Header: React.FC = () => {
                 {/* Firebase Sync Indicator */}
                 <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
                     {isSyncing ? (
-                        <SpinnerIcon className="w-4 h-4 text-blue-500" title="Firebase 동기화 중..." />
+                        <SpinnerIcon className="w-4 h-4 text-blue-500" title="데이터 동기화 중..." />
                     ) : (
                         <div 
                             className={`relative w-2.5 h-2.5 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
