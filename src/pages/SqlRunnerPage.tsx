@@ -599,8 +599,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     <p className="px-2 pb-2 text-xs text-gray-600">아래와 같이 데이터가 수정됩니다. 변경사항을 확인 후 실행하세요.</p>
                     <div className="overflow-auto">
                         <table className="w-full text-xs">
-                            <thead>
-                                <tr className="bg-gray-100 sticky top-0">
+                            <thead className="bg-gray-100 sticky top-0">
+                                <tr className="border-b">
                                     <th className="p-2 font-bold text-left border-r w-1/4">필드</th>
                                     <th className="p-2 font-bold text-left">수정 전 (Before)</th>
                                     <th className="p-2 font-bold text-left">수정 후 (After)</th>
@@ -664,7 +664,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 <textarea 
                     ref={textareaRef} value={sqlQueryInput} onChange={(e) => setSqlQueryInput(e.target.value)}
                     placeholder={isAiMode ? "AI에게 자유롭게 질문하세요..." : "자연어나 SQL 쿼리를 입력하세요..."}
-                    className={`w-full h-20 p-2 border rounded-lg font-mono text-base text-gray-900 bg-white select-text transition-colors resize-none ${isAiMode ? 'border-purple-400 ring-1 ring-purple-400 focus:ring-purple-500 focus:border-purple-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
+                    className={`w-full h-12 p-3 border rounded-lg font-mono text-base text-gray-900 bg-white select-text transition-colors resize-none ${isAiMode ? 'border-purple-400 ring-1 ring-purple-400 focus:ring-purple-500 focus:border-purple-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                     style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
                     autoComplete="off" autoCapitalize="none" spellCheck={false}
                 />
@@ -778,7 +778,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     {savedQueries.map(q => (
                         <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
                             <div className="flex items-center gap-2">
-                                <p className="font-bold text-gray-800 flex-grow cursor-pointer" onClick={() => handleQuickRun(q)}>{q.name}</p>
+                                <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => handleQuickRun(q)}>{q.name}</p>
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                      <button onClick={() => handleSaveUpdatedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
                                         <StarIcon className="w-5 h-5"/>
@@ -786,17 +786,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                     <button onClick={() => setEditingQuery(q)} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-100" title="수정"><PencilSquareIcon className="w-5 h-5"/></button>
                                     <button onClick={() => showAlert(`'${q.name}' 쿼리를 삭제하시겠습니까?`, () => deleteSavedQuery(q.id), '삭제', 'bg-rose-500')} className="p-1.5 rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600" title="삭제"><TrashIcon className="w-5 h-5"/></button>
                                 </div>
-                            </div>
-                             <div className="mt-2 text-sm text-gray-600">
-                                {q.type === 'natural' && q.generatedSql ? (
-                                    <>
-                                        <p className={`whitespace-pre-wrap font-mono p-2 rounded bg-gray-50 text-xs ${queryViewStates[q.id] === 'sql' ? 'hidden' : ''}`}>{q.query}</p>
-                                        <p className={`whitespace-pre-wrap font-mono p-2 rounded bg-gray-50 text-xs ${queryViewStates[q.id] !== 'sql' ? 'hidden' : ''}`}>{q.generatedSql}</p>
-                                        <button onClick={() => toggleQueryView(q.id)} className="text-xs font-semibold mt-1 text-blue-600 hover:underline">{queryViewStates[q.id] === 'sql' ? '자연어 보기' : 'SQL 보기'}</button>
-                                    </>
-                                ) : (
-                                    <p className="whitespace-pre-wrap font-mono p-2 rounded bg-gray-50 text-xs">{q.query}</p>
-                                )}
                             </div>
                         </div>
                     ))}
