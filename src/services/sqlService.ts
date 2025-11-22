@@ -92,10 +92,6 @@ export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, co
     });
 }
 
-export async function sqlToNaturalLanguage(sqlQuery: string): Promise<{ naturalLanguage: string }> {
-    return await fetchApi({ type: 'sqlToNaturalLanguage', sqlQuery });
-}
-
 export async function generateQueryName(query: string, resultSummary: string): Promise<{ name: string }> {
     return await fetchApi({ type: 'generateQueryName', query, resultSummary });
 }

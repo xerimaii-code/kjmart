@@ -248,19 +248,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
 
-      case 'sqlToNaturalLanguage': {
-        if (!ai) return res.status(503).json({ error: "AI service is not configured." });
-        const { sqlQuery } = req.body;
-        const systemInstruction = "You are a helpful assistant that explains SQL Server (T-SQL) queries in simple, natural Korean. Explain what the query does.";
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [{ role: 'user', parts: [{ text: `Explain this SQL query in Korean:\n\n${sqlQuery}` }] }],
-          config: { systemInstruction }
-        });
-        res.status(200).json({ naturalLanguage: response.text });
-        break;
-      }
-
       case 'generateQueryName': {
         if (!ai) return res.status(503).json({ error: "AI service is not configured." });
         const { query, resultSummary } = req.body;

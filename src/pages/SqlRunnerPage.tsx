@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { useAlert, useMiscUI, useScanner } from '../context/AppContext';
 import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, SparklesIcon, StarIcon, BarcodeScannerIcon } from '../components/Icons';
-import { querySql, naturalLanguageToSql, aiChat, sqlToNaturalLanguage, generateQueryName, UpdatePreview } from '../services/sqlService';
+import { querySql, naturalLanguageToSql, aiChat, generateQueryName, UpdatePreview } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
@@ -120,6 +120,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [isAiMode, setIsAiMode] = useState(false);
     const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null);
     
+    const [saveModalState, setSaveModalState] = useState<{
+        query: string;
+        type: 'sql';
+        name: string;
+        isGeneratingName: boolean;
+    } | null>(null);
+
     const abortControllerRef = useRef<AbortController | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -163,7 +170,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setError(null);
         abortControllerRef.current = new AbortController();
     
-        // Client-side check for immediate feedback
         if (/^\s*(delete|insert)\s/i.test(sql.trim()) && !confirmed) {
             showAlert('데이터 보안을 위해 INSERT 및 DELETE 쿼리는 실행할 수 없습니다.');
             setStatus('idle');
@@ -175,8 +181,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
             if (data.preview) {
                 setUpdatePreview(data.preview);
-                setLastSuccessfulQuery(sql); // Save query for confirmation
-                setStatus('idle'); // Stop loading spinner, wait for user confirmation
+                setLastSuccessfulQuery(sql); 
+                setStatus('idle'); 
             } else {
                 setResult(data);
                 setStatus('success');
@@ -329,7 +335,29 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setTableModalOpen(true);
     };
 
+    const openSaveQueryModal = async (queryToSave: string) => {
+        setSaveModalState({
+            query: queryToSave,
+            type: 'sql',
+            name: '이름 생성 중...',
+            isGeneratingName: true,
+        });
 
+        try {
+            const summary = result?.answer
+                ? `AI Answer: ${result.answer.substring(0, 100)}...`
+                : `Result: ${result?.recordset?.length ?? result?.rowsAffected ?? 0} rows.`;
+            
+            const { name: suggestedName } = await generateQueryName(queryToSave, summary);
+            
+            setSaveModalState(prevState => prevState ? { ...prevState, name: suggestedName || '', isGeneratingName: false } : null);
+        } catch (err) {
+            console.error(err);
+            showToast('AI 이름 추천에 실패했습니다.', 'error');
+            setSaveModalState(prevState => prevState ? { ...prevState, name: '', isGeneratingName: false } : null);
+        }
+    };
+    
     const handleSaveQuery = async () => {
         const currentQuery = sqlQueryInput.trim();
         if (!currentQuery) {
@@ -337,68 +365,18 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             return;
         }
         
-        const isCurrentlyNatural = !( /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(currentQuery));
-    
-        const summary = result?.answer
-            ? `AI Answer: ${result.answer.substring(0, 100)}...`
-            : `Result: ${result?.recordset?.length ?? result?.rowsAffected ?? 0} rows. Columns: ${result?.recordset?.[0] ? Object.keys(result.recordset[0]).join(', ') : 'N/A'}`;
-    
-        try {
-            const { name: suggestedName } = await generateQueryName(currentQuery, summary);
-            const name = prompt('저장할 쿼리의 이름을 입력하세요:', suggestedName || '');
-    
-            if (name) {
-                const queryData: Omit<SavedQuery, 'id'> = {
-                    name,
-                    query: currentQuery,
-                    type: isCurrentlyNatural ? 'natural' : 'sql',
-                    isQuickRun: false,
-                };
-                if (isCurrentlyNatural && generatedSql) { (queryData as any).generatedSql = generatedSql; }
-                await addSavedQuery(queryData);
-                showToast('쿼리가 저장되었습니다.', 'success');
-            }
-        } catch (err: any) {
-            showToast(`이름 생성 실패: ${err.message}`, 'error');
-            const name = prompt('저장할 쿼리의 이름을 입력하세요:');
-            if (name) {
-                const queryData: Omit<SavedQuery, 'id'> = { name, query: currentQuery, type: isCurrentlyNatural ? 'natural' : 'sql', isQuickRun: false };
-                if (isCurrentlyNatural && generatedSql) { (queryData as any).generatedSql = generatedSql; }
-                await addSavedQuery(queryData);
-                showToast('쿼리가 저장되었습니다.', 'success');
-            }
-        }
-    };
-    
-    const handleConvertToSql = () => {
-        if (generatedSql) {
-            setSqlQueryInput(generatedSql);
-            setResult(null);
-            setStatus('idle');
-            setGeneratedSql(null);
-            showToast('SQL 쿼리가 실행창에 채워졌습니다.', 'success');
-        }
-    };
-    
-    const handleConvertToNaturalLanguage = async () => {
-        const sqlToConvert = generatedSql || (isOriginalQuerySql ? lastSuccessfulQuery : null);
-        
-        if (!sqlToConvert) {
-            showToast('자연어로 변환할 SQL 쿼리가 없습니다.', 'error');
+        const isSql = /^(SELECT|UPDATE|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(currentQuery);
+        if (!isSql) {
+            showAlert("자연어 쿼리는 저장할 수 없습니다.\n실행 후 [SQL 쿼리 저장]을 이용해 주세요.");
             return;
         }
     
-        setStatus('loading');
-        try {
-            const { naturalLanguage } = await sqlToNaturalLanguage(sqlToConvert);
-            setSqlQueryInput(naturalLanguage);
-            setResult(null);
-            setStatus('idle');
-            showToast('자연어 설명이 실행창에 채워졌습니다.', 'success');
-        } catch (err: any) {
-            showToast('자연어 변환에 실패했습니다.', 'error');
-            setStatus('error');
-            setError(err.message);
+        await openSaveQueryModal(currentQuery);
+    };
+    
+    const handleSaveGeneratedSql = async () => {
+        if (generatedSql) {
+            await openSaveQueryModal(generatedSql);
         }
     };
     
@@ -540,8 +518,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const hasRecordset = result?.recordset && result.recordset.length > 0;
     const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result?.rowsAffected ?? 0}`}`;
-
-    const isOriginalQuerySql = lastSuccessfulQuery && /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(lastSuccessfulQuery);
 
     const renderUpdatePreviewModal = () => {
         if (!updatePreview) return null;
@@ -702,8 +678,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <div className="flex items-center gap-2">
                                 <button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button>
                                 <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>
-                                {generatedSql && !isAiMode && (<button onClick={handleConvertToSql} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL로 변환</button>)}
-                                {isOriginalQuerySql && !result.answer && (<button onClick={handleConvertToNaturalLanguage} className="text-xs font-semibold px-2 py-1 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200">자연어로 변환</button>)}
+                                {generatedSql && !isAiMode && (<button onClick={handleSaveGeneratedSql} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL 쿼리 저장</button>)}
                             </div>
                         )}
                     </div>
@@ -811,7 +786,50 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             </FullScreenModal>
             
-            {/* Edit Modals */}
+            <FullScreenModal 
+                isOpen={!!saveModalState} 
+                onClose={() => setSaveModalState(null)} 
+                title="새 쿼리 저장" 
+                footer={
+                    <button 
+                        onClick={async () => {
+                            if (saveModalState && saveModalState.name) {
+                                await addSavedQuery({
+                                    name: saveModalState.name,
+                                    query: saveModalState.query,
+                                    type: saveModalState.type,
+                                    isQuickRun: false
+                                });
+                                showToast('쿼리가 저장되었습니다.', 'success');
+                                setSaveModalState(null);
+                            } else {
+                                showAlert('쿼리 이름을 입력해주세요.');
+                            }
+                        }}
+                        disabled={saveModalState?.isGeneratingName}
+                        className="relative w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30 flex items-center justify-center disabled:bg-gray-400"
+                    >
+                        {saveModalState?.isGeneratingName ? <SpinnerIcon className="w-6 h-6"/> : '저장'}
+                    </button>
+                }
+            >
+                {saveModalState && (
+                    <div className="space-y-4 p-2">
+                        <input 
+                            type="text" 
+                            value={saveModalState.name} 
+                            onChange={e => setSaveModalState(s => s ? { ...s, name: e.target.value } : null)} 
+                            placeholder="쿼리 이름" 
+                            disabled={saveModalState.isGeneratingName}
+                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" />
+                        <textarea 
+                            value={saveModalState.query} 
+                            readOnly 
+                            className="w-full h-40 p-3 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50" />
+                    </div>
+                )}
+            </FullScreenModal>
+            
              <FullScreenModal isOpen={!!editingQuery} onClose={() => setEditingQuery(null)} title="저장된 쿼리 수정" footer={
                  <button onClick={() => { if (editingQuery) handleSaveUpdatedQuery(editingQuery.id, { name: editingQuery.name, query: editingQuery.query }); }} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">저장</button>
              }>
