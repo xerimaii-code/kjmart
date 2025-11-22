@@ -135,16 +135,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   
   try {
     switch (type) {
-      case 'connect':
+      case 'connect': {
         res.status(200).json({ success: true, message: 'Connection successful' });
         break;
+      }
 
-      case 'getDatabaseSchema':
+      case 'getDatabaseSchema': {
         const schema = await getFullDbSchema(currentPool);
         res.status(200).json(schema);
         break;
+      }
 
-      case 'getTables':
+      case 'getTables': {
         const tablesResult = await currentPool.request().query(`
             SELECT TABLE_NAME 
             FROM INFORMATION_SCHEMA.TABLES 
@@ -153,14 +155,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `);
         res.status(200).json(tablesResult.recordset.map((row: any) => row.TABLE_NAME));
         break;
+      }
       
-      case 'query':
+      case 'query': {
         if (!query) return res.status(400).json({ error: 'Query is required' });
         const result = await currentPool.request().query(query);
         res.status(200).json({ recordset: result.recordset, rowsAffected: result.rowsAffected[0] });
         break;
+      }
       
-      case 'naturalLanguageToSql':
+      case 'naturalLanguageToSql': {
         if (!naturalLanguagePrompt || !clientSchema) {
           return res.status(400).json({ error: 'Prompt and schema are required' });
         }
@@ -174,8 +178,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const sqlQuery = response.text?.trim().replace(/```sql|```/g, '').trim() || '';
         res.status(200).json({ sql: sqlQuery });
         break;
+      }
 
-      case 'aiChat':
+      case 'aiChat': {
          if (!naturalLanguagePrompt || !clientSchema) {
           return res.status(400).json({ error: 'Prompt and schema are required' });
         }
@@ -187,8 +192,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const chatResponse = await ai.models.generateContent({ model: chatModel, contents: chatPrompt });
         res.status(200).json({ answer: chatResponse.text });
         break;
+      }
 
-      case 'syncCustomersAndProducts':
+      case 'syncCustomersAndProducts': {
         const [custRes, prodRes] = await Promise.all([
           currentPool.request().query(`
             SELECT
@@ -220,8 +226,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           products: { recordset: prodRes.recordset }
         });
         break;
+      }
 
-      case 'syncCustomers':
+      case 'syncCustomers': {
         const customersResult = await currentPool.request().query(`
           SELECT
             comp.comcode,
@@ -232,8 +239,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `);
         res.status(200).json({ recordset: customersResult.recordset });
         break;
+      }
 
-      case 'syncProductsIncrementally':
+      case 'syncProductsIncrementally': {
         const request = currentPool.request();
         if (lastSyncDate) {
             request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
@@ -256,10 +264,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const incResult = await request.query(incrementalQuery);
         res.status(200).json({ recordset: incResult.recordset });
         break;
+      }
 
-      default:
+      default: {
         res.status(400).json({ error: 'Invalid request type' });
         break;
+      }
     }
   } catch (err: any) {
     console.error(`Error processing request type "${type}":`, err);
