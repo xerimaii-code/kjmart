@@ -124,12 +124,14 @@ interface ModalsActions {
 interface MiscUIState {
     lastModifiedOrderId: number | null;
     activeMenuOrderId: number | null;
+    sqlQueryInput: string;
 }
 
 interface MiscUIActions {
     // FIX: Update type to support functional updates for useState setters.
     setLastModifiedOrderId: React.Dispatch<React.SetStateAction<number | null>>;
     setActiveMenuOrderId: React.Dispatch<React.SetStateAction<number | null>>;
+    setSqlQueryInput: React.Dispatch<React.SetStateAction<string>>;
 }
 
 interface ScannerState {
@@ -227,6 +229,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [modalsState, setModalsState] = useState<ModalsState>(initialModalsState);
     const [lastModifiedOrderId, setLastModifiedOrderId] = useState<number | null>(null);
     const [activeMenuOrderId, setActiveMenuOrderId] = useState<number | null>(null);
+    const [sqlQueryInput, setSqlQueryInput] = useState('');
     const [scannerState, setScannerState] = useState<ScannerState>({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false });
     const [isInstallPromptAvailable, setInstallPromptAvailable] = useState(false);
     const deferredInstallPrompt = useRef<any>(null);
@@ -829,7 +832,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         closeScanner: () => setScannerState({ isScannerOpen: false, scannerContext: null, onScanSuccess: () => {}, continuousScan: false }),
     }), [scannerState, deviceSettings.selectedCameraId, deviceSettings.scanSettings]);
     
-    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId }), [lastModifiedOrderId, activeMenuOrderId]);
+    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId, sqlQueryInput, setSqlQueryInput }), [lastModifiedOrderId, activeMenuOrderId, sqlQueryInput]);
     
     const pwaInstallValue = useMemo(() => ({ isInstallPromptAvailable, triggerInstallPrompt }), [isInstallPromptAvailable, triggerInstallPrompt]);
 

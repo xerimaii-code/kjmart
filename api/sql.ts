@@ -43,6 +43,33 @@ const config: sql.config = {
 // Gemini AI Configuration
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+// --- Connection Pooling ---
+let pool: sql.ConnectionPool | undefined;
+
+async function getPool(): Promise<sql.ConnectionPool> {
+    if (pool && pool.connected) {
+        return pool;
+    }
+    try {
+        console.log('Creating new SQL Connection Pool with config:', {
+            server: config.server,
+            port: config.port,
+            user: config.user,
+            database: config.database,
+            encrypt: config.options.encrypt
+        });
+        pool = new sql.ConnectionPool(config);
+        await pool.connect();
+        console.log("New SQL Connection Pool created and connected.");
+        return pool;
+    } catch (err) {
+        console.error('SQL Connection Error on getPool:', err);
+        pool = undefined; // Reset on error
+        throw err;
+    }
+}
+
+
 // Helper to get structured DB Schema for caching
 async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
     const schema: Record<string, { columns: { name: string; type: string }[] }> = {};
@@ -111,22 +138,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { type, query, naturalLanguagePrompt, schema: clientSchema, context: clientContext } = req.body;
-  let pool: sql.ConnectionPool | undefined;
   
-  // Log the connection details for debugging, excluding the password
-  console.log('Attempting to connect to SQL Server with config:', {
-    server: config.server,
-    port: config.port,
-    user: config.user,
-    database: config.database,
-    encrypt: config.options.encrypt
-  });
-
+  let currentPool: sql.ConnectionPool;
   try {
-    pool = new sql.ConnectionPool(config);
-    await pool.connect();
+    currentPool = await getPool();
   } catch (err: any) {
-    console.error('SQL Connection Error:', err);
+    console.error('SQL Connection Error from handler:', err);
     return res.status(500).json({ error: 'Database connection failed', details: err.message });
   }
   
@@ -137,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'getTables':
-        const tablesResult = await pool.request().query(`
+        const tablesResult = await currentPool.request().query(`
             SELECT TABLE_NAME 
             FROM INFORMATION_SCHEMA.TABLES 
             WHERE TABLE_TYPE = 'BASE TABLE' 
@@ -147,7 +164,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'getDatabaseSchema':
-        const fullSchema = await getFullDbSchema(pool);
+        const fullSchema = await getFullDbSchema(currentPool);
         res.status(200).json(fullSchema);
         break;
 
@@ -155,7 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!query || typeof query !== 'string') {
           return res.status(400).json({ error: 'Query is required' });
         }
-        const result = await pool.request().query(query);
+        const result = await currentPool.request().query(query);
         res.status(200).json({
           recordset: result.recordset,
           rowsAffected: result.rowsAffected[0],
@@ -199,7 +216,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ORDER BY
                 CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END;
         `;
-        const syncResult = await pool.request().query(syncQuery);
+        const syncResult = await currentPool.request().query(syncQuery);
         res.status(200).json(syncResult.recordset);
         break;
 
@@ -274,9 +291,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err: any) {
     console.error('API Error:', err);
     res.status(500).json({ error: 'An error occurred while processing the request', details: err.message });
-  } finally {
-    if (pool) {
-      await pool.close();
-    }
   }
 }

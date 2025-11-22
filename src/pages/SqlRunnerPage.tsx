@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useAlert } from '../context/AppContext';
+import { useAlert, useMiscUI } from '../context/AppContext';
 import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, SparklesIcon, StarIcon, ChevronDownIcon, MoreVerticalIcon } from '../components/Icons';
 import { querySql, naturalLanguageToSql, aiChat } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue } from '../services/dbService';
@@ -83,8 +83,9 @@ const ModalWrapper: React.FC<{
 // --- MAIN PAGE COMPONENT ---
 const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { showAlert, showToast } = useAlert();
+    const { sqlQueryInput, setSqlQueryInput } = useMiscUI();
     
-    const [queryInput, setQueryInput] = useState('');
+    const [generatedSql, setGeneratedSql] = useState<string | null>(null);
     const [lastSuccessfulQuery, setLastSuccessfulQuery] = useState('');
     const [result, setResult] = useState<QueryResult | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -190,8 +191,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             } else {
                 const { sql } = await naturalLanguageToSql(prompt, schemaForQuery, context);
                 if (sql) {
-                    showToast('AI가 SQL 쿼리를 생성했습니다.', 'success');
-                    setQueryInput(sql); 
+                    setGeneratedSql(sql);
                     executeQuery(sql, prompt);
                 } else {
                     throw new Error('AI가 유효한 SQL을 생성하지 못했습니다.');
@@ -201,7 +201,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             setError(err.message || 'AI 처리 중 오류 발생');
             setStatus('error');
         }
-    }, [executeQuery, selectedTables, useSelectedTablesOnly, showToast, isAiMode]);
+    }, [executeQuery, selectedTables, useSelectedTablesOnly, isAiMode]);
 
     const processAndExecute = useCallback(async (input: string) => {
         const currentInput = input.trim();
@@ -209,6 +209,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             showAlert('실행할 내용을 입력해주세요.');
             return;
         }
+
+        setGeneratedSql(null);
 
         if (currentInput.startsWith('@')) {
             const queryName = currentInput.slice(1).split(/\s+/)[0];
@@ -248,7 +250,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         isExecuteLongPress.current = false;
         executeLongPressTimer.current = setTimeout(() => {
             isExecuteLongPress.current = true;
-            setQueryInput('');
+            setSqlQueryInput('');
             if (navigator.vibrate) navigator.vibrate(50);
             showToast('입력창이 초기화되었습니다.', 'success');
         }, 600);
@@ -268,7 +270,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             setStatus('idle');
             showToast('실행이 중단되었습니다.', 'error');
         } else {
-            processAndExecute(queryInput);
+            processAndExecute(sqlQueryInput);
         }
     };
     
@@ -288,7 +290,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const handleAiButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
         if (aiLongPressTimer.current) clearTimeout(aiLongPressTimer.current);
         if (!isAiLongPress.current) {
-            if (status !== 'loading') processAndExecute(queryInput);
+            if (status !== 'loading') processAndExecute(sqlQueryInput);
         } else if(e.cancelable && e.type !== 'touchend') {
             e.preventDefault();
         }
@@ -439,7 +441,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     </div>
                 </div>
                 <textarea 
-                    ref={textareaRef} value={queryInput} onChange={(e) => setQueryInput(e.target.value)}
+                    ref={textareaRef} value={sqlQueryInput} onChange={(e) => setSqlQueryInput(e.target.value)}
                     placeholder={isAiMode ? "AI에게 자유롭게 질문하세요..." : "자연어나 SQL 쿼리를 입력하세요..."}
                     className={`w-full h-12 p-2 border rounded-lg font-mono text-base text-gray-900 bg-white select-text transition-colors resize-none ${isAiMode ? 'border-purple-400 ring-1 ring-purple-400 focus:ring-purple-500 focus:border-purple-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
                     style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
@@ -463,6 +465,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 setResult(null);
                                 setError(null);
                                 setStatus('idle');
+                                setGeneratedSql(null);
                             }}
                             className="absolute top-2 right-2 z-10 p-1 text-gray-400 hover:bg-gray-100 rounded-full transition-colors"
                             aria-label="결과 지우기"
@@ -471,8 +474,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <RemoveIcon className="w-4 h-4" />
                         </button>
                     )}
-                    <div className="flex justify-end items-center mb-2 flex-shrink-0 h-8">
-                        {status === 'success' && result && (<div className="flex items-center gap-2"><button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button><button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button></div>)}
+                    <div className="flex justify-end items-center mb-2 flex-shrink-0 h-8 pr-8">
+                        {status === 'success' && result && (<div className="flex items-center gap-2"><button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button><button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>{generatedSql && !isAiMode && (<button onClick={() => setSqlQueryInput(generatedSql)} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL로 변환</button>)}</div>)}
                     </div>
                     <div className="flex-grow overflow-auto select-text" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
                         {status === 'loading' && <div className="flex justify-center items-center h-full"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>}
