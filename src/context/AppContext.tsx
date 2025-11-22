@@ -455,8 +455,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const typeKorean = dataType === 'customers' ? '거래처' : '상품';
         try {
             await dbResetData(dataType);
-            // Pass an empty array. The type will be correctly inferred for both customers and products.
-            await cache.setCachedData(dataType, []);
+            // FIX: Explicitly cast the empty array to avoid a TypeScript error.
+            // TypeScript cannot infer the element type of an empty array (`[]`) in this context,
+            // so we cast it to satisfy the `Customer[] | Product[]` parameter type.
+            await cache.setCachedData(dataType, [] as Customer[]);
             if (dataType === 'customers') setCustomers([]);
             else setProducts([]);
             showToast(`${typeKorean} 데이터가 성공적으로 초기화되었습니다.`, 'success');

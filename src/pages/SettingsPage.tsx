@@ -159,6 +159,7 @@ const SyncSection: React.FC<{
                 accept=".xlsx, .xls"
             />
             <h4 className="text-base font-bold text-gray-700">{dataTypeKorean} 데이터</h4>
+            {/*
             <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
                 <div className="space-y-3">
                      <p className="text-xs text-center text-gray-500 -mt-1">Google Drive의 엑셀 파일과 동기화합니다.</p>
@@ -219,6 +220,7 @@ const SyncSection: React.FC<{
                     </div>
                 </div>
             </div>
+            */}
              <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
                 <div className="space-y-3">
                     <p className="text-xs text-center text-gray-500">기기에 저장된 엑셀 파일로 1회성 동기화를 합니다.</p>
