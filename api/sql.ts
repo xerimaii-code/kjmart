@@ -190,44 +190,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       case 'syncCustomersAndProducts': {
         const productNameSql = `(CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)`;
-        const productsQuery = [
-            'SELECT',
-            '    comp.comname AS 거래처명,',
-            '    parts.barcode AS 바코드,',
-            `    ${productNameSql} AS 상품명,`,
-            '    parts.money0vat AS 매입가가,',
-            '    parts.money1 AS 판매가,',
-            '    parts.salemoney0 AS 행사가,',
-            '    parts.saleendday AS 행사종료일,',
-            '    parts.upday1',
-            'FROM',
-            '    comp INNER JOIN parts ON comp.comcode = parts.comcode',
-            'WHERE (',
-            '    ((',
-            '        comp.comname NOT LIKE N\'%야채%\' AND comp.comname NOT LIKE N\'%과일%\' AND',
-            '        comp.comname NOT LIKE N\'%생선%\' AND comp.comname NOT LIKE N\'%정육%\' AND',
-            '        comp.comname NOT LIKE N\'%식품%\' AND comp.comname NOT LIKE N\'%비식품%\' AND',
-            '        comp.comname NOT LIKE N\'%기획%\' AND comp.comname NOT LIKE N\'%경진청과%\'',
-            '    )',
-            '    AND parts.barcode IS NOT NULL',
-            `    AND (${productNameSql}) NOT LIKE N'%*---*%'`,
-            '    AND parts.money0vat <> 0',
-            '    AND parts.isuse <> \'0\'',
-            '    )',
-            '    OR (parts.barcode NOT LIKE \'0000000%\')',
-            ')',
-            'ORDER BY 상품명;'
-        ].join('\n');
-
-        const customersQuery = [
-            'SELECT',
-            '    comp.comcode AS 거래처코드,',
-            '    comp.comname AS 거래처명',
-            'FROM',
-            '    comp',
-            'WHERE',
-            '    comp.isuse <> \'0\';'
-        ].join('\n');
+        const productsQuery = `
+SELECT
+    comp.comname AS 거래처명,
+    parts.barcode AS 바코드,
+    ${productNameSql} AS 상품명,
+    parts.money0vat AS 매입가가,
+    parts.money1 AS 판매가,
+    parts.salemoney0 AS 행사가,
+    parts.saleendday AS 행사종료일,
+    parts.upday1
+FROM
+    comp INNER JOIN parts ON comp.comcode = parts.comcode
+WHERE (
+    (
+        (
+            comp.comname NOT LIKE N'%야채%' AND comp.comname NOT LIKE N'%과일%' AND
+            comp.comname NOT LIKE N'%생선%' AND comp.comname NOT LIKE N'%정육%' AND
+            comp.comname NOT LIKE N'%식품%' AND comp.comname NOT LIKE N'%비식품%' AND
+            comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
+        )
+        AND parts.barcode IS NOT NULL
+        AND (${productNameSql}) NOT LIKE N'%*---*%'
+        AND parts.money0vat <> 0
+        AND parts.isuse <> '0'
+    )
+    OR (parts.barcode NOT LIKE '0000000%')
+)
+ORDER BY 상품명;
+`;
+        const customersQuery = `
+SELECT
+    comp.comcode AS 거래처코드,
+    comp.comname AS 거래처명
+FROM
+    comp
+WHERE
+    comp.isuse <> '0';
+`;
 
         const [custRes, prodRes] = await Promise.all([
           currentPool.request().query(customersQuery),
@@ -241,15 +241,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'syncCustomers': {
-        const syncCustomersQuery = [
-            'SELECT',
-            '    comp.comcode AS 거래처코드,',
-            '    comp.comname AS 거래처명',
-            'FROM',
-            '    comp',
-            'WHERE',
-            '    comp.isuse <> \'0\';'
-        ].join('\n');
+        const syncCustomersQuery = `
+SELECT
+    comp.comcode AS 거래처코드,
+    comp.comname AS 거래처명
+FROM
+    comp
+WHERE
+    comp.isuse <> '0';
+`;
         const customersResult = await currentPool.request().query(syncCustomersQuery);
         res.status(200).json({ recordset: customersResult.recordset });
         break;
@@ -262,39 +262,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         const productNameSqlInc = `(CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)`;
-        const baseQueryParts = [
-            'SELECT',
-            '    comp.comname AS 거래처명,',
-            '    parts.barcode AS 바코드,',
-            `    ${productNameSqlInc} AS 상품명,`,
-            '    parts.money0vat AS 매입가가,',
-            '    parts.money1 AS 판매가,',
-            '    parts.salemoney0 AS 행사가,',
-            '    parts.saleendday AS 행사종료일,',
-            '    parts.upday1,',
-            '    parts.isuse',
-            'FROM',
-            '    comp INNER JOIN parts ON comp.comcode = parts.comcode',
-            'WHERE (',
-            '    ((',
-            '        comp.comname NOT LIKE N\'%야채%\' AND comp.comname NOT LIKE N\'%과일%\' AND',
-            '        comp.comname NOT LIKE N\'%생선%\' AND comp.comname NOT LIKE N\'%정육%\' AND',
-            '        comp.comname NOT LIKE N\'%식품%\' AND comp.comname NOT LIKE N\'%비식품%\' AND',
-            '        comp.comname NOT LIKE N\'%기획%\' AND comp.comname NOT LIKE N\'%경진청과%\'',
-            '    )',
-            '    AND parts.barcode IS NOT NULL',
-            `    AND (${productNameSqlInc}) NOT LIKE N'%*---*%'`,
-            '    AND parts.money0vat <> 0',
-            '    )',
-            '    OR (parts.barcode NOT LIKE \'0000000%\')',
-            ')'
-        ];
+        let finalQuery = `
+SELECT
+    comp.comname AS 거래처명,
+    parts.barcode AS 바코드,
+    ${productNameSqlInc} AS 상품명,
+    parts.money0vat AS 매입가가,
+    parts.money1 AS 판매가,
+    parts.salemoney0 AS 행사가,
+    parts.saleendday AS 행사종료일,
+    parts.upday1,
+    parts.isuse
+FROM
+    comp INNER JOIN parts ON comp.comcode = parts.comcode
+WHERE (
+    (
+        (
+            comp.comname NOT LIKE N'%야채%' AND comp.comname NOT LIKE N'%과일%' AND
+            comp.comname NOT LIKE N'%생선%' AND comp.comname NOT LIKE N'%정육%' AND
+            comp.comname NOT LIKE N'%식품%' AND comp.comname NOT LIKE N'%비식품%' AND
+            comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
+        )
+        AND parts.barcode IS NOT NULL
+        AND (${productNameSqlInc}) NOT LIKE N'%*---*%'
+        AND parts.money0vat <> 0
+    )
+    OR (parts.barcode NOT LIKE '0000000%')
+)
+`;
 
-        let finalQuery = baseQueryParts.join('\n');
         if (lastSyncDate) {
-          finalQuery += '\nAND parts.upday1 >= @lastSyncDate';
+          finalQuery += `\nAND parts.upday1 >= @lastSyncDate`;
         }
-        finalQuery += '\nORDER BY parts.upday1;';
+        finalQuery += `\nORDER BY parts.upday1;`;
 
         const incResult = await request.query(finalQuery);
         res.status(200).json({ recordset: incResult.recordset });
