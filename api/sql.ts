@@ -56,7 +56,7 @@ async function getPool(): Promise<sql.ConnectionPool> {
             port: config.port,
             user: config.user,
             database: config.database,
-            encrypt: config.options.encrypt
+            encrypt: config.options?.encrypt
         });
         pool = new sql.ConnectionPool(config);
         await pool.connect();
@@ -197,7 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 LTRIM(RTRIM(c.comcode)) AS comcode,
                 LTRIM(RTRIM(c.comname)) AS comname,
                 LTRIM(RTRIM(p.barcode)) AS barcode,
-                LTRIM(RTRIM(CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END)) AS name,
+                LTRIM(RTRIM(CONCAT(p.descr, CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN ' [' + p.spec + ']' ELSE '' END))) AS name,
                 p.money0vat AS costPrice,
                 p.money1 AS sellingPrice,
                 p.salemoney0 AS salePrice,
@@ -209,7 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             WHERE
                 p.isuse <> '0' AND p.barcode IS NOT NULL AND p.barcode <> ''
             ORDER BY
-                (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END);
+                name;
         `;
         
         const [customersData, productsData] = await Promise.all([
@@ -244,7 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             SELECT
                 LTRIM(RTRIM(p.barcode)) AS barcode,
                 LTRIM(RTRIM(c.comname)) AS comname,
-                LTRIM(RTRIM(CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END)) AS name,
+                LTRIM(RTRIM(CONCAT(p.descr, CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN ' [' + p.spec + ']' ELSE '' END))) AS name,
                 p.money0vat AS costPrice,
                 p.money1 AS sellingPrice,
                 p.salemoney0 AS salePrice,
