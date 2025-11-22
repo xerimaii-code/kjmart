@@ -219,8 +219,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ORDER BY
                 상품명;
         `;
-        const [custRes, prodRes] = await Promise.all([
-          currentPool.request().query(`
+        const customersQuery = `
             SELECT
                 comp.comcode AS 거래처코드,
                 comp.comname AS 거래처명
@@ -228,7 +227,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 comp
             WHERE
                 comp.isuse <> '0';
-          `),
+        `;
+        const [custRes, prodRes] = await Promise.all([
+          currentPool.request().query(customersQuery),
           currentPool.request().query(productsQuery)
         ]);
         res.status(200).json({
@@ -238,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncCustomers':
-        const customersResult = await currentPool.request().query(`
+        const syncCustomersQuery = `
             SELECT
                 comp.comcode AS 거래처코드,
                 comp.comname AS 거래처명
@@ -246,7 +247,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 comp
             WHERE
                 comp.isuse <> '0';
-        `);
+        `;
+        const customersResult = await currentPool.request().query(syncCustomersQuery);
         res.status(200).json({ recordset: customersResult.recordset });
         break;
 
