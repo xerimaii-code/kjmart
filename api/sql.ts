@@ -1,4 +1,3 @@
-// api/sql.ts
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from 'mssql';
 import { GoogleGenAI } from '@google/genai';
@@ -183,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           pool.request().query(`
             SELECT 
                 p.barcode,
-                IIF(p.spec IS NOT NULL AND p.spec <> '', CONCAT(p.descr, ' [', p.spec, ']'), p.descr) as name,
+                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END as name,
                 p.cost AS costPrice, 
                 p.price AS sellingPrice,
                 p.saleprice AS salePrice, 
@@ -223,7 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const incrementalQuery = `
           SELECT 
               p.barcode,
-              IIF(p.spec IS NOT NULL AND p.spec <> '', CONCAT(p.descr, ' [', p.spec, ']'), p.descr) as name,
+              CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END as name,
               p.cost AS costPrice, 
               p.price AS sellingPrice,
               p.saleprice AS salePrice, 
