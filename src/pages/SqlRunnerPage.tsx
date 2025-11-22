@@ -370,57 +370,85 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
 
     const handleSaveQuery = async () => {
-        if (!queryFormForSave) return;
+        if (!sqlQueryInput.trim()) {
+            showAlert("저장할 쿼리가 없습니다.");
+            return;
+        }
+    
+        const currentQuery = sqlQueryInput.trim();
+        const isCurrentlyNatural = !( /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(currentQuery));
     
         const summary = result?.answer
             ? `AI Answer: ${result.answer.substring(0, 100)}...`
             : `Result: ${result?.recordset?.length ?? result?.rowsAffected ?? 0} rows. Columns: ${result?.recordset?.[0] ? Object.keys(result.recordset[0]).join(', ') : 'N/A'}`;
     
         try {
-            const { name: suggestedName } = await generateQueryName(queryFormForSave, summary);
+            const { name: suggestedName } = await generateQueryName(currentQuery, summary);
             const name = prompt('저장할 쿼리의 이름을 입력하세요:', suggestedName || '');
     
             if (name) {
                 const queryData: Omit<SavedQuery, 'id'> = {
                     name,
-                    query: queryFormForSave,
-                    type: querySaveType,
+                    query: currentQuery,
+                    type: isCurrentlyNatural ? 'natural' : 'sql',
                     isQuickRun: false,
                 };
-                if (querySaveType === 'natural' && generatedSql) {
+    
+                if (isCurrentlyNatural && generatedSql) {
                     (queryData as any).generatedSql = generatedSql;
                 }
+    
                 await addSavedQuery(queryData);
                 showToast('쿼리가 저장되었습니다.', 'success');
             }
         } catch (err: any) {
             showToast(`이름 생성 실패: ${err.message}`, 'error');
-            // Fallback to simple prompt if AI fails
             const name = prompt('저장할 쿼리의 이름을 입력하세요:');
             if (name) {
-                // ... same save logic as above ...
+                const queryData: Omit<SavedQuery, 'id'> = {
+                    name,
+                    query: currentQuery,
+                    type: isCurrentlyNatural ? 'natural' : 'sql',
+                    isQuickRun: false,
+                };
+                if (isCurrentlyNatural && generatedSql) {
+                    (queryData as any).generatedSql = generatedSql;
+                }
+                await addSavedQuery(queryData);
+                showToast('쿼리가 저장되었습니다.', 'success');
             }
         }
     };
     
     const handleConvertToSql = () => {
         if (generatedSql) {
-            setQueryFormForSave(generatedSql);
-            setQuerySaveType('sql');
-            showToast('저장할 쿼리가 SQL로 설정되었습니다.', 'success');
+            setSqlQueryInput(generatedSql);
+            setResult(null);
+            setStatus('idle');
+            showToast('SQL 쿼리가 실행창에 채워졌습니다.', 'success');
         }
     };
     
     const handleConvertToNaturalLanguage = async () => {
-        if (!lastSuccessfulQuery) return;
+        // We use lastSuccessfulQuery because sqlQueryInput might have changed
+        const sqlToConvert = generatedSql || (isOriginalQuerySql ? lastSuccessfulQuery : null);
+        
+        if (!sqlToConvert) {
+            showToast('자연어로 변환할 SQL 쿼리가 없습니다.', 'error');
+            return;
+        }
+    
+        setStatus('loading');
         try {
-            const { naturalLanguage } = await sqlToNaturalLanguage(lastSuccessfulQuery);
-            setGeneratedNaturalLanguage(naturalLanguage);
-            setQueryFormForSave(naturalLanguage);
-            setQuerySaveType('natural');
-            showToast('저장할 쿼리가 자연어로 설정되었습니다.', 'success');
+            const { naturalLanguage } = await sqlToNaturalLanguage(sqlToConvert);
+            setSqlQueryInput(naturalLanguage);
+            setResult(null);
+            setStatus('idle');
+            showToast('자연어 설명이 실행창에 채워졌습니다.', 'success');
         } catch (err: any) {
             showToast('자연어 변환에 실패했습니다.', 'error');
+            setStatus('error');
+            setError(err.message);
         }
     };
 
@@ -608,8 +636,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <div className="flex items-center gap-2">
                                 <button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button>
                                 <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>
-                                {generatedSql && !isAiMode && (<button onClick={handleConvertToSql} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL로 저장 설정</button>)}
-                                {isOriginalQuerySql && !result.answer && (<button onClick={handleConvertToNaturalLanguage} className="text-xs font-semibold px-2 py-1 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200">자연어로 저장 설정</button>)}
+                                {generatedSql && !isAiMode && (<button onClick={handleConvertToSql} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL로 변환</button>)}
+                                {isOriginalQuerySql && !result.answer && (<button onClick={handleConvertToNaturalLanguage} className="text-xs font-semibold px-2 py-1 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200">자연어로 변환</button>)}
                             </div>
                         )}
                     </div>
@@ -707,25 +735,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             >
                                 <div className="flex-grow p-4 min-w-0 cursor-pointer" onClick={() => handleQuickRun(q)}>
                                     <h4 className="font-bold text-gray-800 truncate">{q.name}</h4>
-                                    {q.type === 'natural' ? (
-                                        <>
-                                            <p className="text-sm text-gray-600 mt-2 font-mono bg-gray-100 p-2 rounded break-all">
-                                                {queryViewStates[q.id] === 'sql' ? q.generatedSql : q.query}
-                                            </p>
-                                            {q.generatedSql && (
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); toggleQueryView(q.id); }}
-                                                    className="text-xs text-blue-600 font-semibold mt-1 hover:underline"
-                                                >
-                                                    {queryViewStates[q.id] === 'sql' ? '자연어 보기' : 'SQL 보기'}
-                                                </button>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <p className="text-sm text-gray-600 mt-2 font-mono bg-gray-100 p-2 rounded break-all">
-                                            {q.query}
-                                        </p>
-                                    )}
                                 </div>
                                 
                                 <div className="flex-shrink-0 pr-2 flex items-center gap-1 self-start pt-4">
@@ -766,7 +775,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 )}
             </FullScreenModal>
             
-            <ModalWrapper isActive={isAiModalOpen} onClose={() => setAiModalOpen(false)} title="AI 학습 데이터 관리">
+            <FullScreenModal isOpen={isAiModalOpen} onClose={() => setAiModalOpen(false)} title="AI 학습 데이터 관리">
                 <div className="space-y-4">
                     <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
                         <div className="flex items-start gap-2">
@@ -778,7 +787,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         </div>
                         <button onClick={handleAddLearningItem} className="flex-shrink-0 text-sm bg-white border border-blue-200 text-blue-600 px-3 py-1.5 rounded-lg font-bold hover:bg-blue-50 transition shadow-sm">추가</button>
                     </div>
-                    <div className="space-y-2 max-h-[50vh] overflow-y-auto" onDragOver={handleDragOver} onDrop={handleDrop}>
+                    <div className="space-y-2" onDragOver={handleDragOver} onDrop={handleDrop}>
                         {learningItems.length === 0 ? (
                             <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50">
                                 <p className="text-gray-400">등록된 규칙이 없습니다.</p>
@@ -802,7 +811,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         {dropIndex === learningItems.length && <div className="drag-over-placeholder" />}
                     </div>
                 </div>
-            </ModalWrapper>
+            </FullScreenModal>
 
             {/* Editing Modals */}
             <EditQueryModal query={editingQuery} onClose={() => setEditingQuery(null)} onSave={handleSaveUpdatedQuery} />
