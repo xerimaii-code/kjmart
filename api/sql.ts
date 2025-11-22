@@ -158,88 +158,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({ answer: chatResponse.text });
         break;
 
+      // --- DIAGNOSTIC: Temporarily disabled complex queries ---
       case 'syncCustomersAndProducts': {
-        const customersQuery = `
-            SELECT
-                comp.comcode AS '거래처코드',
-                comp.comname AS '거래처명'
-            FROM
-                comp
-            WHERE
-                comp.isuse <> '0';
-        `;
-        const productsQuery = `
-          SELECT
-            comp.comname AS '거래처명',
-            parts.barcode AS '바코드',
-            CASE
-                WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']')
-                ELSE parts.descr
-            END AS '상품명',
-            parts.money0vat AS '매입가가',
-            parts.money1 AS '판매가',
-            parts.salemoney0 AS '행사가',
-            parts.saleendday AS '행사종료일',
-            parts.upday1,
-            parts.isuse
-          FROM
-            comp INNER JOIN parts ON comp.comcode = parts.comcode
-          WHERE
-            parts.isuse <> '0' AND parts.barcode IS NOT NULL AND parts.barcode <> '';
-        `;
-        const [customersResult, productsResult] = await Promise.all([
-            currentPool.request().query(customersQuery),
-            currentPool.request().query(productsQuery)
-        ]);
         res.status(200).json({
-          customers: customersResult,
-          products: productsResult
+          customers: { recordset: [] },
+          products: { recordset: [] }
         });
         break;
       }
 
       case 'syncCustomers': {
-        const customersQuery = `
-            SELECT
-                comp.comcode AS '거래처코드',
-                comp.comname AS '거래처명'
-            FROM
-                comp
-            WHERE
-                comp.isuse <> '0';
-        `;
-        const result = await currentPool.request().query(customersQuery);
-        res.status(200).json(result);
+        res.status(200).json({ recordset: [] });
         break;
       }
 
       case 'syncProductsIncrementally': {
-        let productsQuery = `
-          SELECT
-              p.barcode AS '바코드',
-              CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN CONCAT(p.descr, ' [', p.spec, ']') ELSE p.descr END AS '상품명',
-              p.money0vat AS '매입가가',
-              p.money1 AS '판매가',
-              p.salemoney0 AS '행사가',
-              p.saleendday AS '행사종료일',
-              c.comname AS '거래처명',
-              p.isuse,
-              p.upday1
-          FROM parts p
-          INNER JOIN comp c ON p.comcode = c.comcode
-          WHERE p.barcode IS NOT NULL AND p.barcode <> ''
-        `;
-        
-        const request = currentPool.request();
-        if (lastSyncDate) {
-          productsQuery += ` AND p.upday1 >= @lastSyncDate`;
-          request.input('lastSyncDate', sql.VarChar, lastSyncDate);
-        }
-        
-        const result = await request.query(productsQuery);
-        res.status(200).json(result);
+        res.status(200).json({ recordset: [] });
         break;
       }
+      // --- END DIAGNOSTIC SECTION ---
 
       default:
         res.status(400).json({ error: 'Invalid request type' });
