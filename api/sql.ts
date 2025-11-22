@@ -190,22 +190,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       case 'syncCustomersAndProducts': {
         // Temporarily disabled complex query for build diagnosis
+        // Returning a simple test query to ensure server is reachable
+        const testCustomers = await currentPool.request().query("SELECT TOP 5 comcode AS [거래처코드], comname AS [거래처명] FROM comp WHERE isuse <> '0';");
+        const testProducts = await currentPool.request().query("SELECT TOP 5 barcode AS [바코드], descr AS [상품명] FROM parts WHERE isuse <> '0';");
         res.status(200).json({
-          customers: { recordset: [] },
-          products: { recordset: [] }
+          customers: testCustomers,
+          products: testProducts
         });
         break;
       }
 
       case 'syncCustomers': {
         // Temporarily disabled complex query for build diagnosis
-        res.status(200).json({ recordset: [] });
+         const testCustomers = await currentPool.request().query("SELECT TOP 5 comcode AS [거래처코드], comname AS [거래처명] FROM comp WHERE isuse <> '0';");
+        res.status(200).json(testCustomers);
         break;
       }
 
       case 'syncProductsIncrementally': {
         // Temporarily disabled complex query for build diagnosis
-        res.status(200).json({ recordset: [] });
+        const testProducts = await currentPool.request().query("SELECT TOP 5 barcode AS [바코드], descr AS [상품명], isuse, upday1 FROM parts;");
+        res.status(200).json(testProducts);
         break;
       }
 
