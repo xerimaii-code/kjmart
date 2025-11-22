@@ -368,25 +368,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             
             // 1. Process Customers
             const newCustomers: Customer[] = rawCustomers.map((row: any) => ({
-                comcode: sanitizeFirebaseKey(String(row.comcode || '').trim()),
-                name: String(row.comname || '').trim(),
+                comcode: sanitizeFirebaseKey(String(row.거래처코드 || '').trim()),
+                name: String(row.거래처명 || '').trim(),
             })).filter((c: Customer) => c.comcode && c.name);
 
             // 2. Process Products
             const newProducts: Product[] = rawData.map((row: any) => {
-                const sanitizedBarcode = sanitizeFirebaseKey(String(row.barcode || '').trim());
+                const sanitizedBarcode = sanitizeFirebaseKey(String(row.바코드 || '').trim());
                 const product: Product = {
                     barcode: sanitizedBarcode,
-                    name: String(row.name || '').trim(),
-                    costPrice: parseFloat(String(row.costPrice || 0)),
-                    sellingPrice: parseFloat(String(row.sellingPrice || 0)),
-                    supplierName: String(row.comname || '').trim(),
+                    name: String(row.상품명 || '').trim(),
+                    costPrice: parseFloat(String(row.매입가가 || 0)),
+                    sellingPrice: parseFloat(String(row.판매가 || 0)),
+                    supplierName: String(row.거래처명 || '').trim(),
                 };
-                const salePriceRaw = row.salePrice;
+                const salePriceRaw = row.행사가;
                 if (salePriceRaw !== null && salePriceRaw !== undefined) {
                     product.salePrice = String(salePriceRaw).trim();
                 }
-                const saleEndDateFormatted = formatDate(row.saleEndDate);
+                const saleEndDateFormatted = formatDate(row.행사종료일);
                 if (saleEndDateFormatted) {
                     product.saleEndDate = saleEndDateFormatted;
                 }
@@ -523,16 +523,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setInitialSyncCompleted(true);
             return;
         }
-
+        
+        let isSyncRunning = false;
         const runBackgroundSync = async () => {
+            if (isSyncRunning) return;
+            isSyncRunning = true;
+
             try {
                 setIsSyncing(true);
                 
                 // 1. Sync Customers (Full sync every time)
                 const serverCustomers = await syncCustomersFromDb();
                 const newCustomers: Customer[] = serverCustomers.map((row: any) => ({
-                    comcode: String(row.comcode || '').trim(),
-                    name: String(row.comname || '').trim(),
+                    comcode: String(row.거래처코드 || '').trim(),
+                    name: String(row.거래처명 || '').trim(),
                 })).filter((c: Customer) => c.comcode && c.name);
                 await cache.setCachedData('customers', newCustomers);
                 setCustomers(newCustomers);
@@ -548,23 +552,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 
                 rawProducts.forEach((row: any) => {
                     const isUsed = String(row.isuse).trim() !== '0';
-                    const barcode = String(row.barcode || '').trim();
+                    const barcode = String(row.바코드 || '').trim();
 
                     if (!barcode) return;
                     
                     if (isUsed) {
                         const product: Product = {
                             barcode: barcode,
-                            name: String(row.name || '').trim(),
-                            costPrice: parseFloat(String(row.costPrice || 0)),
-                            sellingPrice: parseFloat(String(row.sellingPrice || 0)),
-                            supplierName: String(row.comname || '').trim(),
+                            name: String(row.상품명 || '').trim(),
+                            costPrice: parseFloat(String(row.매입가가 || 0)),
+                            sellingPrice: parseFloat(String(row.판매가 || 0)),
+                            supplierName: String(row.거래처명 || '').trim(),
                         };
-                        const salePriceRaw = row.salePrice;
+                        const salePriceRaw = row.행사가;
                         if (salePriceRaw !== null && salePriceRaw !== undefined) {
                             product.salePrice = String(salePriceRaw).trim();
                         }
-                        const saleEndDateFormatted = formatDate(row.saleEndDate);
+                        const saleEndDateFormatted = formatDate(row.행사종료일);
                         if (saleEndDateFormatted) {
                             product.saleEndDate = saleEndDateFormatted;
                         }
@@ -589,6 +593,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 showToast('백그라운드 동기화 실패. 오프라인 데이터로 계속 사용합니다.', 'error');
             } finally {
                 setIsSyncing(false);
+                isSyncRunning = false;
             }
         };
 
