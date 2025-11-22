@@ -220,6 +220,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json(syncResult.recordset);
         break;
 
+    case 'syncCustomers':
+        const customersQuery = `
+            SELECT
+                LTRIM(RTRIM(c.comcode)) AS comcode,
+                LTRIM(RTRIM(c.comname)) AS comname
+            FROM
+                comp AS c
+            WHERE
+                c.comcode NOT LIKE '000%'
+                AND c.isuse <> '0'
+            ORDER BY
+                c.comname;
+        `;
+        const customersResult = await currentPool.request().query(customersQuery);
+        res.status(200).json(customersResult.recordset);
+        break;
+
       case 'naturalLanguageToSql':
         if (!naturalLanguagePrompt) {
           return res.status(400).json({ error: 'Natural language prompt is required' });

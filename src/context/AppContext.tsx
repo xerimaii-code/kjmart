@@ -17,7 +17,7 @@ import * as googleDrive from '../services/googleDriveService';
 import { getDeviceId } from '../services/deviceService';
 import Toast, { ToastState } from '../components/Toast';
 import { processExcelFileInWorker } from '../services/dataService';
-import { syncAllDataFromDb } from '../services/sqlService';
+import { syncAllDataFromDb, syncCustomersFromDb } from '../services/sqlService';
 import { IS_DEVELOPER_MODE } from '../config';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 
@@ -365,24 +365,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSyncStatusText("DB에서 데이터 다운로드 중...");
     
         try {
+            setSyncStatusText("거래처 데이터 다운로드 중...");
+            const rawCustomers = await syncCustomersFromDb();
+            setSyncProgress(15);
+            setSyncStatusText(`거래처 데이터 처리 중 (${rawCustomers.length}건)`);
+            
+            // 1. Process Customers
+            const newCustomers: Customer[] = rawCustomers.map((row: any) => ({
+                comcode: sanitizeFirebaseKey(String(row.comcode || '').trim()),
+                name: String(row.comname || '').trim(),
+            })).filter((c: Customer) => c.comcode && c.name);
+
+            setSyncStatusText("상품 데이터 다운로드 중...");
             const rawData = await syncAllDataFromDb();
             setSyncProgress(30);
             setSyncStatusText(`데이터 처리 중 (${rawData.length}건)`);
             
-            // 1. Process Customers
-            const customerMap = new Map<string, Customer>();
-            rawData.forEach(row => {
-                const comcode = String(row.comcode || '').trim();
-                const name = String(row.comname || '').trim();
-                if (comcode && name) {
-                    const sanitizedComcode = sanitizeFirebaseKey(comcode);
-                    if (sanitizedComcode && !customerMap.has(sanitizedComcode)) {
-                        customerMap.set(sanitizedComcode, { comcode: sanitizedComcode, name });
-                    }
-                }
-            });
-            const newCustomers = Array.from(customerMap.values());
-    
             // 2. Process Products
             const newProducts: Product[] = rawData.map((row: any) => {
                 const sanitizedBarcode = sanitizeFirebaseKey(String(row.barcode || '').trim());
@@ -407,14 +405,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             // 3. Sync Customers
             setSyncStatusText(`거래처 데이터 동기화...`);
             setSyncProgress(50);
-            const customerSyncResult = await smartSyncData('customers', newCustomers, user?.email || 'unknown', (msg) => setSyncStatusText(`거래처: ${msg}`), customers);
+            await smartSyncData('customers', newCustomers, user?.email || 'unknown', (msg) => setSyncStatusText(`거래처: ${msg}`), customers);
             setCustomers(newCustomers);
             await cache.setCachedData('customers', newCustomers);
             
             // 4. Sync Products
             setSyncStatusText(`상품 데이터 동기화...`);
             setSyncProgress(75);
-            const productSyncResult = await smartSyncData('products', newProducts, user?.email || 'unknown', (msg) => setSyncStatusText(`상품: ${msg}`), products);
+            await smartSyncData('products', newProducts, user?.email || 'unknown', (msg) => setSyncStatusText(`상품: ${msg}`), products);
             setProducts(newProducts);
             await cache.setCachedData('products', newProducts);
             

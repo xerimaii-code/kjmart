@@ -82,3 +82,7 @@ export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, co
 export async function syncAllDataFromDb(): Promise<any[]> {
     return fetchApi({ type: 'syncAllData' });
 }
+
+export async function syncCustomersFromDb(): Promise<any[]> {
+    return fetchApi({ type: 'syncCustomers' });
+}
