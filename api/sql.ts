@@ -189,12 +189,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncCustomersAndProducts':
-        const productNameExpression = `CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END`;
         const productsQuery = `
             SELECT
                 comp.comname AS 거래처명,
                 parts.barcode AS 바코드,
-                ${productNameExpression} AS 상품명,
+                (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
                 parts.money0vat AS 매입가가,
                 parts.money1 AS 판매가,
                 parts.salemoney0 AS 행사가,
@@ -211,7 +210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
                     )
                     AND parts.barcode IS NOT NULL
-                    AND (${productNameExpression}) NOT LIKE N'%*---*%'
+                    AND ((CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)) NOT LIKE N'%*---*%'
                     AND parts.money0vat <> 0
                     AND parts.isuse <> '0'
                 )
@@ -253,7 +252,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncProductsIncrementally':
-        const incProductNameExpr = `CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END`;
         const request = currentPool.request();
         if (lastSyncDate) {
             request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
@@ -263,7 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             SELECT
                 comp.comname AS 거래처명,
                 parts.barcode AS 바코드,
-                ${incProductNameExpr} AS 상품명,
+                (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
                 parts.money0vat AS 매입가가,
                 parts.money1 AS 판매가,
                 parts.salemoney0 AS 행사가,
@@ -282,7 +280,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
                         )
                         AND parts.barcode IS NOT NULL
-                        AND (${incProductNameExpr}) NOT LIKE N'%*---*%'
+                        AND ((CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)) NOT LIKE N'%*---*%'
                         AND parts.money0vat <> 0
                     )
                     OR (parts.barcode NOT LIKE '0000000%')
