@@ -2,8 +2,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from 'mssql';
 
-// NOTE: All complex functionalities (Firebase, AI, complex queries) are temporarily disabled
-// to diagnose the Vercel build issue. The goal is to get a minimal server running.
+// NOTE: All complex functionalities are temporarily disabled to diagnose the Vercel build issue.
+// The goal is to get a minimal server running that only tests the connection.
 
 const config: sql.config = {
   user: process.env.DB_USER,
@@ -16,13 +16,19 @@ const config: sql.config = {
     trustServerCertificate: true,
   },
   connectionTimeout: 15000,
-  requestTimeout: 30000,
+  requestTimeout: 15000, // Reduced for faster connection test feedback
 };
 
 let pool: sql.ConnectionPool | undefined;
+
 async function getPool(): Promise<sql.ConnectionPool> {
     if (pool && pool.connected) {
         return pool;
+    }
+    // If a pool exists but is not connected, close it before creating a new one.
+    if (pool) {
+        await pool.close();
+        pool = undefined;
     }
     try {
         pool = new sql.ConnectionPool(config);
@@ -30,6 +36,7 @@ async function getPool(): Promise<sql.ConnectionPool> {
         return pool;
     } catch (err) {
         pool = undefined; // Reset on failure
+        console.error("Connection Pool Error:", err);
         throw err;
     }
 }
@@ -45,13 +52,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     switch (type) {
       case 'connect':
         // Attempt to get a connection to test credentials and connectivity.
-        // This will throw if it fails, which will be caught below.
         await getPool();
         res.status(200).json({ success: true, message: 'Connection successful' });
         break;
 
+      // All other types are disabled for this diagnostic step.
       default:
-        // For any other request type during this diagnostic phase, return a clear message.
         res.status(404).json({ error: `Request type '${type}' is temporarily disabled for diagnostics.` });
         break;
     }
