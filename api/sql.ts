@@ -189,21 +189,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncCustomersAndProducts':
-        const [custRes, prodRes] = await Promise.all([
-          currentPool.request().query(`
-            SELECT
-                comp.comcode AS 거래처코드,
-                comp.comname AS 거래처명
-            FROM
-                comp
-            WHERE
-                comp.isuse <> '0';
-          `),
-          currentPool.request().query(`
+        const productNameExpression = `CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END`;
+        const productsQuery = `
             SELECT
                 comp.comname AS 거래처명,
                 parts.barcode AS 바코드,
-                CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END AS 상품명,
+                ${productNameExpression} AS 상품명,
                 parts.money0vat AS 매입가가,
                 parts.money1 AS 판매가,
                 parts.salemoney0 AS 행사가,
@@ -220,14 +211,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
                     )
                     AND parts.barcode IS NOT NULL
-                    AND (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) NOT LIKE N'%*---*%'
+                    AND (${productNameExpression}) NOT LIKE N'%*---*%'
                     AND parts.money0vat <> 0
                     AND parts.isuse <> '0'
                 )
                 OR (parts.barcode NOT LIKE '0000000%')
             ORDER BY
                 상품명;
-          `)
+        `;
+        const [custRes, prodRes] = await Promise.all([
+          currentPool.request().query(`
+            SELECT
+                comp.comcode AS 거래처코드,
+                comp.comname AS 거래처명
+            FROM
+                comp
+            WHERE
+                comp.isuse <> '0';
+          `),
+          currentPool.request().query(productsQuery)
         ]);
         res.status(200).json({
           customers: { recordset: custRes.recordset },
@@ -249,17 +251,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncProductsIncrementally':
+        const incProductNameExpr = `CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END`;
         const request = currentPool.request();
         if (lastSyncDate) {
             request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
         }
-        // This query is adapted to support soft-deletes for incremental sync
-        // It removes `parts.isuse <> '0'` from the WHERE clause but adds `parts.isuse` to the SELECT
+        
         const incrementalQuery = `
             SELECT
                 comp.comname AS 거래처명,
                 parts.barcode AS 바코드,
-                CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END AS 상품명,
+                ${incProductNameExpr} AS 상품명,
                 parts.money0vat AS 매입가가,
                 parts.money1 AS 판매가,
                 parts.salemoney0 AS 행사가,
@@ -278,7 +280,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
                         )
                         AND parts.barcode IS NOT NULL
-                        AND (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) NOT LIKE N'%*---*%'
+                        AND (${incProductNameExpr}) NOT LIKE N'%*---*%'
                         AND parts.money0vat <> 0
                     )
                     OR (parts.barcode NOT LIKE '0000000%')
