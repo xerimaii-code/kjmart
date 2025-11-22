@@ -75,7 +75,7 @@ interface SyncState {
     isSyncing: boolean;
     syncProgress: number;
     syncStatusText: string;
-    syncDataType: 'customers' | 'products' | 'full' | null;
+    syncDataType: 'customers' | 'products' | 'full' | 'background' | null;
     syncSource: 'local' | 'drive' | null;
     initialSyncCompleted: boolean;
 }
@@ -215,7 +215,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState(0);
     const [syncStatusText, setSyncStatusText] = useState('');
-    const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | null>(null);
+    const [syncDataType, setSyncDataType] = useState<'customers' | 'products' | 'full' | 'background' | null>(null);
     const [syncSource, setSyncSource] = useState<'local' | 'drive' | null>(null);
     const [initialSyncCompleted, setInitialSyncCompleted] = useState(false);
 
@@ -540,6 +540,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
             try {
                 setIsSyncing(true);
+                setSyncDataType('background');
                 
                 // 1. Sync Customers (Full sync every time)
                 const serverCustomers = await syncCustomersFromDb();
@@ -601,6 +602,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 showToast('백그라운드 동기화 실패. 오프라인 데이터로 계속 사용합니다.', 'error');
             } finally {
                 setIsSyncing(false);
+                setSyncDataType(null);
                 isSyncRunning = false;
             }
         };
@@ -637,7 +639,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setSyncStatusText("");
             
             // Phase 2: Trigger background sync with a delay to improve stability
-            setTimeout(() => runBackgroundSync(), 1000);
+            setTimeout(() => runBackgroundSync(), 2000);
         };
 
         startup();

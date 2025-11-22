@@ -9,7 +9,7 @@ type SqlServerStatus = 'unknown' | 'connected' | 'error' | 'checking';
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [isOnline, setIsOnline] = useState(navigator.onLine);
-    const { isSyncing } = useSyncState();
+    const { isSyncing, syncDataType } = useSyncState();
     const [currentTime, setCurrentTime] = useState(new Date());
     const [sqlStatus, setSqlStatus] = useState<SqlServerStatus>('unknown');
     const isCheckingSql = useRef(false);
@@ -75,13 +75,14 @@ const Header: React.FC = () => {
             }
         };
         const sqlProps = getSqlStatusProps();
+        const isBackgroundSync = isSyncing && syncDataType === 'background';
 
         return (
             <div className="flex items-center gap-3">
                 {/* Firebase Sync Indicator */}
                 <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
                     {isSyncing ? (
-                        <SpinnerIcon className="w-4 h-4 text-blue-500" title="데이터 동기화 중..." />
+                        <SpinnerIcon className={`w-4 h-4 ${isBackgroundSync ? 'text-orange-500' : 'text-blue-500'}`} title={isBackgroundSync ? "백그라운드 동기화 중..." : "데이터 동기화 중..."} />
                     ) : (
                         <div 
                             className={`relative w-2.5 h-2.5 rounded-full transition-colors duration-500 ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
