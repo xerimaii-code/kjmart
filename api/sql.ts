@@ -190,33 +190,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       case 'syncCustomersAndProducts': {
         const productsQuery = `
+WITH ProductData AS (
+    SELECT
+        comp.comname,
+        parts.barcode,
+        (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
+        parts.money0vat,
+        parts.money1,
+        parts.salemoney0,
+        parts.saleendday,
+        parts.upday1,
+        parts.isuse
+    FROM
+        comp INNER JOIN parts ON comp.comcode = parts.comcode
+)
 SELECT
-    comp.comname AS 거래처명,
-    parts.barcode AS 바코드,
-    (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
-    parts.money0vat AS 매입가가,
-    parts.money1 AS 판매가,
-    parts.salemoney0 AS 행사가,
-    parts.saleendday AS 행사종료일,
-    parts.upday1
-FROM
-    comp INNER JOIN parts ON comp.comcode = parts.comcode
+    ProductData.comname AS 거래처명,
+    ProductData.barcode AS 바코드,
+    ProductData.상품명,
+    ProductData.money0vat AS 매입가가,
+    ProductData.money1 AS 판매가,
+    ProductData.salemoney0 AS 행사가,
+    ProductData.saleendday AS 행사종료일,
+    ProductData.upday1
+FROM ProductData
 WHERE (
     (
         (
-            comp.comname NOT LIKE N'%야채%' AND comp.comname NOT LIKE N'%과일%' AND
-            comp.comname NOT LIKE N'%생선%' AND comp.comname NOT LIKE N'%정육%' AND
-            comp.comname NOT LIKE N'%식품%' AND comp.comname NOT LIKE N'%비식품%' AND
-            comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
+            ProductData.comname NOT LIKE N'%야채%' AND ProductData.comname NOT LIKE N'%과일%' AND
+            ProductData.comname NOT LIKE N'%생선%' AND ProductData.comname NOT LIKE N'%정육%' AND
+            ProductData.comname NOT LIKE N'%식품%' AND ProductData.comname NOT LIKE N'%비식품%' AND
+            ProductData.comname NOT LIKE N'%기획%' AND ProductData.comname NOT LIKE N'%경진청과%'
         )
-        AND parts.barcode IS NOT NULL
-        AND ((CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)) NOT LIKE N'%*---*%'
-        AND parts.money0vat <> 0
-        AND parts.isuse <> '0'
+        AND ProductData.barcode IS NOT NULL
+        AND ProductData.상품명 NOT LIKE N'%*---*%'
+        AND ProductData.money0vat <> 0
+        AND ProductData.isuse <> '0'
     )
-    OR (parts.barcode NOT LIKE '0000000%')
+    OR (ProductData.barcode NOT LIKE '0000000%')
 )
-ORDER BY 상품명;
+ORDER BY ProductData.상품명;
 `;
         const customersQuery = `
 SELECT
@@ -256,43 +269,61 @@ WHERE
 
       case 'syncProductsIncrementally': {
         const request = currentPool.request();
-        let whereClause = '';
+        let dateFilter = '';
         if (lastSyncDate) {
             request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
-            whereClause = `AND parts.upday1 >= @lastSyncDate`;
+            dateFilter = `WHERE parts.upday1 >= @lastSyncDate`;
         }
 
-        const finalQuery = `
-SELECT
-    comp.comname AS 거래처명,
-    parts.barcode AS 바코드,
-    (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
-    parts.money0vat AS 매입가가,
-    parts.money1 AS 판매가,
-    parts.salemoney0 AS 행사가,
-    parts.saleendday AS 행사종료일,
-    parts.upday1,
-    parts.isuse
-FROM
-    comp INNER JOIN parts ON comp.comcode = parts.comcode
-WHERE (
-    (
-        (
-            comp.comname NOT LIKE N'%야채%' AND comp.comname NOT LIKE N'%과일%' AND
-            comp.comname NOT LIKE N'%생선%' AND comp.comname NOT LIKE N'%정육%' AND
-            comp.comname NOT LIKE N'%식품%' AND comp.comname NOT LIKE N'%비식품%' AND
-            comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
-        )
-        AND parts.barcode IS NOT NULL
-        AND ((CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)) NOT LIKE N'%*---*%'
-        AND parts.money0vat <> 0
-    )
-    OR (parts.barcode NOT LIKE '0000000%')
+        const incrementalQuery = `
+WITH ProductData AS (
+    SELECT
+        comp.comname,
+        parts.barcode,
+        (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
+        parts.money0vat,
+        parts.money1,
+        parts.salemoney0,
+        parts.saleendday,
+        parts.upday1,
+        parts.isuse
+    FROM
+        comp INNER JOIN parts ON comp.comcode = parts.comcode
+    ${dateFilter}
 )
-${whereClause}
-ORDER BY parts.upday1;
+SELECT
+    ProductData.comname AS 거래처명,
+    ProductData.barcode AS 바코드,
+    ProductData.상품명,
+    ProductData.money0vat AS 매입가가,
+    ProductData.money1 AS 판매가,
+    ProductData.salemoney0 AS 행사가,
+    ProductData.saleendday AS 행사종료일,
+    ProductData.upday1,
+    ProductData.isuse
+FROM ProductData
+WHERE
+    (
+        ProductData.isuse <> '0' AND
+        (
+            (
+                (
+                    ProductData.comname NOT LIKE N'%야채%' AND ProductData.comname NOT LIKE N'%과일%' AND
+                    ProductData.comname NOT LIKE N'%생선%' AND ProductData.comname NOT LIKE N'%정육%' AND
+                    ProductData.comname NOT LIKE N'%식품%' AND ProductData.comname NOT LIKE N'%비식품%' AND
+                    ProductData.comname NOT LIKE N'%기획%' AND ProductData.comname NOT LIKE N'%경진청과%'
+                )
+                AND ProductData.barcode IS NOT NULL
+                AND ProductData.상품명 NOT LIKE N'%*---*%'
+                AND ProductData.money0vat <> 0
+            )
+            OR (ProductData.barcode NOT LIKE '0000000%')
+        )
+    )
+    OR (ProductData.isuse = '0')
+ORDER BY ProductData.upday1;
 `;
-        const incResult = await request.query(finalQuery);
+        const incResult = await request.query(incrementalQuery);
         res.status(200).json({ recordset: incResult.recordset });
         break;
       }
