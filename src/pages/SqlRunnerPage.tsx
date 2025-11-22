@@ -115,7 +115,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     const [editingQuery, setEditingQuery] = useState<SavedQuery | null>(null);
     const [editingLearningItem, setEditingLearningItem] = useState<LearningItem | null>(null);
-    const [queryViewStates, setQueryViewStates] = useState<Record<string, 'natural' | 'sql'>>({});
 
     const [isAiMode, setIsAiMode] = useState(false);
     const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null);
@@ -397,6 +396,52 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         else processNaturalLanguageQuery(query.query);
     };
 
+    const handleAddNewQuery = () => {
+        setSavedQueriesModalOpen(false);
+        setEditingQuery({
+            id: 'new',
+            name: '',
+            query: '',
+            type: 'sql',
+            isQuickRun: false,
+        });
+    };
+
+    const handleSaveEditingQuery = () => {
+        if (!editingQuery) return;
+
+        const { id, name, query, type, isQuickRun } = editingQuery;
+        if (!name.trim() || !query.trim()) {
+            showAlert('쿼리 이름과 내용을 모두 입력해주세요.');
+            return;
+        }
+
+        if (id === 'new') {
+            // Add new query
+            addSavedQuery({ name, query, type, isQuickRun })
+                .then(() => {
+                    showToast('쿼리가 추가되었습니다.', 'success');
+                    setEditingQuery(null);
+                })
+                .catch(err => {
+                    console.error(err);
+                    showAlert('쿼리 추가에 실패했습니다.');
+                });
+        } else {
+            // Update existing query
+            updateSavedQuery(id, { name, query, type, isQuickRun })
+                .then(() => {
+                    showToast('쿼리가 수정되었습니다.', 'success');
+                    setEditingQuery(null);
+                })
+                .catch(err => {
+                    console.error(err);
+                    showAlert('쿼리 수정에 실패했습니다.');
+                });
+        }
+    };
+
+
     const handleAddLearningItem = () => {
         const id = 'item_' + Date.now();
         const newItem = { id, title: '', content: '' };
@@ -478,11 +523,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const toggleTable = (t: string) => setSelectedTables(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
 
-    const handleSaveUpdatedQuery = (id: string, updates: Partial<SavedQuery>) => {
-        updateSavedQuery(id, updates).then(() => showToast('쿼리가 수정되었습니다.', 'success'));
-        setEditingQuery(null);
-    };
-
     const handleSaveLearningItem = async (itemToSave: LearningItem) => {
         const isNew = !learningItems.some(item => item.id === itemToSave.id);
         const newItems = isNew
@@ -497,13 +537,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         } catch (e) {
             showAlert('저장에 실패했습니다.');
         }
-    };
-
-    const toggleQueryView = (queryId: string) => {
-        setQueryViewStates(prev => ({
-            ...prev,
-            [queryId]: (prev[queryId] === 'sql') ? 'natural' : 'sql'
-        }));
     };
     
     const handleConfirmUpdate = useCallback(() => {
@@ -748,14 +781,26 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             </FullScreenModal>
             
-            <FullScreenModal isOpen={isSavedQueriesModalOpen} onClose={() => setSavedQueriesModalOpen(false)} title="저장된 쿼리">
+            <FullScreenModal 
+                isOpen={isSavedQueriesModalOpen} 
+                onClose={() => setSavedQueriesModalOpen(false)} 
+                title="저장된 쿼리"
+                footer={
+                    <button 
+                        onClick={handleAddNewQuery} 
+                        className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30"
+                    >
+                        쿼리 추가
+                    </button>
+                }
+            >
                 <div className="space-y-2">
                     {savedQueries.map(q => (
                         <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
                             <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => handleQuickRun(q)}>{q.name}</p>
                                 <div className="flex items-center gap-1 flex-shrink-0">
-                                     <button onClick={() => handleSaveUpdatedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
+                                     <button onClick={() => updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
                                         <StarIcon className="w-5 h-5"/>
                                     </button>
                                     <button onClick={() => setEditingQuery(q)} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-100" title="수정"><PencilSquareIcon className="w-5 h-5"/></button>
@@ -767,7 +812,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             </FullScreenModal>
 
-            <FullScreenModal isOpen={isAiModalOpen} onClose={() => setAiModalOpen(false)} title="AI 학습 데이터 관리" footer={
+            <FullScreenModal 
+                isOpen={isAiModalOpen} 
+                onClose={() => setAiModalOpen(false)} 
+                title="AI 학습 데이터 관리" 
+                footer={
                  <button onClick={handleAddLearningItem} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">규칙 추가</button>
             }>
                 <div className="space-y-2" onDragOver={handleDragOver} onDrop={handleDrop}>
@@ -814,40 +863,75 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 }
             >
                 {saveModalState && (
-                    <div className="space-y-4 p-2">
+                    <div className="flex flex-col h-full space-y-4 p-2">
                         <input 
                             type="text" 
                             value={saveModalState.name} 
                             onChange={e => setSaveModalState(s => s ? { ...s, name: e.target.value } : null)} 
                             placeholder="쿼리 이름" 
                             disabled={saveModalState.isGeneratingName}
-                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" />
+                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold flex-shrink-0" />
                         <textarea 
                             value={saveModalState.query} 
                             readOnly 
-                            className="w-full h-40 p-3 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50" />
+                            className="w-full flex-grow p-3 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50 resize-none" />
                     </div>
                 )}
             </FullScreenModal>
             
-             <FullScreenModal isOpen={!!editingQuery} onClose={() => setEditingQuery(null)} title="저장된 쿼리 수정" footer={
-                 <button onClick={() => { if (editingQuery) handleSaveUpdatedQuery(editingQuery.id, { name: editingQuery.name, query: editingQuery.query }); }} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">저장</button>
+             <FullScreenModal 
+                isOpen={!!editingQuery} 
+                onClose={() => setEditingQuery(null)} 
+                title={editingQuery?.id === 'new' ? '새 쿼리 추가' : '저장된 쿼리 수정'}
+                footer={
+                 <button 
+                    onClick={handleSaveEditingQuery} 
+                    className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30"
+                >
+                    저장
+                </button>
              }>
                 {editingQuery && (
-                    <div className="space-y-4 p-2">
-                        <input type="text" value={editingQuery.name} onChange={e => setEditingQuery({ ...editingQuery, name: e.target.value })} placeholder="쿼리 이름" className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" />
-                        <textarea value={editingQuery.query} onChange={e => setEditingQuery({ ...editingQuery, query: e.target.value })} placeholder="쿼리 내용" className="w-full h-40 p-3 border border-gray-300 rounded-lg font-mono text-sm" />
+                    <div className="flex flex-col h-full space-y-4 p-2">
+                        <input 
+                            type="text" 
+                            value={editingQuery.name} 
+                            onChange={e => setEditingQuery({ ...editingQuery, name: e.target.value })} 
+                            placeholder="쿼리 이름" 
+                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold flex-shrink-0" 
+                        />
+                        <textarea 
+                            value={editingQuery.query} 
+                            onChange={e => setEditingQuery({ ...editingQuery, query: e.target.value })} 
+                            placeholder="쿼리 내용" 
+                            className="w-full flex-grow p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none" 
+                        />
                     </div>
                 )}
             </FullScreenModal>
             
-            <FullScreenModal isOpen={!!editingLearningItem} onClose={() => setEditingLearningItem(null)} title={editingLearningItem?.title ? 'AI 학습 규칙 수정' : 'AI 학습 규칙 추가'} footer={
+            <FullScreenModal 
+                isOpen={!!editingLearningItem} 
+                onClose={() => setEditingLearningItem(null)} 
+                title={editingLearningItem?.id && !editingLearningItem.id.startsWith('item_') ? 'AI 학습 규칙 수정' : 'AI 학습 규칙 추가'}
+                footer={
                  <button onClick={() => { if (editingLearningItem) handleSaveLearningItem(editingLearningItem); }} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">저장</button>
             }>
                  {editingLearningItem && (
-                    <div className="space-y-4 p-2">
-                        <input type="text" value={editingLearningItem.title} onChange={e => setEditingLearningItem({ ...editingLearningItem, title: e.target.value })} placeholder="규칙 제목" className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" />
-                        <textarea value={editingLearningItem.content} onChange={e => setEditingLearningItem({ ...editingLearningItem, content: e.target.value })} placeholder="규칙 내용" className="w-full h-48 p-3 border border-gray-300 rounded-lg font-mono text-sm" />
+                    <div className="flex flex-col h-full space-y-4 p-2">
+                        <input 
+                            type="text" 
+                            value={editingLearningItem.title} 
+                            onChange={e => setEditingLearningItem({ ...editingLearningItem, title: e.target.value })} 
+                            placeholder="규칙 제목" 
+                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold flex-shrink-0"
+                        />
+                        <textarea 
+                            value={editingLearningItem.content} 
+                            onChange={e => setEditingLearningItem({ ...editingLearningItem, content: e.target.value })} 
+                            placeholder="규칙 내용" 
+                            className="w-full flex-grow p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none"
+                        />
                     </div>
                  )}
             </FullScreenModal>
