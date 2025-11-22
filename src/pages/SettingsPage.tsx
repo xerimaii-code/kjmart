@@ -221,6 +221,7 @@ const SyncSection: React.FC<{
                 </div>
             </div>
             */}
+            {/*
              <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
                 <div className="space-y-3">
                     <p className="text-xs text-center text-gray-500">기기에 저장된 엑셀 파일로 1회성 동기화를 합니다.</p>
@@ -249,6 +250,7 @@ const SyncSection: React.FC<{
                     </div>
                 )}
             </div>
+            */}
         </div>
     );
 };
@@ -485,6 +487,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 </button>
                             </div>
                         </div>
+                        {/*
                         <SyncSection 
                             dataType="customers" 
                             settings={googleDriveSyncSettings.customers}
@@ -496,6 +499,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             settings={googleDriveSyncSettings.products}
                             onSettingsChange={(s) => setGoogleDriveSyncSettings('products', s)}
                         />
+                        */}
                     </CollapsibleCard>
                     
                     <CollapsibleCard title="데이터 관리" icon={<UserCircleIcon className="w-6 h-6 text-gray-500" />}>
