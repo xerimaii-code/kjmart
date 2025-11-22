@@ -189,12 +189,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncCustomersAndProducts': {
-        const productNameSql = `(CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)`;
         const productsQuery = `
 SELECT
     comp.comname AS 거래처명,
     parts.barcode AS 바코드,
-    ${productNameSql} AS 상품명,
+    (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
     parts.money0vat AS 매입가가,
     parts.money1 AS 판매가,
     parts.salemoney0 AS 행사가,
@@ -211,7 +210,7 @@ WHERE (
             comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
         )
         AND parts.barcode IS NOT NULL
-        AND (${productNameSql}) NOT LIKE N'%*---*%'
+        AND ((CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)) NOT LIKE N'%*---*%'
         AND parts.money0vat <> 0
         AND parts.isuse <> '0'
     )
@@ -257,16 +256,17 @@ WHERE
 
       case 'syncProductsIncrementally': {
         const request = currentPool.request();
+        let whereClause = '';
         if (lastSyncDate) {
             request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
+            whereClause = `AND parts.upday1 >= @lastSyncDate`;
         }
-        
-        const productNameSqlInc = `(CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)`;
-        let finalQuery = `
+
+        const finalQuery = `
 SELECT
     comp.comname AS 거래처명,
     parts.barcode AS 바코드,
-    ${productNameSqlInc} AS 상품명,
+    (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
     parts.money0vat AS 매입가가,
     parts.money1 AS 판매가,
     parts.salemoney0 AS 행사가,
@@ -284,18 +284,14 @@ WHERE (
             comp.comname NOT LIKE N'%기획%' AND comp.comname NOT LIKE N'%경진청과%'
         )
         AND parts.barcode IS NOT NULL
-        AND (${productNameSqlInc}) NOT LIKE N'%*---*%'
+        AND ((CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END)) NOT LIKE N'%*---*%'
         AND parts.money0vat <> 0
     )
     OR (parts.barcode NOT LIKE '0000000%')
 )
+${whereClause}
+ORDER BY parts.upday1;
 `;
-
-        if (lastSyncDate) {
-          finalQuery += `\nAND parts.upday1 >= @lastSyncDate`;
-        }
-        finalQuery += `\nORDER BY parts.upday1;`;
-
         const incResult = await request.query(finalQuery);
         res.status(200).json({ recordset: incResult.recordset });
         break;
