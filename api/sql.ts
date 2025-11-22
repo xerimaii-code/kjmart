@@ -5,7 +5,6 @@ import { GoogleGenAI } from '@google/genai';
 import { getDatabase, ref, get } from 'firebase/database';
 import { initializeApp, getApp, FirebaseApp } from 'firebase/app';
 
-// Firebase config (should be same as frontend)
 const firebaseConfig = {
   apiKey: "AIzaSyAsfRMNBfG4GRVnQBdonpP2N2ykCZIDGtg",
   authDomain: "kjmart-8ff85.firebaseapp.com",
@@ -16,7 +15,6 @@ const firebaseConfig = {
   appId: "1:694281067109:web:420c066bda06fe6c10c48c"
 };
 
-// Initialize Firebase App
 let firebaseApp: FirebaseApp;
 try {
   firebaseApp = getApp();
@@ -25,7 +23,6 @@ try {
 }
 const firebaseDb = getDatabase(firebaseApp);
 
-// MS SQL Server Configuration from environment variables
 const config: sql.config = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -40,30 +37,8 @@ const config: sql.config = {
   requestTimeout: 30000,
 };
 
-// Gemini AI Configuration
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// --- Connection Pooling ---
-let pool: sql.ConnectionPool | undefined;
-
-async function getPool(): Promise<sql.ConnectionPool> {
-    if (pool && pool.connected) {
-        return pool;
-    }
-    try {
-        console.log('Creating new SQL Connection Pool...');
-        pool = new sql.ConnectionPool(config);
-        await pool.connect();
-        console.log("SQL Connection Pool created and connected.");
-        return pool;
-    } catch (err) {
-        console.error('SQL Connection Error on getPool:', err);
-        pool = undefined; // Reset on error
-        throw err;
-    }
-}
-
-// Helper to get structured DB Schema for caching
 async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
     const schema: Record<string, { columns: { name: string; type: string }[] }>> = {};
     const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
@@ -86,7 +61,6 @@ async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string,
     return schema;
 }
 
-// Helper to format a structured schema object into a string for the AI prompt
 function formatSchemaForAI(schema: Record<string, any>): string {
     let schemaString = 'Database Schema:\n';
     for (const tableName in schema) {
@@ -100,7 +74,6 @@ function formatSchemaForAI(schema: Record<string, any>): string {
     return schemaString;
 }
 
-// Helper to fetch context from Firebase
 async function getLearningContextFromFirebase() {
     try {
         const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
@@ -117,7 +90,6 @@ async function getLearningContextFromFirebase() {
     return 'No additional context provided.';
 }
 
-// Main API handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -125,15 +97,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { type, query, naturalLanguagePrompt, schema: clientSchema, context: clientContext, lastSyncDate } = req.body;
   
-  let currentPool: sql.ConnectionPool;
+  let pool: sql.ConnectionPool | undefined;
+
   try {
-    currentPool = await getPool();
-  } catch (err: any) {
-    console.error('SQL Connection Error from handler:', err);
-    return res.status(500).json({ error: 'Database connection failed', details: err.message });
-  }
-  
-  try {
+    pool = new sql.ConnectionPool(config);
+    await pool.connect();
+    
     switch (type) {
       case 'connect': {
         res.status(200).json({ success: true, message: 'Connection successful' });
@@ -141,13 +110,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'getDatabaseSchema': {
-        const schema = await getFullDbSchema(currentPool);
+        const schema = await getFullDbSchema(pool);
         res.status(200).json(schema);
         break;
       }
 
       case 'getTables': {
-        const tablesResult = await currentPool.request().query(`
+        const tablesResult = await pool.request().query(`
             SELECT TABLE_NAME 
             FROM INFORMATION_SCHEMA.TABLES 
             WHERE TABLE_TYPE = 'BASE TABLE' 
@@ -158,15 +127,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       
       case 'query': {
-        if (!query) return res.status(400).json({ error: 'Query is required' });
-        const result = await currentPool.request().query(query);
+        if (!query) {
+            res.status(400).json({ error: 'Query is required' });
+            return;
+        }
+        const result = await pool.request().query(query);
         res.status(200).json({ recordset: result.recordset, rowsAffected: result.rowsAffected[0] });
         break;
       }
       
       case 'naturalLanguageToSql': {
         if (!naturalLanguagePrompt || !clientSchema) {
-          return res.status(400).json({ error: 'Prompt and schema are required' });
+          res.status(400).json({ error: 'Prompt and schema are required' });
+          return;
         }
         const schemaString = formatSchemaForAI(clientSchema);
         const learningContext = clientContext || await getLearningContextFromFirebase();
@@ -182,7 +155,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       case 'aiChat': {
          if (!naturalLanguagePrompt || !clientSchema) {
-          return res.status(400).json({ error: 'Prompt and schema are required' });
+          res.status(400).json({ error: 'Prompt and schema are required' });
+          return;
         }
         const chatSchemaString = formatSchemaForAI(clientSchema);
         const chatLearningContext = clientContext || await getLearningContextFromFirebase();
@@ -196,7 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       case 'syncCustomersAndProducts': {
         const [custRes, prodRes] = await Promise.all([
-          currentPool.request().query(`
+          pool.request().query(`
             SELECT
               comp.comcode,
               comp.comname
@@ -206,7 +180,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ORDER BY
               comp.comname;
           `),
-          currentPool.request().query(`
+          pool.request().query(`
             SELECT 
                 p.barcode,
                 IIF(p.spec IS NOT NULL AND p.spec <> '', CONCAT(p.descr, ' [', p.spec, ']'), p.descr) as name,
@@ -229,7 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'syncCustomers': {
-        const customersResult = await currentPool.request().query(`
+        const customersResult = await pool.request().query(`
           SELECT
             comp.comcode,
             comp.comname
@@ -242,7 +216,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       case 'syncProductsIncrementally': {
-        const request = currentPool.request();
+        const request = pool.request();
         if (lastSyncDate) {
             request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
         }
@@ -274,5 +248,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err: any) {
     console.error(`Error processing request type "${type}":`, err);
     res.status(500).json({ error: 'An internal server error occurred', details: err.message });
+  } finally {
+    if (pool) {
+        try {
+            await pool.close();
+        } catch (e) {
+            console.error("Error closing SQL pool", e);
+        }
+    }
   }
 }
