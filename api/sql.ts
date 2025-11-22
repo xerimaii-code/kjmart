@@ -197,7 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 LTRIM(RTRIM(c.comcode)) AS comcode,
                 LTRIM(RTRIM(c.comname)) AS comname,
                 LTRIM(RTRIM(p.barcode)) AS barcode,
-                LTRIM(RTRIM(CONCAT(p.descr, CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN ' [' + p.spec + ']' ELSE '' END))) AS name,
+                LTRIM(RTRIM(CONCAT(p.descr, CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN CONCAT(' [', p.spec, ']') ELSE '' END))) AS name,
                 p.money0vat AS costPrice,
                 p.money1 AS sellingPrice,
                 p.salemoney0 AS salePrice,
@@ -244,7 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             SELECT
                 LTRIM(RTRIM(p.barcode)) AS barcode,
                 LTRIM(RTRIM(c.comname)) AS comname,
-                LTRIM(RTRIM(CONCAT(p.descr, CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN ' [' + p.spec + ']' ELSE '' END))) AS name,
+                LTRIM(RTRIM(CONCAT(p.descr, CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN CONCAT(' [', p.spec, ']') ELSE '' END))) AS name,
                 p.money0vat AS costPrice,
                 p.money1 AS sellingPrice,
                 p.salemoney0 AS salePrice,
