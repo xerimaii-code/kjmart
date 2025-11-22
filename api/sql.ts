@@ -40,7 +40,7 @@ const config: sql.config = {
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
-    const schema: Record<string, { columns: { name: string; type: string }[] }>> = {};
+    const schema: Record<string, { columns: { name: string; type: string }[] }> = {};
     const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
     const tablesToQuery = tableResult.recordset.map((row: any) => row.TABLE_NAME);
 
