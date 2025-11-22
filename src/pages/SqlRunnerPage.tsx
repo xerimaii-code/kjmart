@@ -155,8 +155,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     // States for editing modals and UI
     const [editingQuery, setEditingQuery] = useState<SavedQuery | null>(null);
     const [editingLearningItem, setEditingLearningItem] = useState<LearningItem | null>(null);
-    const [showGeneratedSqlMap, setShowGeneratedSqlMap] = useState<Record<string, boolean>>({});
-    const [activeQueryMenuId, setActiveQueryMenuId] = useState<string | null>(null);
 
 
     // AI Mode State
@@ -189,23 +187,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         const unsubscribe = subscribeToSavedQueries(setSavedQueries);
         return () => unsubscribe();
     }, [isActive]);
-
-    // Close any open menu if clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (activeQueryMenuId !== null && !(event.target as HTMLElement).closest('.relative.z-30')) {
-                setActiveQueryMenuId(null);
-            }
-        };
-
-        if (activeQueryMenuId !== null) {
-            document.addEventListener('click', handleClickOutside, true);
-        }
-        return () => {
-            document.removeEventListener('click', handleClickOutside, true);
-        };
-    }, [activeQueryMenuId]);
-
 
     // Load Learning Items when AI modal opens
     useEffect(() => {
@@ -623,34 +604,48 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 ) : (
                     <div className="divide-y divide-gray-200 bg-white rounded-xl border border-gray-200">
                         {savedQueries.map(q => (
-                            <div key={q.id} className={`relative ${activeQueryMenuId === q.id ? 'z-30' : ''}`}>
-                                <div className="flex items-center transition-colors duration-200 hover:bg-gray-50">
-                                    <div 
-                                        onClick={() => handleQuickRun(q)}
-                                        className="flex-grow p-4 cursor-pointer min-w-0"
-                                    >
-                                        <h4 className="font-bold text-gray-800 truncate">{q.name}</h4>
-                                        <p className="text-xs text-gray-500 mt-1">{q.type === 'natural' ? '자연어' : 'SQL'}</p>
-                                    </div>
-                                    <div className="flex-shrink-0 pr-2">
-                                        <button onClick={(e) => { e.stopPropagation(); setActiveQueryMenuId(prev => prev === q.id ? null : q.id); }} className="p-2 rounded-full text-gray-500 hover:bg-gray-200/80 transition-colors">
-                                            <MoreVerticalIcon className="w-5 h-5" />
-                                        </button>
-                                    </div>
+                             <div 
+                                key={q.id}
+                                onClick={() => handleQuickRun(q)}
+                                className="flex items-center transition-colors duration-200 hover:bg-gray-50 cursor-pointer"
+                            >
+                                <div className="flex-grow p-4 min-w-0">
+                                    <h4 className="font-bold text-gray-800 truncate">{q.name}</h4>
+                                    <p className="text-xs text-gray-500 mt-1">{q.type === 'natural' ? '자연어' : 'SQL'}</p>
                                 </div>
-                                {activeQueryMenuId === q.id && (
-                                    <div className="absolute top-12 right-4 w-56 bg-white rounded-xl shadow-lg border border-gray-200/60 z-20 py-2 animate-fade-in-down" onClick={(e) => e.stopPropagation()}>
-                                        <button onClick={(e) => { e.stopPropagation(); updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun }); setActiveQueryMenuId(null); }} className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 transition-colors text-gray-700">
-                                            <StarIcon className={`w-5 h-5 ${q.isQuickRun ? 'text-yellow-500 fill-current' : 'text-gray-400'}`} /> <span className="font-medium">빠른 실행</span>
-                                        </button>
-                                         <button onClick={() => { setEditingQuery(q); setActiveQueryMenuId(null); }} className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 transition-colors text-gray-700">
-                                            <PencilSquareIcon className="w-5 h-5" /> <span className="font-medium">수정</span>
-                                        </button>
-                                        <button onClick={() => { showAlert('이 쿼리를 삭제하시겠습니까?', () => deleteSavedQuery(q.id).then(() => showToast('쿼리가 삭제되었습니다.', 'success')), '삭제', 'bg-red-500 hover:bg-red-600'); setActiveQueryMenuId(null); }} className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 hover:bg-gray-100 transition-colors text-red-600">
-                                            <TrashIcon className="w-5 h-5" /> <span className="font-medium">삭제</span>
-                                        </button>
-                                    </div>
-                                )}
+                                
+                                <div className="flex-shrink-0 pr-2 flex items-center gap-1">
+                                    <button 
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun }); 
+                                        }} 
+                                        className="p-2 rounded-full hover:bg-yellow-100 transition-colors"
+                                        title="빠른 실행 등록/해제"
+                                    >
+                                        <StarIcon className={`w-5 h-5 ${q.isQuickRun ? 'text-yellow-500 fill-yellow-400' : 'text-gray-400 hover:text-yellow-500'}`} />
+                                    </button>
+                                    <button 
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setEditingQuery(q); 
+                                        }} 
+                                        className="p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors"
+                                        title="수정"
+                                    >
+                                        <PencilSquareIcon className="w-5 h-5" />
+                                    </button>
+                                    <button 
+                                        onClick={(e) => { 
+                                            e.stopPropagation();
+                                            showAlert('이 쿼리를 삭제하시겠습니까?', () => deleteSavedQuery(q.id).then(() => showToast('쿼리가 삭제되었습니다.', 'success')), '삭제', 'bg-red-500 hover:bg-red-600'); 
+                                        }} 
+                                        className="p-2 rounded-full text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                        title="삭제"
+                                    >
+                                        <TrashIcon className="w-5 h-5" />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -713,9 +708,17 @@ const EditQueryModal: React.FC<{
     const [name, setName] = useState('');
     const [content, setContent] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
-        if (query) { setName(query.name); setContent(query.query); }
+        if (query) {
+            setName(query.name);
+            setContent(query.query);
+            const timer = setTimeout(() => setIsRendered(true), 10);
+            return () => clearTimeout(timer);
+        } else {
+            setIsRendered(false);
+        }
     }, [query]);
 
     if (!query) return null;
@@ -723,31 +726,50 @@ const EditQueryModal: React.FC<{
     const handleSave = () => {
         setIsSaving(true);
         onSave(query.id, { name, query: content });
-        // Assume onSave will trigger onClose
         setIsSaving(false);
         onClose();
     };
 
-    return (
-        <ModalWrapper isActive={!!query} onClose={onClose} title="쿼리 수정" className="w-[95vw] max-w-4xl">
-            <div className="space-y-4 flex flex-col h-full">
-                <div>
-                    <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 이름</label>
-                    <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="쿼리 이름" className="w-full p-2 py-1.5 border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
-                </div>
-                <div className="flex-grow flex flex-col">
-                    <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 내용</label>
-                    <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="쿼리 내용" className="w-full p-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 flex-grow" />
-                </div>
-                <div className="pt-3 border-t flex justify-end gap-2 flex-shrink-0">
-                    <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300">취소</button>
-                    <button onClick={handleSave} disabled={isSaving} className="relative px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">
-                        <span className={isSaving ? 'opacity-0' : 'opacity-100'}>저장</span>
-                         {isSaving && <div className="absolute inset-0 flex items-center justify-center"><SpinnerIcon className="w-5 h-5"/></div>}
+    return createPortal(
+        <div 
+            className={`fixed inset-0 bg-black z-[110] transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}
+            onClick={onClose}
+            role="dialog"
+            aria-modal="true"
+        >
+            <div 
+                style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}
+                className={`absolute bottom-0 left-0 right-0 flex flex-col bg-gray-50 shadow-lg transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'} rounded-t-2xl will-change-[opacity,transform]`}
+                onClick={e => e.stopPropagation()}
+            >
+                <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">
+                    <h2 className="text-lg font-bold text-gray-800 truncate">저장된 쿼리 수정</h2>
+                    <button onClick={onClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
+                        <RemoveIcon className="w-6 h-6"/>
                     </button>
-                </div>
+                </header>
+                <main className="flex-grow p-4 overflow-y-auto flex flex-col gap-4">
+                    <div>
+                        <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 이름</label>
+                        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="쿼리 이름" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white" />
+                    </div>
+                    <div className="flex-grow flex flex-col">
+                        <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 내용</label>
+                        <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="쿼리 내용" className="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 flex-grow bg-white" />
+                    </div>
+                </main>
+                <footer className="p-3 bg-white border-t border-gray-200 z-10 flex-shrink-0">
+                    <div className="max-w-2xl mx-auto grid grid-cols-2 gap-3">
+                        <button onClick={onClose} className="h-12 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300 active:scale-95 transition">취소</button>
+                        <button onClick={handleSave} disabled={isSaving} className="relative h-12 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 active:scale-95 transition disabled:bg-gray-400">
+                            <span className={isSaving ? 'opacity-0' : 'opacity-100'}>저장</span>
+                            {isSaving && <div className="absolute inset-0 flex items-center justify-center"><SpinnerIcon className="w-6 h-6"/></div>}
+                        </button>
+                    </div>
+                </footer>
             </div>
-        </ModalWrapper>
+        </div>,
+        document.body
     );
 };
 
