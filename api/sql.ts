@@ -5,7 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 import { getDatabase, ref, get } from 'firebase/database';
 import { initializeApp, getApp, FirebaseApp } from 'firebase/app';
 
-// Firebase config (should be same as frontend)
+// Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyAsfRMNBfG4GRVnQBdonpP2N2ykCZIDGtg",
   authDomain: "kjmart-8ff85.firebaseapp.com",
@@ -16,7 +16,6 @@ const firebaseConfig = {
   appId: "1:694281067109:web:420c066bda06fe6c10c48c"
 };
 
-// Initialize Firebase App
 let firebaseApp: FirebaseApp;
 try {
   firebaseApp = getApp();
@@ -25,7 +24,6 @@ try {
 }
 const firebaseDb = getDatabase(firebaseApp);
 
-// MS SQL Server Configuration from environment variables
 const config: sql.config = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -40,30 +38,23 @@ const config: sql.config = {
   requestTimeout: 30000,
 };
 
-// Gemini AI Configuration
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// --- Connection Pooling ---
 let pool: sql.ConnectionPool | undefined;
-
 async function getPool(): Promise<sql.ConnectionPool> {
     if (pool && pool.connected) {
         return pool;
     }
     try {
-        console.log('Creating new SQL Connection Pool...');
         pool = new sql.ConnectionPool(config);
         await pool.connect();
-        console.log("SQL Connection Pool created and connected.");
         return pool;
     } catch (err) {
-        console.error('SQL Connection Error on getPool:', err);
-        pool = undefined; // Reset on error
+        pool = undefined;
         throw err;
     }
 }
 
-// Helper to get structured DB Schema for caching
 async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
     const schema: Record<string, { columns: { name: string; type: string }[] }>> = {};
     const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
@@ -71,14 +62,8 @@ async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string,
 
     for (const tableName of tablesToQuery) {
         try {
-            const columnResult = await pool.request().query(`
-                SELECT COLUMN_NAME, DATA_TYPE 
-                FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_NAME = N'${tableName}'
-            `);
-            schema[tableName] = {
-                columns: columnResult.recordset.map((col: any) => ({ name: col.COLUMN_NAME, type: col.DATA_TYPE }))
-            };
+            const columnResult = await pool.request().query(`SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = N'${tableName}'`);
+            schema[tableName] = { columns: columnResult.recordset.map((col: any) => ({ name: col.COLUMN_NAME, type: col.DATA_TYPE })) };
         } catch (err) {
             console.warn(`Could not get schema for table ${tableName}:`, err);
         }
@@ -86,7 +71,6 @@ async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string,
     return schema;
 }
 
-// Helper to format a structured schema object into a string for the AI prompt
 function formatSchemaForAI(schema: Record<string, any>): string {
     let schemaString = 'Database Schema:\n';
     for (const tableName in schema) {
@@ -100,7 +84,6 @@ function formatSchemaForAI(schema: Record<string, any>): string {
     return schemaString;
 }
 
-// Helper to fetch context from Firebase
 async function getLearningContextFromFirebase() {
     try {
         const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
@@ -117,7 +100,6 @@ async function getLearningContextFromFirebase() {
     return 'No additional context provided.';
 }
 
-// Main API handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -129,7 +111,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     currentPool = await getPool();
   } catch (err: any) {
-    console.error('SQL Connection Error from handler:', err);
     return res.status(500).json({ error: 'Database connection failed', details: err.message });
   }
   
@@ -140,20 +121,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'getDatabaseSchema':
-        const schema = await getFullDbSchema(currentPool);
-        res.status(200).json(schema);
+        const dbSchema = await getFullDbSchema(currentPool);
+        res.status(200).json(dbSchema);
         break;
 
-      case 'getTables':
-        const tablesResult = await currentPool.request().query(`
-            SELECT TABLE_NAME 
-            FROM INFORMATION_SCHEMA.TABLES 
-            WHERE TABLE_TYPE = 'BASE TABLE' 
-            ORDER BY TABLE_NAME
-        `);
-        res.status(200).json(tablesResult.recordset.map((row: any) => row.TABLE_NAME));
-        break;
-      
       case 'query':
         if (!query) return res.status(400).json({ error: 'Query is required' });
         const result = await currentPool.request().query(query);
@@ -166,7 +137,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         const schemaString = formatSchemaForAI(clientSchema);
         const learningContext = clientContext || await getLearningContextFromFirebase();
-
         const model = 'gemini-3-pro-preview';
         const fullPrompt = `Based on the database schema below, and the provided context, convert the following natural language query into a single, executable MS SQL query. Only return the SQL query. Do not add any explanation or markdown formatting.\n\n${schemaString}\n\nContext:\n${learningContext}\n\nNatural Language Query: "${naturalLanguagePrompt}"\n\nSQL Query:`;
         
@@ -189,23 +159,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncCustomersAndProducts': {
-        // DIAGNOSTIC STEP: Return empty data to test build.
+        const customersQuery = `
+            SELECT
+                comp.comcode AS '거래처코드',
+                comp.comname AS '거래처명'
+            FROM
+                comp
+            WHERE
+                comp.isuse <> '0';
+        `;
+        const productsQuery = `
+          SELECT
+            comp.comname AS '거래처명',
+            parts.barcode AS '바코드',
+            CASE
+                WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']')
+                ELSE parts.descr
+            END AS '상품명',
+            parts.money0vat AS '매입가가',
+            parts.money1 AS '판매가',
+            parts.salemoney0 AS '행사가',
+            parts.saleendday AS '행사종료일',
+            parts.upday1,
+            parts.isuse
+          FROM
+            comp INNER JOIN parts ON comp.comcode = parts.comcode
+          WHERE
+            parts.isuse <> '0' AND parts.barcode IS NOT NULL AND parts.barcode <> '';
+        `;
+        const [customersResult, productsResult] = await Promise.all([
+            currentPool.request().query(customersQuery),
+            currentPool.request().query(productsQuery)
+        ]);
         res.status(200).json({
-          customers: { recordset: [] },
-          products: { recordset: [] }
+          customers: customersResult,
+          products: productsResult
         });
         break;
       }
 
       case 'syncCustomers': {
-        // DIAGNOSTIC STEP: Return empty data to test build.
-        res.status(200).json({ recordset: [] });
+        const customersQuery = `
+            SELECT
+                comp.comcode AS '거래처코드',
+                comp.comname AS '거래처명'
+            FROM
+                comp
+            WHERE
+                comp.isuse <> '0';
+        `;
+        const result = await currentPool.request().query(customersQuery);
+        res.status(200).json(result);
         break;
       }
 
       case 'syncProductsIncrementally': {
-        // DIAGNOSTIC STEP: Return empty data to test build.
-        res.status(200).json({ recordset: [] });
+        let productsQuery = `
+          SELECT
+              p.barcode AS '바코드',
+              CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN CONCAT(p.descr, ' [', p.spec, ']') ELSE p.descr END AS '상품명',
+              p.money0vat AS '매입가가',
+              p.money1 AS '판매가',
+              p.salemoney0 AS '행사가',
+              p.saleendday AS '행사종료일',
+              c.comname AS '거래처명',
+              p.isuse,
+              p.upday1
+          FROM parts p
+          INNER JOIN comp c ON p.comcode = c.comcode
+          WHERE p.barcode IS NOT NULL AND p.barcode <> ''
+        `;
+        
+        const request = currentPool.request();
+        if (lastSyncDate) {
+          productsQuery += ` AND p.upday1 >= @lastSyncDate`;
+          request.input('lastSyncDate', sql.VarChar, lastSyncDate);
+        }
+        
+        const result = await request.query(productsQuery);
+        res.status(200).json(result);
         break;
       }
 
