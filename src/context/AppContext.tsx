@@ -2,7 +2,6 @@ import React, { createContext, useState, useCallback, useEffect, ReactNode, useC
 import { Customer, Product, Order, OrderItem, ScannerContext as ScannerContextType, SyncLog, DeviceSettings, SyncSettings } from '../types';
 import { 
     isDbReady, getDeviceSettings, getStore, 
-    getLastSyncLogKey, getSyncLogChanges, listenForNewLogs, cleanupSyncLogs,
     addOrder as dbAddOrder, updateOrder as dbUpdateOrder, deleteOrder as dbDeleteOrder,
     updateOrderStatus as dbUpdateOrderStatus, clearOrders as dbClearOrders, 
     clearOrdersBeforeDate as dbClearOrdersBeforeDate, resetData as dbResetData,
@@ -17,7 +16,7 @@ import * as googleDrive from '../services/googleDriveService';
 import { getDeviceId } from '../services/deviceService';
 import Toast, { ToastState } from '../components/Toast';
 import { processExcelFileInWorker } from '../services/dataService';
-import { syncAllDataFromDb, syncCustomersFromDb } from '../services/sqlService';
+import { syncCustomersAndProductsFromDb, syncCustomersFromDb, syncProductsIncrementally } from '../services/sqlService';
 import { IS_DEVELOPER_MODE } from '../config';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 
@@ -210,9 +209,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // --- Data State ---
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
-    const [lastSyncKeys, setLastSyncKeys] = useLocalStorage<{ customers: string | null; products: string | null; }>('lastSyncKeys', { customers: null, products: null }, { deviceSpecific: true });
-    const lastSyncKeysRef = useRef(lastSyncKeys);
-    useEffect(() => { lastSyncKeysRef.current = lastSyncKeys; }, [lastSyncKeys]);
     const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(defaultDeviceSettings);
 
     // --- Sync State ---
@@ -365,10 +361,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSyncStatusText("DB에서 데이터 다운로드 중...");
     
         try {
-            setSyncStatusText("거래처 데이터 다운로드 중...");
-            const rawCustomers = await syncCustomersFromDb();
-            setSyncProgress(15);
-            setSyncStatusText(`거래처 데이터 처리 중 (${rawCustomers.length}건)`);
+            const { customers: rawCustomers, products: rawData } = await syncCustomersAndProductsFromDb();
+            
+            setSyncProgress(30);
+            setSyncStatusText(`데이터 처리 중 (${rawCustomers.length}건 거래처, ${rawData.length}건 상품)`);
             
             // 1. Process Customers
             const newCustomers: Customer[] = rawCustomers.map((row: any) => ({
@@ -376,11 +372,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 name: String(row.comname || '').trim(),
             })).filter((c: Customer) => c.comcode && c.name);
 
-            setSyncStatusText("상품 데이터 다운로드 중...");
-            const rawData = await syncAllDataFromDb();
-            setSyncProgress(30);
-            setSyncStatusText(`데이터 처리 중 (${rawData.length}건)`);
-            
             // 2. Process Products
             const newProducts: Product[] = rawData.map((row: any) => {
                 const sanitizedBarcode = sanitizeFirebaseKey(String(row.barcode || '').trim());
@@ -464,6 +455,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const typeKorean = dataType === 'customers' ? '거래처' : '상품';
         try {
             await dbResetData(dataType);
+            // Pass an empty array. The type will be correctly inferred for both customers and products.
             await cache.setCachedData(dataType, []);
             if (dataType === 'customers') setCustomers([]);
             else setProducts([]);
@@ -523,127 +515,95 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }), [deviceSettings, showToast]);
 
 
-    // --- Initial Data Load and Sync Effect ---
+    // --- Initial Data Load and Sync Effect (Offline-first) ---
     useEffect(() => {
-        if (!user || !isDbReady()) {
-            setInitialSyncCompleted(!user); // Complete if not logged in, wait if logged in but DB not ready
+        if (!user) {
+            setInitialSyncCompleted(true);
             return;
         }
-    
-        const unsubscribers: (() => void)[] = [];
-        let syncTimeout: number;
-    
-        const applyChanges = async (dataType: 'customers' | 'products', changes: SyncLog[]) => {
-            if (changes.length === 0) return;
-    
-            const keyField = dataType === 'customers' ? 'comcode' : 'barcode';
-            const setData = dataType === 'customers' ? setCustomers : setProducts;
-    
-            for (const change of changes) {
-                const key = (change as any)[keyField];
-                if (change._deleted) {
-                    await cache.removeCachedItem(dataType, key);
-                } else {
-                    const { _key, timestamp, user, ...itemData } = change;
-                    await cache.addOrUpdateCachedItem(dataType, itemData as any);
-                }
-            }
-    
-            setData(prevData => {
-                const dataMap = new Map(prevData.map(item => [(item as any)[keyField], item]));
-                changes.forEach(change => {
-                    const key = (change as any)[keyField];
-                    if (change._deleted) {
-                        dataMap.delete(key);
+
+        const runBackgroundSync = async () => {
+            try {
+                setIsSyncing(true);
+                
+                // 1. Sync Customers (Full sync every time)
+                const serverCustomers = await syncCustomersFromDb();
+                const newCustomers: Customer[] = serverCustomers.map((row: any) => ({
+                    comcode: String(row.comcode || '').trim(),
+                    name: String(row.comname || '').trim(),
+                })).filter((c: Customer) => c.comcode && c.name);
+                await cache.setCachedData('customers', newCustomers);
+                setCustomers(newCustomers);
+
+                // 2. Sync Products (Incremental)
+                const lastSyncDate = await cache.getSetting<string>('lastProductSyncDate');
+                const rawProducts = await syncProductsIncrementally(lastSyncDate);
+
+                // Process and merge changes
+                const productMap = new Map(products.map(p => [p.barcode, p]));
+                
+                rawProducts.forEach((row: any) => {
+                    const isUsed = String(row.isuse).trim() !== '0';
+                    const barcode = String(row.barcode || '').trim();
+
+                    if (!barcode) return;
+                    
+                    if (isUsed) {
+                        const product: Product = {
+                            barcode: barcode,
+                            name: String(row.name || '').trim(),
+                            costPrice: parseFloat(String(row.costPrice || 0)),
+                            sellingPrice: parseFloat(String(row.sellingPrice || 0)),
+                            supplierName: String(row.comname || '').trim(),
+                        };
+                        const salePriceRaw = row.salePrice;
+                        if (salePriceRaw !== null && salePriceRaw !== undefined) {
+                            product.salePrice = String(salePriceRaw).trim();
+                        }
+                        const saleEndDateFormatted = formatDate(row.saleEndDate);
+                        if (saleEndDateFormatted) {
+                            product.saleEndDate = saleEndDateFormatted;
+                        }
+                        productMap.set(barcode, product);
                     } else {
-                        const { _key, timestamp, user, ...itemData } = change;
-                        dataMap.set(key, itemData);
+                        // Soft delete: remove from local data
+                        productMap.delete(barcode);
                     }
                 });
-                return Array.from(dataMap.values()) as any;
-            });
+                
+                const newProductList = Array.from(productMap.values());
+                await cache.setCachedData('products', newProductList);
+                setProducts(newProductList);
+
+                // 3. Update last sync date on success
+                const today = new Date().toISOString().slice(0, 10);
+                await cache.setSetting('lastProductSyncDate', today);
+                
+                showToast('데이터가 최신 상태로 동기화되었습니다.', 'success');
+            } catch (error) {
+                console.error("Background sync failed:", error);
+                showToast('백그라운드 동기화 실패. 오프라인 데이터로 계속 사용합니다.', 'error');
+            } finally {
+                setIsSyncing(false);
+            }
         };
-    
-        const runInitialSync = async () => {
-            let forceFullSyncFlag = false;
-            try {
-                forceFullSyncFlag = localStorage.getItem('forceFullSyncOnNextLoad') === 'true';
-            } catch (e) {
-                console.warn("Could not access localStorage to check for force sync flag:", e);
-            }
 
-            if (IS_DEVELOPER_MODE && !forceFullSyncFlag) {
-                console.warn('%c[DEV MODE] Minimal data sync is active.', 'color: orange; font-weight: bold;');
-                setIsSyncing(true);
-                setSyncDataType('full');
-                setSyncProgress(0);
-        
-                try {
-                    setSyncStatusText("DEV MODE: 기기 설정 로딩");
-                    const deviceId = getDeviceId();
-                    const remoteSettings = await getDeviceSettings(deviceId);
-                    const loadedSettings = {
-                        ...defaultDeviceSettings,
-                        ...remoteSettings,
-                        scanSettings: { ...defaultDeviceSettings.scanSettings, ...(remoteSettings.scanSettings || {}) },
-                        googleDriveSyncSettings: { ...defaultDeviceSettings.googleDriveSyncSettings, ...(remoteSettings.googleDriveSyncSettings || {}) },
-                    };
-                    setDeviceSettings(loadedSettings);
-                    setSyncProgress(25);
-        
-                    setSyncStatusText("DEV MODE: 거래처 샘플 로딩 (10개)");
-                    const limitedCustomers = await getStore<Customer>('customers'); 
-                    setCustomers(limitedCustomers.slice(0, 10));
-                    await cache.setCachedData('customers', limitedCustomers.slice(0, 10));
-                    setSyncProgress(50);
-        
-                    setSyncStatusText("DEV MODE: 상품 샘플 로딩 (50개)");
-                     const limitedProducts = await getStore<Product>('products'); 
-                    setProducts(limitedProducts.slice(0, 50));
-                    await cache.setCachedData('products', limitedProducts.slice(0, 50));
-                    setSyncProgress(75);
-        
-                    setSyncStatusText("앱 시작 준비 완료");
-                    setSyncProgress(100);
-                    setTimeout(() => {
-                        setInitialSyncCompleted(true);
-                        setIsSyncing(false);
-                    }, 300);
-        
-                } catch (error) {
-                    console.error("Dev mode sync failed:", error);
-                    showAlert("개발자 모드 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
-                    const cachedCustomers = await cache.getCachedData<Customer>('customers');
-                    setCustomers(cachedCustomers);
-                    const cachedProducts = await cache.getCachedData<Product>('products');
-                    setProducts(cachedProducts);
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }
-                return;
-            }
-
-            if (forceFullSyncFlag) {
-                try {
-                    localStorage.removeItem('forceFullSyncOnNextLoad');
-                } catch (e) {
-                     console.warn("Could not remove force sync flag from localStorage:", e);
-                }
-                showToast("강제 전체 동기화를 시작합니다.", 'success');
-            }
-
+        const startup = async () => {
+            // Phase 1: Immediate UI from Cache
+            setSyncStatusText("로컬 데이터 로딩 중...");
             setIsSyncing(true);
-            setSyncDataType('full');
-            setSyncProgress(0);
-            setSyncStatusText("앱 초기화 중");
             
-            let loadedSettings = { ...defaultDeviceSettings };
-            const deviceId = getDeviceId();
+            const cachedCustomers = await cache.getCachedData<Customer>('customers');
+            setCustomers(cachedCustomers);
+            
+            const cachedProducts = await cache.getCachedData<Product>('products');
+            setProducts(cachedProducts);
+
+            // Also load device settings
             try {
-                setSyncProgress(5);
-                setSyncStatusText("기기 설정 로딩");
+                const deviceId = getDeviceId();
                 const remoteSettings = await getDeviceSettings(deviceId);
-                loadedSettings = {
+                const loadedSettings = {
                     ...defaultDeviceSettings,
                     ...remoteSettings,
                     scanSettings: { ...defaultDeviceSettings.scanSettings, ...(remoteSettings.scanSettings || {}) },
@@ -651,123 +611,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 };
                 setDeviceSettings(loadedSettings);
             } catch (e) {
-                console.warn("Could not load device settings from Firebase", e);
+                 console.warn("Could not load device settings", e);
             }
-
-            setSyncProgress(10);
-            setSyncStatusText("로컬 캐시 읽기 (거래처)");
-            const cachedCustomers = await cache.getCachedData<Customer>('customers');
-            setCustomers(cachedCustomers);
-
-            setSyncProgress(20);
-            setSyncStatusText("로컬 캐시 읽기 (상품)");
-            const cachedProducts = await cache.getCachedData<Product>('products');
-            setProducts(cachedProducts);
-    
-            setSyncProgress(30);
-    
-            syncTimeout = window.setTimeout(() => {
-                if (!initialSyncCompleted) {
-                    console.warn("Sync timed out. Using cached data.");
-                    showAlert("서버 동기화가 시간 초과되었습니다. 오프라인 데이터로 시작합니다.");
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }
-            }, 20000);
-    
-            const syncDataTypeOp = async (dataType: 'customers' | 'products', lastKey: string | null | undefined, progressStart: number, progressEnd: number) => {
-                const typeName = dataType === 'customers' ? '거래처' : '상품';
-                const hasCache = dataType === 'customers' ? cachedCustomers.length > 0 : cachedProducts.length > 0;
-                
-                setSyncStatusText(`${typeName} 정보 동기화`);
-                setSyncProgress(progressStart);
-
-                if (!lastKey || !hasCache) { // Full Sync
-                    setSyncStatusText(`${typeName} 전체 데이터 다운로드`);
-                    const remoteData = await getStore<Customer | Product>(dataType);
-                    
-                    setSyncProgress(progressStart + (progressEnd - progressStart) * 0.7);
-                    setSyncStatusText(`${typeName} 정보 적용`);
-                    
-                    if (dataType === 'customers') setCustomers(remoteData as Customer[]); else setProducts(remoteData as Product[]);
-                    await cache.setCachedData(dataType, remoteData as any);
-                    const newLastKey = await getLastSyncLogKey(dataType);
-                    setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
-                    
-                    setSyncProgress(progressEnd);
-                    return newLastKey;
-                } else { // Incremental Sync
-                    setSyncStatusText(`${typeName} 변경사항 확인`);
-                    const { items: changes, newLastKey } = await getSyncLogChanges(dataType, lastKey);
-                    
-                    setSyncProgress(progressStart + (progressEnd - progressStart) * 0.7);
-
-                    if (changes.length > 0) {
-                        setSyncStatusText(`${typeName} ${changes.length}건 업데이트 적용`);
-                        await applyChanges(dataType, changes);
-                    }
-                    if (newLastKey !== lastKey) {
-                        setLastSyncKeys(prev => ({ ...prev, [dataType]: newLastKey }));
-                    }
-                    setSyncProgress(progressEnd);
-                    return newLastKey;
-                }
-            };
-    
-            try {
-                const finalCustomerKey = await syncDataTypeOp('customers', lastSyncKeysRef.current?.customers, 30, 60);
-                
-                setSyncStatusText("거래처 실시간 연결 설정");
-                unsubscribers.push(
-                    listenForNewLogs('customers', finalCustomerKey, async (newItem, newKey) => {
-                        await applyChanges('customers', [newItem]);
-                        setLastSyncKeys(prev => ({ ...prev, customers: newKey }));
-                    })
-                );
-                setSyncProgress(65);
-
-                const finalProductKey = await syncDataTypeOp('products', lastSyncKeysRef.current?.products, 65, 95);
-                setSyncStatusText("상품 실시간 연결 설정");
-                unsubscribers.push(
-                    listenForNewLogs('products', finalProductKey, async (newItem, newKey) => {
-                        await applyChanges('products', [newItem]);
-                        setLastSyncKeys(prev => ({ ...prev, products: newKey }));
-                    })
-                );
-                
-                if (loadedSettings.logRetentionDays > 0) {
-                    setSyncStatusText("오래된 로그 정리");
-                    await Promise.all([
-                        cleanupSyncLogs('customers', loadedSettings.logRetentionDays),
-                        cleanupSyncLogs('products', loadedSettings.logRetentionDays)
-                    ]).catch(e => console.warn("Log cleanup failed during init:", e));
-                }
-                
-                setSyncProgress(100);
-                setSyncStatusText("앱 시작 준비 완료");
-                clearTimeout(syncTimeout);
-                
-                setTimeout(() => {
-                    setInitialSyncCompleted(true);
-                    setIsSyncing(false);
-                }, 300);
-
-            } catch (error) {
-                console.error("Initial data sync failed:", error);
-                showAlert("데이터 동기화에 실패했습니다. 캐시된 데이터로 시작합니다.");
-                clearTimeout(syncTimeout);
-                setInitialSyncCompleted(true);
-                setIsSyncing(false);
-            }
+            
+            // UI is now interactive
+            setInitialSyncCompleted(true);
+            setIsSyncing(false);
+            setSyncStatusText("");
+            
+            // Phase 2: Trigger background sync
+            runBackgroundSync();
         };
-    
-        runInitialSync();
-    
-        return () => {
-            unsubscribers.forEach(unsubscribe => unsubscribe());
-            clearTimeout(syncTimeout);
-        };
-    }, [user]);
+
+        startup();
+
+    }, [user, showToast, products]);
 
     // --- PWA Install Prompt Logic ---
     useEffect(() => {

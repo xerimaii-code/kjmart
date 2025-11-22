@@ -79,10 +79,14 @@ export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, co
     });
 }
 
-export async function syncAllDataFromDb(): Promise<any[]> {
-    return fetchApi({ type: 'syncAllData' });
+export async function syncCustomersAndProductsFromDb(): Promise<{ customers: any[], products: any[] }> {
+    return fetchApi({ type: 'syncCustomersAndProducts' });
 }
 
 export async function syncCustomersFromDb(): Promise<any[]> {
     return fetchApi({ type: 'syncCustomers' });
+}
+
+export async function syncProductsIncrementally(lastSyncDate: string | null): Promise<any[]> {
+    return fetchApi({ type: 'syncProductsIncrementally', lastSyncDate });
 }

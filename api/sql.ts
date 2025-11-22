@@ -72,7 +72,7 @@ async function getPool(): Promise<sql.ConnectionPool> {
 
 // Helper to get structured DB Schema for caching
 async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
-    const schema: Record<string, { columns: { name: string; type: string }[] }> = {};
+    const schema: Record<string, { columns: { name: string; type: string }[] }>> = {};
     const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
     const tablesToQuery = tableResult.recordset.map((row: any) => row.TABLE_NAME);
 
@@ -137,7 +137,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { type, query, naturalLanguagePrompt, schema: clientSchema, context: clientContext } = req.body;
+  const { type, query, naturalLanguagePrompt, schema: clientSchema, context: clientContext, lastSyncDate } = req.body;
   
   let currentPool: sql.ConnectionPool;
   try {
@@ -179,8 +179,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         break;
       
-      case 'syncAllData':
-        const syncQuery = `
+      case 'syncCustomersAndProducts':
+        const customersSyncQuery = `
+            SELECT
+                c.comcode,
+                c.comname
+            FROM
+                comp AS c
+            WHERE
+                c.isuse <> '0'
+            ORDER BY
+                c.comname;
+        `;
+        
+        const productsSyncQuery = `
             SELECT
                 LTRIM(RTRIM(c.comcode)) AS comcode,
                 LTRIM(RTRIM(c.comname)) AS comname,
@@ -191,51 +203,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 p.salemoney0 AS salePrice,
                 p.saleendday AS saleEndDate
             FROM
-                comp AS c
-            INNER JOIN
-                parts AS p ON c.comcode = p.comcode
+                parts AS p
+            LEFT JOIN
+                comp AS c ON p.comcode = c.comcode
             WHERE
-                (
-                    (
-                        c.comname NOT LIKE '%야채%'
-                    AND c.comname NOT LIKE '%과일%'
-                    AND c.comname NOT LIKE '%생선%'
-                    AND c.comname NOT LIKE '%정육%'
-                    AND c.comname NOT LIKE '%식품%'
-                    AND c.comname NOT LIKE '%비식품%'
-                    AND c.comname NOT LIKE '%기획%'
-                    AND c.comname NOT LIKE '%경진청과%'
-                    )
-                AND p.barcode IS NOT NULL
-                AND (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END) NOT LIKE '%---%'
-                AND p.money0vat <> 0
-                AND p.isuse <> '0'
-                )
-            OR
-                (p.barcode NOT LIKE '0000000%')
+                p.isuse <> '0' AND p.barcode IS NOT NULL AND p.barcode <> ''
             ORDER BY
-                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END;
+                (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END);
         `;
-        const syncResult = await currentPool.request().query(syncQuery);
-        res.status(200).json(syncResult.recordset);
+        
+        const [customersData, productsData] = await Promise.all([
+            currentPool.request().query(customersSyncQuery),
+            currentPool.request().query(productsSyncQuery)
+        ]);
+
+        res.status(200).json({
+            customers: customersData.recordset,
+            products: productsData.recordset
+        });
         break;
 
     case 'syncCustomers':
         const customersQuery = `
             SELECT
-                LTRIM(RTRIM(c.comcode)) AS comcode,
-                LTRIM(RTRIM(c.comname)) AS comname
-            FROM
-                comp AS c
+                comp.comcode,
+                comp.comname
+            FROM comp
             WHERE
-                c.comcode NOT LIKE '000%'
-                AND c.isuse <> '0'
+                comp.isuse <> '0'
             ORDER BY
-                c.comname;
+                comp.comname;
         `;
         const customersResult = await currentPool.request().query(customersQuery);
         res.status(200).json(customersResult.recordset);
         break;
+      
+      case 'syncProductsIncrementally':
+        const productRequest = currentPool.request();
+        let productSyncQuery = `
+            SELECT
+                LTRIM(RTRIM(p.barcode)) AS barcode,
+                LTRIM(RTRIM(c.comname)) AS comname,
+                LTRIM(RTRIM(CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END)) AS name,
+                p.money0vat AS costPrice,
+                p.money1 AS sellingPrice,
+                p.salemoney0 AS salePrice,
+                p.saleendday AS saleEndDate,
+                p.upday1,
+                p.isuse
+            FROM
+                parts AS p
+            LEFT JOIN
+                comp AS c ON p.comcode = c.comcode
+            WHERE 
+                p.barcode IS NOT NULL AND p.barcode <> ''
+        `;
+
+        if (lastSyncDate && typeof lastSyncDate === 'string') {
+            productSyncQuery += ` AND p.upday1 >= @lastSyncDate`;
+            productRequest.input('lastSyncDate', sql.Date, lastSyncDate);
+        }
+        
+        const productSyncResult = await productRequest.query(productSyncQuery);
+        res.status(200).json(productSyncResult.recordset);
+        break;
+
 
       case 'naturalLanguageToSql':
         if (!naturalLanguagePrompt) {
