@@ -75,7 +75,7 @@ const TopTabBar: React.FC<TopTabBarProps> = ({ activePage, setActivePage }) => {
         { page: "history" as Page, label: "발주내역" },
         { page: "new-order" as Page, label: "신규발주" },
         { page: "product-inquiry" as Page, label: "상품조회" },
-        { page: "sql-runner" as Page, label: "SQL 실행기" },
+        { page: "sql-runner" as Page, label: "윈포스(SQL)" },
         { page: "settings" as Page, label: "설정" },
     ], []);
 

@@ -30,10 +30,10 @@ const Toast: React.FC<ToastProps> = ({ isOpen, message, type, onClose }) => {
     return (
         <div 
              style={{ top: `calc(var(--header-height, 4rem) + 0.5rem)` }}
-             className={`fixed inset-x-0 mx-auto z-[100] w-[90%] max-w-lg p-3 rounded-lg shadow-2xl text-white font-semibold flex items-center gap-3 animate-fade-in-down ${bgColor}`}
+             className={`fixed inset-x-0 mx-auto z-[100] w-[90%] max-w-sm p-2 rounded-lg shadow-2xl text-white font-semibold flex items-center gap-2 animate-fade-in-down ${bgColor}`}
         >
-            <Icon className="w-6 h-6 flex-shrink-0" />
-            <span className="whitespace-pre-line text-sm">{message}</span>
+            <Icon className="w-5 h-5 flex-shrink-0" />
+            <span className="whitespace-pre-line text-xs">{message}</span>
         </div>
     );
 };

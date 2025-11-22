@@ -6,6 +6,7 @@ import { querySql, naturalLanguageToSql, aiChat } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
+import ToggleSwitch from '../components/ToggleSwitch';
 
 // --- TYPE DEFINITIONS ---
 type QueryStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -155,7 +156,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     // States for editing modals and UI
     const [editingQuery, setEditingQuery] = useState<SavedQuery | null>(null);
     const [editingLearningItem, setEditingLearningItem] = useState<LearningItem | null>(null);
-
+    const [queryViewStates, setQueryViewStates] = useState<Record<string, 'natural' | 'sql'>>({});
 
     // AI Mode State
     const [isAiMode, setIsAiMode] = useState(false);
@@ -164,8 +165,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Long press logic
-    const tableLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const isTableLongPress = useRef(false);
     const executeLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isExecuteLongPress = useRef(false);
     const aiLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -279,25 +278,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (isLikelySql && !isAiMode) executeQuery(currentInput);
         else processNaturalLanguageQuery(currentInput);
     }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery, isAiMode]);
-
-    const handleTableButtonStart = () => {
-        isTableLongPress.current = false;
-        tableLongPressTimer.current = setTimeout(() => {
-            isTableLongPress.current = true;
-            setUseSelectedTablesOnly(prev => {
-                 const next = !prev;
-                 if (navigator.vibrate) navigator.vibrate(50);
-                 showToast(next ? '선택된 테이블만 사용합니다.' : '전체 테이블을 사용합니다.', 'success');
-                 return next;
-            });
-        }, 600);
-    };
-
-    const handleTableButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
-        if (tableLongPressTimer.current) clearTimeout(tableLongPressTimer.current);
-        if (!isTableLongPress.current) setTableModalOpen(true);
-        else if(e.cancelable && e.type !== 'touchend') e.preventDefault();
-    };
 
     const handleExecuteStart = () => {
         isExecuteLongPress.current = false;
@@ -474,6 +454,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
 
+    const toggleQueryView = (queryId: string) => {
+        setQueryViewStates(prev => ({
+            ...prev,
+            [queryId]: (prev[queryId] === 'sql') ? 'natural' : 'sql'
+        }));
+    };
+
     const hasRecordset = result?.recordset && result.recordset.length > 0;
     const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result?.rowsAffected ?? 0}`}`;
 
@@ -482,8 +469,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             <div className="p-2 bg-white border-b border-gray-200 z-10 flex flex-col gap-2 flex-shrink-0">
                  <div className="flex items-center gap-2 flex-wrap">
                     <button 
-                        onMouseDown={handleTableButtonStart} onMouseUp={handleTableButtonEnd} onMouseLeave={handleTableButtonEnd}
-                        onTouchStart={handleTableButtonStart} onTouchEnd={handleTableButtonEnd}
+                        onClick={() => setTableModalOpen(true)}
                         className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 border rounded-lg font-semibold text-sm active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                     >
                         <TableCellsIcon className="w-5 h-5"/> 
@@ -582,7 +568,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 <div className="text-left text-xs space-y-2 bg-gray-100 p-4 rounded-lg text-gray-500 max-w-md w-full">
                                     <h4 className="font-bold text-gray-600 mb-1">💡 숨겨진 기능 팁</h4>
                                     <p><strong>- 실행 버튼 (길게 누르기):</strong> 입력창 내용을 초기화합니다.</p>
-                                    <p><strong>- 테이블 버튼 (길게 누르기):</strong> '선택/전체 테이블' 모드를 전환합니다.</p>
                                     <p><strong>- AI 버튼 (길게 누르기):</strong> 'AI 모드'를 활성화/비활성화합니다.</p>
                                     <p><strong>- 빠른 실행:</strong> '저장된 쿼리'에서 별표(★)를 눌러 단축 버튼을 만들 수 있습니다.</p>
                                 </div>
@@ -593,7 +578,33 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </main>
 
             <ModalWrapper isActive={isTableModalOpen} onClose={() => setTableModalOpen(false)} title="테이블 선택">
-                <div className="space-y-1"><div className="p-3 bg-blue-50 text-blue-800 text-sm rounded-lg mb-3"><p>💡 <strong>팁:</strong> '테이블' 버튼을 길게 누르면(0.6초) 모드가 전환됩니다.</p></div><div className="flex gap-2 mb-3"><button onClick={() => setSelectedTables([...allTables])} className="flex-1 py-2 text-sm bg-blue-50 text-blue-600 font-bold rounded-lg">전체 선택</button><button onClick={() => setSelectedTables([])} className="flex-1 py-2 text-sm bg-gray-100 text-gray-600 font-bold rounded-lg">전체 해제</button></div><div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-[50vh] overflow-y-auto">{sortedTables.map(t => (<label key={t} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${selectedTables.includes(t) ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50 border-gray-200'}`}><input type="checkbox" checked={selectedTables.includes(t)} onChange={() => toggleTable(t)} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500" /><span className="ml-3 font-medium text-gray-700 truncate">{t}</span></label>))}</div><div className="mt-4 pt-2 border-t border-gray-100 flex justify-end"><button onClick={() => setTableModalOpen(false)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 active:scale-95">완료 ({selectedTables.length})</button></div></div>
+                <div className="space-y-1">
+                    <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg mb-3 flex items-center justify-between gap-4">
+                        <p>AI가 참고할 테이블 범위를 설정합니다.</p>
+                        <ToggleSwitch 
+                            id="use-selected-tables" 
+                            label="선택만 사용" 
+                            checked={useSelectedTablesOnly} 
+                            onChange={setUseSelectedTablesOnly} 
+                            color="blue" 
+                        />
+                    </div>
+                    <div className="flex gap-2 mb-3">
+                        <button onClick={() => setSelectedTables([...allTables])} className="flex-1 py-2 text-sm bg-blue-50 text-blue-600 font-bold rounded-lg">전체 선택</button>
+                        <button onClick={() => setSelectedTables([])} className="flex-1 py-2 text-sm bg-gray-100 text-gray-600 font-bold rounded-lg">전체 해제</button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-[50vh] overflow-y-auto">
+                        {sortedTables.map(t => (
+                            <label key={t} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${selectedTables.includes(t) ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50 border-gray-200'}`}>
+                                <input type="checkbox" checked={selectedTables.includes(t)} onChange={() => toggleTable(t)} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500" />
+                                <span className="ml-3 font-medium text-gray-700 truncate">{t}</span>
+                            </label>
+                        ))}
+                    </div>
+                    <div className="mt-4 pt-2 border-t border-gray-100 flex justify-end">
+                        <button onClick={() => setTableModalOpen(false)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 active:scale-95">완료 ({selectedTables.length})</button>
+                    </div>
+                </div>
             </ModalWrapper>
 
             <FullScreenModal isOpen={isSavedQueriesModalOpen} onClose={() => setSavedQueriesModalOpen(false)} title="저장된 쿼리">
@@ -606,15 +617,32 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         {savedQueries.map(q => (
                              <div 
                                 key={q.id}
-                                onClick={() => handleQuickRun(q)}
-                                className="flex items-center transition-colors duration-200 hover:bg-gray-50 cursor-pointer"
+                                className="flex items-start transition-colors duration-200 hover:bg-gray-50"
                             >
-                                <div className="flex-grow p-4 min-w-0">
+                                <div className="flex-grow p-4 min-w-0 cursor-pointer" onClick={() => handleQuickRun(q)}>
                                     <h4 className="font-bold text-gray-800 truncate">{q.name}</h4>
-                                    <p className="text-xs text-gray-500 mt-1">{q.type === 'natural' ? '자연어' : 'SQL'}</p>
+                                    {q.type === 'natural' ? (
+                                        <>
+                                            <p className="text-sm text-gray-600 mt-2 font-mono bg-gray-100 p-2 rounded break-all">
+                                                {queryViewStates[q.id] === 'sql' ? q.generatedSql : q.query}
+                                            </p>
+                                            {q.generatedSql && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); toggleQueryView(q.id); }}
+                                                    className="text-xs text-blue-600 font-semibold mt-1 hover:underline"
+                                                >
+                                                    {queryViewStates[q.id] === 'sql' ? '자연어 보기' : 'SQL 보기'}
+                                                </button>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <p className="text-sm text-gray-600 mt-2 font-mono bg-gray-100 p-2 rounded break-all">
+                                            {q.query}
+                                        </p>
+                                    )}
                                 </div>
                                 
-                                <div className="flex-shrink-0 pr-2 flex items-center gap-1">
+                                <div className="flex-shrink-0 pr-2 flex items-center gap-1 self-start pt-4">
                                     <button 
                                         onClick={(e) => { 
                                             e.stopPropagation(); 

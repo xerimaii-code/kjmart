@@ -396,19 +396,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             // 3. Sync Customers
             setSyncStatusText(`거래처 데이터 동기화...`);
             setSyncProgress(50);
-            await smartSyncData('customers', newCustomers, user?.email || 'unknown', (msg) => setSyncStatusText(`거래처: ${msg}`), customers);
+            const customerSyncResult = await smartSyncData('customers', newCustomers, user?.email || 'unknown', (msg) => setSyncStatusText(`거래처: ${msg}`), customers);
             setCustomers(newCustomers);
             await cache.setCachedData('customers', newCustomers);
             
             // 4. Sync Products
             setSyncStatusText(`상품 데이터 동기화...`);
             setSyncProgress(75);
-            await smartSyncData('products', newProducts, user?.email || 'unknown', (msg) => setSyncStatusText(`상품: ${msg}`), products);
+            const productSyncResult = await smartSyncData('products', newProducts, user?.email || 'unknown', (msg) => setSyncStatusText(`상품: ${msg}`), products);
             setProducts(newProducts);
             await cache.setCachedData('products', newProducts);
             
             setSyncProgress(100);
-            showToast("DB 동기화 완료!", 'success');
+            
+            const totalChanges = customerSyncResult.additions + customerSyncResult.updates + customerSyncResult.deletions + productSyncResult.additions + productSyncResult.updates + productSyncResult.deletions;
+
+            if (totalChanges > 0) {
+                const c_msg = `거래처: ${customerSyncResult.additions} 추가, ${customerSyncResult.updates} 수정, ${customerSyncResult.deletions} 삭제`;
+                const p_msg = `상품: ${productSyncResult.additions} 추가, ${productSyncResult.updates} 수정, ${productSyncResult.deletions} 삭제`;
+                showToast(`DB 동기화 완료:\n${c_msg}\n${p_msg}`, 'success');
+            } else {
+                showToast("DB 동기화 완료: 변경된 내용이 없습니다.", 'success');
+            }
             
         } catch (error: any) {
             console.error(`Sync from DB failed:`, error);
@@ -587,7 +596,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const today = new Date().toISOString().slice(0, 10);
                 await cache.setSetting('lastProductSyncDate', today);
                 
-                showToast('데이터가 최신 상태로 동기화되었습니다.', 'success');
             } catch (error) {
                 console.error("Background sync failed:", error);
                 showToast('백그라운드 동기화 실패. 오프라인 데이터로 계속 사용합니다.', 'error');
@@ -628,8 +636,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setIsSyncing(false);
             setSyncStatusText("");
             
-            // Phase 2: Trigger background sync
-            runBackgroundSync();
+            // Phase 2: Trigger background sync with a delay to improve stability
+            setTimeout(() => runBackgroundSync(), 1000);
         };
 
         startup();
