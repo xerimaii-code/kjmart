@@ -189,137 +189,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'syncCustomersAndProducts': {
-        const productsQuery = `
-SELECT
-    ProductData.거래처명,
-    ProductData.바코드,
-    ProductData.상품명,
-    ProductData.매입가가,
-    ProductData.판매가,
-    ProductData.행사가,
-    ProductData.행사종료일,
-    ProductData.upday1
-FROM (
-    SELECT
-        comp.comname AS 거래처명,
-        parts.barcode AS 바코드,
-        (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
-        parts.money0vat AS 매입가가,
-        parts.money1 AS 판매가,
-        parts.salemoney0 AS 행사가,
-        parts.saleendday AS 행사종료일,
-        parts.upday1,
-        parts.isuse
-    FROM
-        comp INNER JOIN parts ON comp.comcode = parts.comcode
-) AS ProductData
-WHERE (
-    (
-        ProductData.거래처명 NOT LIKE N'%야채%' AND ProductData.거래처명 NOT LIKE N'%과일%' AND
-        ProductData.거래처명 NOT LIKE N'%생선%' AND ProductData.거래처명 NOT LIKE N'%정육%' AND
-        ProductData.거래처명 NOT LIKE N'%식품%' AND ProductData.거래처명 NOT LIKE N'%비식품%' AND
-        ProductData.거래처명 NOT LIKE N'%기획%' AND ProductData.거래처명 NOT LIKE N'%경진청과%'
-    )
-    AND ProductData.바코드 IS NOT NULL
-    AND ProductData.상품명 NOT LIKE N'%*---*%'
-    AND ProductData.매입가가 <> 0
-    AND ProductData.isuse <> '0'
-) OR (ProductData.바코드 NOT LIKE '0000000%')
-ORDER BY ProductData.상품명;
-`;
-        const customersQuery = `
-SELECT
-    comp.comcode AS 거래처코드,
-    comp.comname AS 거래처명
-FROM
-    comp
-WHERE
-    comp.isuse <> '0';
-`;
-
-        const [custRes, prodRes] = await Promise.all([
-          currentPool.request().query(customersQuery),
-          currentPool.request().query(productsQuery)
-        ]);
+        // Temporarily disabled complex query for build diagnosis
         res.status(200).json({
-          customers: { recordset: custRes.recordset },
-          products: { recordset: prodRes.recordset }
+          customers: { recordset: [] },
+          products: { recordset: [] }
         });
         break;
       }
 
       case 'syncCustomers': {
-        const syncCustomersQuery = `
-SELECT
-    comp.comcode AS 거래처코드,
-    comp.comname AS 거래처명
-FROM
-    comp
-WHERE
-    comp.isuse <> '0';
-`;
-        const customersResult = await currentPool.request().query(syncCustomersQuery);
-        res.status(200).json({ recordset: customersResult.recordset });
+        // Temporarily disabled complex query for build diagnosis
+        res.status(200).json({ recordset: [] });
         break;
       }
 
       case 'syncProductsIncrementally': {
-        const request = currentPool.request();
-        let dateFilter = '';
-        if (lastSyncDate) {
-            request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
-            dateFilter = `WHERE parts.upday1 >= @lastSyncDate`;
-        }
-
-        const incrementalQuery = `
-SELECT
-    ProductData.거래처명,
-    ProductData.바코드,
-    ProductData.상품명,
-    ProductData.매입가가,
-    ProductData.판매가,
-    ProductData.행사가,
-    ProductData.행사종료일,
-    ProductData.upday1,
-    ProductData.isuse
-FROM (
-    SELECT
-        comp.comname AS 거래처명,
-        parts.barcode AS 바코드,
-        (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
-        parts.money0vat AS 매입가가,
-        parts.money1 AS 판매가,
-        parts.salemoney0 AS 행사가,
-        parts.saleendday AS 행사종료일,
-        parts.upday1,
-        parts.isuse
-    FROM
-        comp INNER JOIN parts ON comp.comcode = parts.comcode
-    ${dateFilter}
-) AS ProductData
-WHERE
-    (
-        ProductData.isuse <> '0' AND
-        (
-            (
-                (
-                    ProductData.거래처명 NOT LIKE N'%야채%' AND ProductData.거래처명 NOT LIKE N'%과일%' AND
-                    ProductData.거래처명 NOT LIKE N'%생선%' AND ProductData.거래처명 NOT LIKE N'%정육%' AND
-                    ProductData.거래처명 NOT LIKE N'%식품%' AND ProductData.거래처명 NOT LIKE N'%비식품%' AND
-                    ProductData.거래처명 NOT LIKE N'%기획%' AND ProductData.거래처명 NOT LIKE N'%경진청과%'
-                )
-                AND ProductData.바코드 IS NOT NULL
-                AND ProductData.상품명 NOT LIKE N'%*---*%'
-                AND ProductData.매입가가 <> 0
-            )
-            OR (ProductData.바코드 NOT LIKE '0000000%')
-        )
-    )
-    OR (ProductData.isuse = '0')
-ORDER BY ProductData.upday1;
-`;
-        const incResult = await request.query(incrementalQuery);
-        res.status(200).json({ recordset: incResult.recordset });
+        // Temporarily disabled complex query for build diagnosis
+        res.status(200).json({ recordset: [] });
         break;
       }
 
