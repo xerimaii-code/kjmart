@@ -80,13 +80,19 @@ export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, co
 }
 
 export async function syncCustomersAndProductsFromDb(): Promise<{ customers: any[], products: any[] }> {
-    return fetchApi({ type: 'syncCustomersAndProducts' });
+    const result = await fetchApi({ type: 'syncCustomersAndProducts' });
+    return {
+        customers: result.customers?.recordset || [],
+        products: result.products?.recordset || []
+    };
 }
 
 export async function syncCustomersFromDb(): Promise<any[]> {
-    return fetchApi({ type: 'syncCustomers' });
+    const result = await fetchApi({ type: 'syncCustomers' });
+    return result.recordset || [];
 }
 
 export async function syncProductsIncrementally(lastSyncDate: string | null): Promise<any[]> {
-    return fetchApi({ type: 'syncProductsIncrementally', lastSyncDate });
+    const result = await fetchApi({ type: 'syncProductsIncrementally', lastSyncDate });
+    return result.recordset || [];
 }
