@@ -40,22 +40,26 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
     const schema: Record<string, { columns: { name: string; type: string }[] }> = {};
-    const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
-    const tablesToQuery = tableResult.recordset.map((row: any) => row.TABLE_NAME);
+    try {
+      const tableResult = await pool.request().query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`);
+      const tablesToQuery = tableResult.recordset.map((row: any) => row.TABLE_NAME);
 
-    for (const tableName of tablesToQuery) {
-        try {
-            const columnResult = await pool.request().query(`
-                SELECT COLUMN_NAME, DATA_TYPE 
-                FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_NAME = N'${tableName}'
-            `);
-            schema[tableName] = {
-                columns: columnResult.recordset.map((col: any) => ({ name: col.COLUMN_NAME, type: col.DATA_TYPE }))
-            };
-        } catch (err) {
-            console.warn(`Could not get schema for table ${tableName}:`, err);
-        }
+      for (const tableName of tablesToQuery) {
+          try {
+              const columnResult = await pool.request().query(`
+                  SELECT COLUMN_NAME, DATA_TYPE 
+                  FROM INFORMATION_SCHEMA.COLUMNS 
+                  WHERE TABLE_NAME = N'${tableName}'
+              `);
+              schema[tableName] = {
+                  columns: columnResult.recordset.map((col: any) => ({ name: col.COLUMN_NAME, type: col.DATA_TYPE }))
+              };
+          } catch (err) {
+              console.warn(`Could not get schema for table ${tableName}:`, err);
+          }
+      }
+    } catch (err) {
+      console.error("Error fetching DB schema:", err);
     }
     return schema;
 }
@@ -171,27 +175,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const [custRes, prodRes] = await Promise.all([
           pool.request().query(`
             SELECT
-              comp.comcode,
-              comp.comname
+              comp.comcode AS comcode,
+              comp.comname AS comname
             FROM comp
             WHERE
-              comp.isuse <> '0'
-            ORDER BY
-              comp.comname;
+              comp.isuse <> '0';
           `),
           pool.request().query(`
-            SELECT 
-                p.barcode,
-                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END as name,
-                p.cost AS costPrice, 
-                p.price AS sellingPrice,
-                p.saleprice AS salePrice, 
-                p.saleend AS saleEndDate,
-                c.comname
-            FROM parts AS p
-            LEFT JOIN comp AS c ON p.comcode = c.comcode
-            WHERE p.isuse <> '0'
-            ORDER BY p.descr;
+            SELECT
+                c.comname AS comname,
+                p.barcode AS barcode,
+                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END AS name,
+                p.money0vat AS costPrice,
+                p.money1 AS sellingPrice,
+                p.salemoney0 AS salePrice,
+                p.saleendday AS saleEndDate
+            FROM
+                comp AS c
+            INNER JOIN
+                parts AS p ON c.comcode = p.comcode
+            WHERE
+                (
+                    (
+                        c.comname NOT LIKE '%야채%'
+                    AND c.comname NOT LIKE '%과일%'
+                    AND c.comname NOT LIKE '%생선%'
+                    AND c.comname NOT LIKE '%정육%'
+                    AND c.comname NOT LIKE '%식품%'
+                    AND c.comname NOT LIKE '%비식품%'
+                    AND c.comname NOT LIKE '%기획%'
+                    AND c.comname NOT LIKE '%경진청과%'
+                    )
+                AND p.barcode IS NOT NULL
+                AND (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END) NOT LIKE '%---%'
+                AND p.money0vat <> 0
+                AND p.isuse <> '0'
+                )
+            OR
+                (p.barcode NOT LIKE '0000000%')
+            ORDER BY
+                CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' ' + '[' + p.spec + ']' ELSE p.descr END;
           `)
         ]);
         res.status(200).json({
@@ -204,8 +227,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'syncCustomers': {
         const customersResult = await pool.request().query(`
           SELECT
-            comp.comcode,
-            comp.comname
+            comp.comcode AS comcode,
+            comp.comname AS comname
           FROM comp
           WHERE
             comp.isuse <> '0';
@@ -219,6 +242,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (lastSyncDate) {
             request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
         }
+        // Use a simplified query for incremental sync that just fetches changes based on upday1
+        // It is crucial to include 'isuse' for soft delete handling in the frontend
         const incrementalQuery = `
           SELECT 
               p.barcode,
