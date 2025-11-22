@@ -58,11 +58,11 @@ export async function getDatabaseSchema(): Promise<DbSchema> {
 }
 
 export async function querySql(query: string, signal: AbortSignal): Promise<{ recordset: any[], rowsAffected: number }> {
-    return fetchApi({ type: 'query', query }, signal);
+    return await fetchApi({ type: 'query', query }, signal);
 }
 
 export async function naturalLanguageToSql(naturalLanguagePrompt: string, schema: DbSchema, context: string): Promise<{ sql: string }> {
-    return fetchApi({ 
+    return await fetchApi({ 
         type: 'naturalLanguageToSql', 
         naturalLanguagePrompt,
         schema,
@@ -71,7 +71,7 @@ export async function naturalLanguageToSql(naturalLanguagePrompt: string, schema
 }
 
 export async function aiChat(naturalLanguagePrompt: string, schema: DbSchema, context: string): Promise<{ answer: string }> {
-    return fetchApi({
+    return await fetchApi({
         type: 'aiChat',
         naturalLanguagePrompt,
         schema,
@@ -89,10 +89,14 @@ export async function syncCustomersAndProductsFromDb(): Promise<{ customers: any
 
 export async function syncCustomersFromDb(): Promise<any[]> {
     const result = await fetchApi({ type: 'syncCustomers' });
-    return result.recordset || [];
+    // FIX: Safely access recordset from the result object.
+    // This prevents a "map is not a function" error if the result is not an array.
+    return result?.recordset || [];
 }
 
 export async function syncProductsIncrementally(lastSyncDate: string | null): Promise<any[]> {
     const result = await fetchApi({ type: 'syncProductsIncrementally', lastSyncDate });
-    return result.recordset || [];
+    // FIX: Safely access recordset from the result object.
+    // This prevents a "forEach is not a function" error if the result is not an array.
+    return result?.recordset || [];
 }

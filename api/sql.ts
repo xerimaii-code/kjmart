@@ -51,16 +51,10 @@ async function getPool(): Promise<sql.ConnectionPool> {
         return pool;
     }
     try {
-        console.log('Creating new SQL Connection Pool with config:', {
-            server: config.server,
-            port: config.port,
-            user: config.user,
-            database: config.database,
-            encrypt: config.options?.encrypt
-        });
+        console.log('Creating new SQL Connection Pool...');
         pool = new sql.ConnectionPool(config);
         await pool.connect();
-        console.log("New SQL Connection Pool created and connected.");
+        console.log("SQL Connection Pool created and connected.");
         return pool;
     } catch (err) {
         console.error('SQL Connection Error on getPool:', err);
@@ -68,7 +62,6 @@ async function getPool(): Promise<sql.ConnectionPool> {
         throw err;
     }
 }
-
 
 // Helper to get structured DB Schema for caching
 async function getFullDbSchema(pool: sql.ConnectionPool): Promise<Record<string, { columns: { name: string; type: string }[] }>> {
@@ -107,29 +100,22 @@ function formatSchemaForAI(schema: Record<string, any>): string {
     return schemaString;
 }
 
-// Helper to fetch context
-async function getLearningContext(clientContext: string | undefined) {
-    let learningContext = clientContext;
-    // Fallback to fetch from Firebase if context is not provided by the client
-    if (!learningContext) {
-        try {
-          const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
-          if (snapshot.exists()) {
+// Helper to fetch context from Firebase
+async function getLearningContextFromFirebase() {
+    try {
+        const snapshot = await get(ref(firebaseDb, 'learning/sqlContext'));
+        if (snapshot.exists()) {
             const data = snapshot.val();
-            if (typeof data === 'string') {
-                learningContext = data;
-            } else if (typeof data === 'object' && data !== null) {
-                // Handle new list-based learning context
-                learningContext = Object.values(data).map((item: any) => `Title: ${item.title}\nContent: ${item.content}`).join('\n\n');
+            if (Array.isArray(data)) {
+                return data.map((item: any) => `Title: ${item.title}\nContent: ${item.content}`).join('\n\n');
             }
-          }
-        } catch (fbError) {
-          console.warn('Could not fetch learning context from Firebase:', fbError);
+            return String(data);
         }
+    } catch (fbError) {
+        console.warn('Could not fetch learning context from Firebase:', fbError);
     }
-    return learningContext || 'No additional context provided.';
+    return 'No additional context provided.';
 }
-
 
 // Main API handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -153,6 +139,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({ success: true, message: 'Connection successful' });
         break;
 
+      case 'getDatabaseSchema':
+        const schema = await getFullDbSchema(currentPool);
+        res.status(200).json(schema);
+        break;
+
       case 'getTables':
         const tablesResult = await currentPool.request().query(`
             SELECT TABLE_NAME 
@@ -161,3 +152,117 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ORDER BY TABLE_NAME
         `);
         res.status(200).json(tablesResult.recordset.map((row: any) => row.TABLE_NAME));
+        break;
+      
+      case 'query':
+        if (!query) return res.status(400).json({ error: 'Query is required' });
+        const result = await currentPool.request().query(query);
+        res.status(200).json({ recordset: result.recordset, rowsAffected: result.rowsAffected[0] });
+        break;
+      
+      case 'naturalLanguageToSql':
+        if (!naturalLanguagePrompt || !clientSchema) {
+          return res.status(400).json({ error: 'Prompt and schema are required' });
+        }
+        const schemaString = formatSchemaForAI(clientSchema);
+        const learningContext = clientContext || await getLearningContextFromFirebase();
+
+        const model = 'gemini-3-pro-preview';
+        const fullPrompt = `Based on the database schema below, and the provided context, convert the following natural language query into a single, executable MS SQL query. Only return the SQL query. Do not add any explanation or markdown formatting.\n\n${schemaString}\n\nContext:\n${learningContext}\n\nNatural Language Query: "${naturalLanguagePrompt}"\n\nSQL Query:`;
+        
+        const response = await ai.models.generateContent({ model, contents: fullPrompt });
+        const sqlQuery = response.text?.trim().replace(/```sql|```/g, '').trim() || '';
+        res.status(200).json({ sql: sqlQuery });
+        break;
+
+      case 'aiChat':
+         if (!naturalLanguagePrompt || !clientSchema) {
+          return res.status(400).json({ error: 'Prompt and schema are required' });
+        }
+        const chatSchemaString = formatSchemaForAI(clientSchema);
+        const chatLearningContext = clientContext || await getLearningContextFromFirebase();
+        const chatModel = 'gemini-3-pro-preview';
+        const chatPrompt = `You are a helpful assistant for a database. Based on the provided schema and context, answer the user's question. If you need to query the database to answer, formulate the SQL query. Otherwise, answer directly. \n\n${chatSchemaString}\n\nContext:\n${chatLearningContext}\n\nQuestion: "${naturalLanguagePrompt}"\n\nAnswer:`;
+        
+        const chatResponse = await ai.models.generateContent({ model: chatModel, contents: chatPrompt });
+        res.status(200).json({ answer: chatResponse.text });
+        break;
+
+      case 'syncCustomersAndProducts':
+        const [custRes, prodRes] = await Promise.all([
+          currentPool.request().query(`
+            SELECT
+              comp.comcode,
+              comp.comname
+            FROM comp
+            WHERE
+              comp.isuse <> '0'
+            ORDER BY
+              comp.comname;
+          `),
+          currentPool.request().query(`
+            SELECT 
+                p.barcode,
+                IIF(p.spec IS NOT NULL AND p.spec <> '', CONCAT(p.descr, ' [', p.spec, ']'), p.descr) as name,
+                p.cost AS costPrice, 
+                p.price AS sellingPrice,
+                p.saleprice AS salePrice, 
+                p.saleend AS saleEndDate,
+                c.comname
+            FROM parts AS p
+            LEFT JOIN comp AS c ON p.comcode = c.comcode
+            WHERE p.isuse <> '0'
+            ORDER BY p.descr;
+          `)
+        ]);
+        res.status(200).json({
+          customers: { recordset: custRes.recordset },
+          products: { recordset: prodRes.recordset }
+        });
+        break;
+
+      case 'syncCustomers':
+        const customersResult = await currentPool.request().query(`
+          SELECT
+            comp.comcode,
+            comp.comname
+          FROM comp
+          WHERE
+            comp.isuse <> '0';
+        `);
+        res.status(200).json({ recordset: customersResult.recordset });
+        break;
+
+      case 'syncProductsIncrementally':
+        const request = currentPool.request();
+        if (lastSyncDate) {
+            request.input('lastSyncDate', sql.Date, new Date(lastSyncDate));
+        }
+        const incrementalQuery = `
+          SELECT 
+              p.barcode,
+              IIF(p.spec IS NOT NULL AND p.spec <> '', CONCAT(p.descr, ' [', p.spec, ']'), p.descr) as name,
+              p.cost AS costPrice, 
+              p.price AS sellingPrice,
+              p.saleprice AS salePrice, 
+              p.saleend AS saleEndDate,
+              c.comname,
+              p.isuse
+          FROM parts AS p
+          LEFT JOIN comp AS c ON p.comcode = c.comcode
+          ${lastSyncDate ? 'WHERE p.upday1 >= @lastSyncDate' : ''}
+          ORDER BY p.upday1;
+        `;
+        const incResult = await request.query(incrementalQuery);
+        res.status(200).json({ recordset: incResult.recordset });
+        break;
+
+      default:
+        res.status(400).json({ error: 'Invalid request type' });
+        break;
+    }
+  } catch (err: any) {
+    console.error(`Error processing request type "${type}":`, err);
+    res.status(500).json({ error: 'An internal server error occurred', details: err.message });
+  }
+}
