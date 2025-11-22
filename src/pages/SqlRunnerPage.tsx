@@ -439,7 +439,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
 
     const hasRecordset = result?.recordset && result.recordset.length > 0;
-    const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result.rowsAffected}`}`;
+    const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result?.rowsAffected ?? 0}`}`;
 
     return (
         <div className="h-full flex flex-col bg-gray-50">
