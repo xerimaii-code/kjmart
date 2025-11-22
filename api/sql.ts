@@ -38,7 +38,7 @@ async function getPool(): Promise<sql.ConnectionPool> {
     }
 }
 
-const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
 
 // --- SQL Queries ---
 const customerQuery = `
@@ -57,7 +57,7 @@ SELECT * FROM (
     SELECT
         comp.comname AS 거래처명,
         parts.barcode AS 바코드,
-        (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
+        (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN parts.descr + ' [' + parts.spec + ']' ELSE parts.descr END) AS 상품명,
         parts.money0vat AS 매입가가,
         parts.money1 AS 판매가,
         parts.salemoney0 AS 행사가,
@@ -93,7 +93,7 @@ const incrementalProductSyncQuery = `
 SELECT
     comp.comname AS 거래처명,
     parts.barcode AS 바코드,
-    (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN CONCAT(parts.descr, ' [', parts.spec, ']') ELSE parts.descr END) AS 상품명,
+    (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN parts.descr + ' [' + parts.spec + ']' ELSE parts.descr END) AS 상품명,
     parts.money0vat AS 매입가가,
     parts.money1 AS 판매가,
     parts.salemoney0 AS 행사가,
