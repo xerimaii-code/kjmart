@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { useAlert, useMiscUI, useScanner } from '../context/AppContext';
 import { SpinnerIcon, CheckCircleIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, TableCellsIcon, BookmarkSquareIcon, StopCircleIcon, RemoveIcon, SparklesIcon, StarIcon, BarcodeScannerIcon } from '../components/Icons';
-import { querySql, naturalLanguageToSql, aiChat, sqlToNaturalLanguage, generateQueryName } from '../services/sqlService';
+import { querySql, naturalLanguageToSql, aiChat, sqlToNaturalLanguage, generateQueryName, UpdatePreview } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
@@ -118,6 +118,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [queryViewStates, setQueryViewStates] = useState<Record<string, 'natural' | 'sql'>>({});
 
     const [isAiMode, setIsAiMode] = useState(false);
+    const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null);
     
     const abortControllerRef = useRef<AbortController | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -156,26 +157,40 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [isAiModalOpen]);
 
-    const executeQuery = useCallback(async (sql: string, naturalLang?: string) => {
+    const executeQuery = useCallback(async (sql: string, naturalLang?: string, confirmed?: boolean) => {
         setStatus('loading');
         setResult(null);
         setError(null);
         abortControllerRef.current = new AbortController();
-
+    
+        // Client-side check for immediate feedback
+        if (/^\s*(delete|insert)\s/i.test(sql.trim()) && !confirmed) {
+            showAlert('데이터 보안을 위해 INSERT 및 DELETE 쿼리는 실행할 수 없습니다.');
+            setStatus('idle');
+            return;
+        }
+    
         try {
-            const data = await querySql(sql, abortControllerRef.current.signal);
-            setResult(data);
-            setStatus('success');
-            const queryToSave = naturalLang || sql;
-            setLastSuccessfulQuery(queryToSave);
-            setVisibleResultCount(INITIAL_VISIBLE_ROWS);
+            const data = await querySql(sql, abortControllerRef.current.signal, confirmed);
+    
+            if (data.preview) {
+                setUpdatePreview(data.preview);
+                setLastSuccessfulQuery(sql); // Save query for confirmation
+                setStatus('idle'); // Stop loading spinner, wait for user confirmation
+            } else {
+                setResult(data);
+                setStatus('success');
+                const queryToSave = naturalLang || sql;
+                setLastSuccessfulQuery(queryToSave);
+                setVisibleResultCount(INITIAL_VISIBLE_ROWS);
+            }
         } catch (err: any) {
             if (err.name !== 'AbortError') {
                 setError(err.message || '알 수 없는 오류가 발생했습니다.');
                 setStatus('error');
             }
         }
-    }, []);
+    }, [showAlert]);
 
     const processNaturalLanguageQuery = useCallback(async (prompt: string) => {
         setStatus('loading');
@@ -512,16 +527,119 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             [queryId]: (prev[queryId] === 'sql') ? 'natural' : 'sql'
         }));
     };
+    
+    const handleConfirmUpdate = useCallback(() => {
+        if (!lastSuccessfulQuery) return;
+        setUpdatePreview(null);
+        executeQuery(lastSuccessfulQuery, undefined, true);
+    }, [lastSuccessfulQuery, executeQuery]);
+
+    const handleCancelUpdate = useCallback(() => {
+        setUpdatePreview(null);
+    }, []);
 
     const hasRecordset = result?.recordset && result.recordset.length > 0;
     const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result?.rowsAffected ?? 0}`}`;
 
     const isOriginalQuerySql = lastSuccessfulQuery && /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(lastSuccessfulQuery);
 
+    const renderUpdatePreviewModal = () => {
+        if (!updatePreview) return null;
+    
+        const { before, after, primaryKeys } = updatePreview;
+    
+        const beforeMap = new Map();
+        if(before.length > 0 && primaryKeys.length > 0) {
+            before.forEach(row => {
+                const key = primaryKeys.map(pk => row[pk]).join('|');
+                beforeMap.set(key, row);
+            });
+        }
+    
+        const changes = after.map((afterRow, index) => {
+            let beforeRow = before[index]; // Fallback for no primary keys
+            if (primaryKeys.length > 0) {
+                 const key = primaryKeys.map(pk => afterRow[pk]).join('|');
+                 beforeRow = beforeMap.get(key) || before[index];
+            }
+            return { beforeRow, afterRow };
+        });
+    
+        if (changes.length === 0) {
+          return (
+            <FullScreenModal
+              isOpen={!!updatePreview}
+              onClose={handleCancelUpdate}
+              title="수정 미리보기 (0건)"
+              footer={<button onClick={handleCancelUpdate} className="w-full h-12 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">닫기</button>}
+            >
+              <div className="p-8 text-center">
+                <p className="font-semibold text-lg">UPDATE 쿼리와 일치하는 데이터가 없습니다.</p>
+                <p className="text-sm text-gray-500 mt-2">데이터가 수정되지 않습니다.</p>
+              </div>
+            </FullScreenModal>
+          );
+        }
+        
+        const allKeys = Object.keys(changes[0].afterRow);
+    
+        return (
+            <FullScreenModal
+                isOpen={!!updatePreview}
+                onClose={handleCancelUpdate}
+                title={`수정 미리보기 (${changes.length}건)`}
+                footer={
+                     <div className="grid grid-cols-2 gap-3">
+                        <button onClick={handleCancelUpdate} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">취소</button>
+                        <button onClick={handleConfirmUpdate} className="h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95">확인 및 실행</button>
+                    </div>
+                }
+            >
+                <div className="p-2 text-sm">
+                    <p className="px-2 pb-2 text-xs text-gray-600">아래와 같이 데이터가 수정됩니다. 변경사항을 확인 후 실행하세요.</p>
+                    <div className="overflow-auto">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="bg-gray-100 sticky top-0">
+                                    <th className="p-2 font-bold text-left border-r w-1/4">필드</th>
+                                    <th className="p-2 font-bold text-left">수정 전 (Before)</th>
+                                    <th className="p-2 font-bold text-left">수정 후 (After)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {changes.map((change, index) => (
+                                    <React.Fragment key={index}>
+                                        <tr className="bg-blue-50">
+                                            <td colSpan={3} className="p-1 font-bold text-blue-800 border-t-4 border-gray-50">
+                                                #{index + 1} {primaryKeys.map(pk => `${pk}: ${change.afterRow[pk]}`).join(', ')}
+                                            </td>
+                                        </tr>
+                                        {allKeys.map(key => {
+                                            const beforeValue = String(change.beforeRow?.[key] ?? 'N/A');
+                                            const afterValue = String(change.afterRow?.[key] ?? 'N/A');
+                                            const isChanged = beforeValue !== afterValue;
+                                            return (
+                                                <tr key={key} className={`border-b ${isChanged ? 'bg-yellow-50' : ''}`}>
+                                                    <td className="p-2 font-semibold border-r">{key}</td>
+                                                    <td className={`p-2 font-mono ${isChanged ? 'text-red-600 line-through' : 'text-gray-500'}`}>{beforeValue}</td>
+                                                    <td className={`p-2 font-mono ${isChanged ? 'text-green-700 font-bold' : ''}`}>{afterValue}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </React.Fragment>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </FullScreenModal>
+        );
+    };
+
     return (
         <div className="h-full flex flex-col bg-gray-50">
             <div className="p-2 bg-white border-b border-gray-200 z-10 flex flex-col gap-2 flex-shrink-0">
-                 <div className="flex items-center gap-2 flex-wrap">
+                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                     <button 
                         onMouseDown={handleTableButtonStart}
                         onMouseUp={handleTableButtonEnd}
@@ -529,19 +647,20 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         onTouchStart={handleTableButtonStart}
                         onTouchEnd={handleTableButtonEnd}
                         onClick={handleTableButtonClick}
-                        className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 border rounded-lg font-semibold text-sm active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                        className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg font-semibold text-xs active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                     >
-                        <TableCellsIcon className="w-5 h-5"/> 
+                        <TableCellsIcon className="w-4 h-4"/> 
                         <span className="truncate">{useSelectedTablesOnly ? `선택 (${selectedTables.length})` : '전체 테이블'}</span>
                     </button>
-                    <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm active:scale-95 transition"><BookmarkSquareIcon className="w-5 h-5"/> <span>저장된 쿼리</span></button>
-                    <button onClick={() => setAiModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-sm active:scale-95 transition"><SparklesIcon className="w-5 h-5 text-purple-500"/> <span>AI 학습</span></button>
+                    <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><BookmarkSquareIcon className="w-4 h-4"/> <span>저장된 쿼리</span></button>
+                    <button onClick={() => setAiModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><SparklesIcon className="w-4 h-4 text-purple-500"/> <span>AI 학습</span></button>
+                    {savedQueries.some(q => q.isQuickRun) && (
+                        <>
+                            <div className="border-l border-gray-300 h-5 mx-1"></div>
+                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => handleQuickRun(q)} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap">{q.name}</button>))}
+                        </>
+                    )}
                 </div>
-                {savedQueries.some(q => q.isQuickRun) && (
-                    <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-gray-200/80">
-                         {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => handleQuickRun(q)} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition">{q.name}</button>))}
-                    </div>
-                )}
                 <textarea 
                     ref={textareaRef} value={sqlQueryInput} onChange={(e) => setSqlQueryInput(e.target.value)}
                     placeholder={isAiMode ? "AI에게 자유롭게 질문하세요..." : "자연어나 SQL 쿼리를 입력하세요..."}
@@ -588,7 +707,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             </div>
                         )}
                     </div>
-                    <div className="flex-grow overflow-auto select-text" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
+                    <div className="flex-grow overflow-auto select-text" data-no-swipe="true" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
                         {status === 'loading' && <div className="flex justify-center items-center h-full"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>}
                         {status === 'error' && <div className="p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 font-medium">{error}</div>}
                         {status === 'success' && result && (
@@ -725,6 +844,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     </div>
                  )}
             </FullScreenModal>
+            
+            {renderUpdatePreviewModal()}
 
         </div>
     );

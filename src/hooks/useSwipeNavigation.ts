@@ -56,7 +56,7 @@ export const useSwipeNavigation = <T,>({ items, activeIndex, onNavigate, contain
     const onTouchStart = useCallback((e: React.TouchEvent) => {
         const target = e.target as HTMLElement;
         // Ignore swipes on interactive elements to prevent conflicts
-        if (target.closest('button, input, a, select, textarea, [role="dialog"]')) {
+        if (target.closest('button, input, a, select, textarea, [role="dialog"], [data-no-swipe="true"]')) {
             return;
         }
 

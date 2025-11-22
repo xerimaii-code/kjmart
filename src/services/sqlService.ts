@@ -57,8 +57,20 @@ export async function getDatabaseSchema(): Promise<DbSchema> {
     return response as DbSchema;
 }
 
-export async function querySql(query: string, signal: AbortSignal): Promise<{ recordset: any[], rowsAffected: number }> {
-    return await fetchApi({ type: 'query', query }, signal);
+export interface UpdatePreview {
+    before: any[];
+    after: any[];
+    primaryKeys: string[];
+}
+  
+export interface QuerySqlResponse {
+    recordset?: any[];
+    rowsAffected?: number;
+    preview?: UpdatePreview;
+}
+
+export async function querySql(query: string, signal: AbortSignal, confirmed?: boolean): Promise<QuerySqlResponse> {
+    return await fetchApi({ type: 'query', query, confirmed }, signal);
 }
 
 export async function naturalLanguageToSql(naturalLanguagePrompt: string, schema: DbSchema, context: string): Promise<{ sql: string }> {

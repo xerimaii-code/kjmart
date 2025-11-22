@@ -121,19 +121,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'query': {
-        const { query } = req.body;
-        const request = pool.request();
-        // FIX: Cast `req` to `any` to access the `signal` property for request cancellation.
-        // The `VercelRequest` type might not include this property even if it exists at runtime.
-        const signal = (req as any).signal;
-        if (signal) {
-            signal.addEventListener('abort', () => request.cancel());
+        const { query, confirmed } = req.body;
+        const lowerCaseQuery = query.toLowerCase().trim();
+
+        if (/^\s*(delete|insert)\s/i.test(lowerCaseQuery)) {
+          return res.status(403).json({ error: '데이터 보안을 위해 INSERT 및 DELETE 쿼리는 실행할 수 없습니다.' });
         }
-        const result = await request.query(query);
-        res.status(200).json({ recordset: result.recordset, rowsAffected: result.rowsAffected[0] });
+        
+        if (/^\s*update\s/i.test(lowerCaseQuery) && !confirmed) {
+            // UPDATE preview logic
+            const transaction = new sql.Transaction(pool);
+            try {
+                await transaction.begin();
+
+                const tableMatch = lowerCaseQuery.match(/update\s+([a-zA-Z0-9_\[\]\.]+)/);
+                const whereMatch = lowerCaseQuery.match(/\s(where\s.+)/);
+
+                if (!tableMatch || !tableMatch[1]) {
+                    throw new Error('UPDATE 문에서 테이블 이름을 찾을 수 없습니다.');
+                }
+                if (!whereMatch || !whereMatch[1]) {
+                    throw new Error('안전 모드를 위해 WHERE 절이 없는 UPDATE는 미리보기를 지원하지 않습니다.');
+                }
+
+                const tableName = tableMatch[1];
+                const whereClause = whereMatch[1];
+                const selectQuery = `SELECT * FROM ${tableName} ${whereClause}`;
+
+                const beforeResult = await transaction.request().query(selectQuery);
+                await transaction.request().query(query); // Execute the actual update
+                const afterResult = await transaction.request().query(selectQuery);
+                
+                await transaction.rollback(); // IMPORTANT: Rollback the changes
+
+                // Get primary keys for the table to help UI diffing
+                const primaryKeyResult = await pool.request().query(`
+                    SELECT KU.column_name
+                    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
+                    INNER JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KU
+                        ON TC.CONSTRAINT_TYPE = 'PRIMARY KEY' 
+                        AND TC.CONSTRAINT_NAME = KU.CONSTRAINT_NAME
+                    WHERE KU.table_name = '${tableName.replace(/[\[\]]/g, '')}'
+                `);
+                const primaryKeys = primaryKeyResult.recordset.map(r => r.column_name);
+
+                res.status(200).json({ 
+                    preview: {
+                        before: beforeResult.recordset,
+                        after: afterResult.recordset,
+                        primaryKeys,
+                    }
+                });
+
+            } catch (err: any) {
+                if (transaction.active) {
+                    await transaction.rollback();
+                }
+                throw err; // Let the main error handler catch it
+            }
+        } else {
+            // Regular SELECT or confirmed UPDATE
+            const request = pool.request();
+            const signal = (req as any).signal;
+            if (signal) {
+                signal.addEventListener('abort', () => request.cancel());
+            }
+            const result = await request.query(query);
+            res.status(200).json({ recordset: result.recordset, rowsAffected: result.rowsAffected[0] });
+        }
         break;
       }
-
+      
       case 'getDatabaseSchema': {
         const schemaQuery = `
             SELECT 
