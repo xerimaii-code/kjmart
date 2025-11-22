@@ -21,6 +21,7 @@ interface SavedQuery {
     query: string;
     type: 'sql' | 'natural';
     isQuickRun?: boolean;
+    generatedSql?: string;
 }
 
 interface LearningItem {
@@ -28,6 +29,9 @@ interface LearningItem {
     title: string;
     content: string;
 }
+
+const INITIAL_VISIBLE_ROWS = 50;
+const ROWS_PER_LOAD = 100;
 
 // --- REUSABLE MODAL WRAPPER ---
 const ModalWrapper: React.FC<{
@@ -100,10 +104,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [isSavedQueriesModalOpen, setSavedQueriesModalOpen] = useState(false);
     const [isAiModalOpen, setAiModalOpen] = useState(false);
     const [learningItems, setLearningItems] = useState<LearningItem[]>([]);
+    const [visibleResultCount, setVisibleResultCount] = useState(INITIAL_VISIBLE_ROWS);
     
-    // States for editing modals
+    // States for editing modals and UI
     const [editingQuery, setEditingQuery] = useState<SavedQuery | null>(null);
     const [editingLearningItem, setEditingLearningItem] = useState<LearningItem | null>(null);
+    const [showGeneratedSqlMap, setShowGeneratedSqlMap] = useState<Record<string, boolean>>({});
+
 
     // AI Mode State
     const [isAiMode, setIsAiMode] = useState(false);
@@ -160,6 +167,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             setResult(data);
             setStatus('success');
             setLastSuccessfulQuery(naturalLang || sql);
+            setVisibleResultCount(INITIAL_VISIBLE_ROWS);
         } catch (err: any) {
             if (err.name !== 'AbortError') {
                 setError(err.message || '알 수 없는 오류가 발생했습니다.');
@@ -299,8 +307,17 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const handleSaveQuery = () => {
         const name = prompt('저장할 쿼리의 이름을 입력하세요:', '');
         if (name && lastSuccessfulQuery) {
-            const isNatural = !/^(SELECT|UPDATE|DELETE|INSERT)\b/i.test(lastSuccessfulQuery);
-            addSavedQuery({ name, query: lastSuccessfulQuery, type: isNatural ? 'natural' : 'sql', isQuickRun: false })
+            const isNatural = !/^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(lastSuccessfulQuery);
+            const queryData: Omit<SavedQuery, 'id'> = {
+                name,
+                query: lastSuccessfulQuery,
+                type: isNatural ? 'natural' : 'sql',
+                isQuickRun: false,
+            };
+            if (isNatural && generatedSql) {
+                (queryData as any).generatedSql = generatedSql;
+            }
+            addSavedQuery(queryData)
                 .then(() => showToast('쿼리가 저장되었습니다.', 'success'));
         }
     };
@@ -421,6 +438,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
 
+    const hasRecordset = result?.recordset && result.recordset.length > 0;
+    const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result.rowsAffected}`}`;
+
     return (
         <div className="h-full flex flex-col bg-gray-50">
             <div className="p-2 bg-white border-b border-gray-200 z-10 flex flex-col gap-2 flex-shrink-0">
@@ -484,8 +504,38 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <div>
                                 {result.answer ? (<div className="prose prose-sm max-w-none bg-purple-50 p-4 rounded-lg border border-purple-100"><p className="whitespace-pre-wrap text-gray-800 leading-relaxed">{result.answer}</p></div>) : (
                                     <>
-                                        <p className="text-sm text-green-600 font-semibold mb-2 flex items-center gap-2"><CheckCircleIcon className="w-5 h-5"/>쿼리 성공! (영향 받은 행: {result.rowsAffected})</p>
-                                        {result.recordset && result.recordset.length > 0 ? (<div className="border border-gray-200 rounded-lg overflow-auto"><table className="w-full text-sm text-left"><thead className="bg-gray-100 sticky top-0 z-10"><tr className="border-b">{Object.keys(result.recordset[0]).map(k => <th key={k} className="p-2 font-bold whitespace-nowrap">{k}</th>)}</tr></thead><tbody>{result.recordset.map((r, i) => (<tr key={i} className="border-b last:border-b-0 hover:bg-gray-50">{Object.values(r).map((v: any, j) => <td key={j} className="p-2 whitespace-nowrap">{v === null ? 'NULL' : String(v)}</td>)}</tr>))}</tbody></table></div>) : <p className="text-gray-500">결과 데이터가 없습니다.</p>}
+                                        <p className="text-sm text-green-600 font-semibold mb-2 flex items-center gap-2"><CheckCircleIcon className="w-5 h-5"/>{successText}</p>
+                                        {hasRecordset ? (
+                                            <>
+                                                <div className="border border-gray-200 rounded-lg overflow-auto">
+                                                    <table className="w-full text-sm text-left">
+                                                        <thead className="bg-gray-100 sticky top-0 z-10">
+                                                            <tr className="border-b">{Object.keys(result.recordset[0]).map(k => <th key={k} className="p-2 font-bold whitespace-nowrap">{k}</th>)}</tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {result.recordset.slice(0, visibleResultCount).map((r, i) => (
+                                                                <tr key={i} className="border-b last:border-b-0 hover:bg-gray-50">
+                                                                    {Object.values(r).map((v: any, j) => <td key={j} className="p-2 whitespace-nowrap">{v === null ? 'NULL' : String(v)}</td>)}
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                {result.recordset.length > visibleResultCount && (
+                                                    <div className="text-center mt-4">
+                                                        <p className="text-sm text-gray-500 mb-2">
+                                                            총 {result.recordset.length.toLocaleString()}개 결과 중 {Math.min(visibleResultCount, result.recordset.length).toLocaleString()}개 표시
+                                                        </p>
+                                                        <button
+                                                            onClick={() => setVisibleResultCount(prev => prev + ROWS_PER_LOAD)}
+                                                            className="px-6 py-2 bg-gray-100 text-gray-800 font-bold rounded-lg hover:bg-gray-200 transition active:scale-95 shadow-sm"
+                                                        >
+                                                            더 보기
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : <p className="text-gray-500">결과 데이터가 없습니다.</p>}
                                     </>
                                 )}
                             </div>
@@ -510,7 +560,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </ModalWrapper>
 
             <ModalWrapper isActive={isSavedQueriesModalOpen} onClose={() => setSavedQueriesModalOpen(false)} title="저장된 쿼리">
-                {savedQueries.length === 0 ? (<p className="text-center text-gray-500 py-8">저장된 쿼리가 없습니다.</p>) : (<div className="space-y-2 max-h-[60vh] overflow-y-auto">{savedQueries.map(q => (<div key={q.id} className="border border-gray-200 rounded-lg overflow-hidden transition-colors hover:border-blue-300 bg-white"><div className="flex justify-between items-center p-3"><div className="flex items-center gap-3 flex-grow min-w-0"><button onClick={(e) => handleToggleQuickRun(e, q)} className={`p-1 rounded-md transition-colors flex-shrink-0 ${q.isQuickRun ? 'text-yellow-500 bg-yellow-50' : 'text-gray-300 hover:text-yellow-400'}`} title={q.isQuickRun ? "빠른 실행 해제" : "빠른 실행 등록"}><StarIcon className={`w-5 h-5 ${q.isQuickRun ? 'fill-current' : ''}`} /></button><h4 className="font-bold text-gray-800 truncate cursor-pointer hover:underline" onClick={() => setEditingQuery(q)}>{q.name}</h4></div><div className="flex items-center gap-2 flex-shrink-0"><button onClick={() => setEditingQuery(q)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="수정"><PencilSquareIcon className="w-5 h-5"/></button><button onClick={(e) => handleDeleteSavedQuery(e, q.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="삭제"><TrashIcon className="w-5 h-5"/></button></div></div></div>))}</div>)}
+                {savedQueries.length === 0 ? (<p className="text-center text-gray-500 py-8">저장된 쿼리가 없습니다.</p>) : (<div className="space-y-2 max-h-[60vh] overflow-y-auto">{savedQueries.map(q => (<div key={q.id} className="border border-gray-200 rounded-lg overflow-hidden transition-colors hover:border-blue-300 bg-white"><div className="flex justify-between items-center p-3"><div className="flex items-center gap-3 flex-grow min-w-0"><button onClick={(e) => handleToggleQuickRun(e, q)} className={`p-1 rounded-md transition-colors flex-shrink-0 ${q.isQuickRun ? 'text-yellow-500 bg-yellow-50' : 'text-gray-300 hover:text-yellow-400'}`} title={q.isQuickRun ? "빠른 실행 해제" : "빠른 실행 등록"}><StarIcon className={`w-5 h-5 ${q.isQuickRun ? 'fill-current' : ''}`} /></button><h4 className="font-bold text-gray-800 truncate cursor-pointer hover:underline" onClick={() => setEditingQuery(q)}>{q.name}</h4></div><div className="flex items-center gap-2 flex-shrink-0"><button onClick={() => setEditingQuery(q)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="수정"><PencilSquareIcon className="w-5 h-5"/></button><button onClick={(e) => handleDeleteSavedQuery(e, q.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="삭제"><TrashIcon className="w-5 h-5"/></button></div></div><div className="px-3 pb-3 border-t border-gray-100"><code className="block bg-gray-50 p-2 rounded text-xs whitespace-pre-wrap font-mono select-text" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>{q.type === 'natural' && showGeneratedSqlMap[q.id] ? (q.generatedSql || 'SQL이 생성되지 않았습니다.') : q.query}</code>{q.type === 'natural' && q.generatedSql && (<div className="text-right mt-2"><button onClick={(e) => { e.stopPropagation(); setShowGeneratedSqlMap(p => ({...p, [q.id]: !p[q.id]}))}} className="text-xs font-bold text-blue-600 hover:underline px-2 py-1 rounded-md hover:bg-blue-50 transition">{showGeneratedSqlMap[q.id] ? '자연어 보기' : 'SQL 보기'}</button></div>)}</div></div>))}</div>)}
             </ModalWrapper>
             
             <ModalWrapper isActive={isAiModalOpen} onClose={() => setAiModalOpen(false)} title="AI 학습 데이터 관리">

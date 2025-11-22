@@ -16,7 +16,7 @@ const Toast: React.FC<ToastProps> = ({ isOpen, message, type, onClose }) => {
         if (isOpen) {
             const timer = setTimeout(() => {
                 onClose();
-            }, 5000); // 5초 후 자동으로 닫힘
+            }, 2000); // 2초 후 자동으로 닫힘
             return () => clearTimeout(timer);
         }
     }, [isOpen, onClose]);
