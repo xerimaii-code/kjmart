@@ -101,6 +101,56 @@ const FullScreenModal: React.FC<{
     );
 };
 
+const CompactModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    title: string;
+    children: React.ReactNode;
+    footer?: React.ReactNode;
+    containerRef?: React.Ref<HTMLDivElement>;
+}> = ({ isOpen, onClose, title, children, footer, containerRef }) => {
+    const [isRendered, setIsRendered] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            const timer = setTimeout(() => setIsRendered(true), 10);
+            return () => clearTimeout(timer);
+        } else {
+            setIsRendered(false);
+        }
+    }, [isOpen]);
+
+    if (!isOpen) return null;
+
+    return createPortal(
+        <div 
+            className={`fixed inset-0 bg-black z-[90] flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}
+            onClick={onClose}
+            role="dialog"
+            aria-modal="true"
+        >
+            <div 
+                ref={containerRef}
+                className={`bg-white rounded-xl shadow-lg w-full max-w-sm transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                onClick={e => e.stopPropagation()}
+            >
+                <header className="relative p-5 border-b border-gray-200">
+                    <h2 className="text-xl font-bold text-gray-800 text-center">{title}</h2>
+                </header>
+                <main className="p-5 max-h-[60vh] overflow-y-auto">
+                    {children}
+                </main>
+                {footer && (
+                     <footer className="px-4 py-3 bg-gray-50 rounded-b-xl">
+                        {footer}
+                    </footer>
+                )}
+            </div>
+        </div>,
+        document.body
+    );
+};
+
 
 // --- MAIN PAGE COMPONENT ---
 const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
@@ -158,10 +208,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const saveModalRef = useRef<HTMLDivElement>(null);
     const editQueryModalRef = useRef<HTMLDivElement>(null);
     const editLearningModalRef = useRef<HTMLDivElement>(null);
+    const variableModalRef = useRef<HTMLDivElement>(null);
     
     useAdjustForKeyboard(saveModalRef, !!saveModalState);
     useAdjustForKeyboard(editQueryModalRef, !!editingQuery);
     useAdjustForKeyboard(editLearningModalRef, !!editingLearningItem);
+    useAdjustForKeyboard(variableModalRef, !!variableInputState);
 
 
     useEffect(() => {
@@ -259,7 +311,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [executeQuery, selectedTables, useSelectedTablesOnly, isAiMode]);
 
-    // FIX: Refactored logic to correctly narrow the type of `queryToRun` before accessing its properties.
     const runQueryWithVariableCheck = useCallback((queryToRun: SavedQuery | string) => {
         if (isProcessingVariableQuery.current) return;
 
@@ -272,17 +323,14 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 if (savedQuery) {
                     finalQueryDef = savedQuery;
                 } else {
-                    // It's an @ command but not a saved query, so just execute as is.
                     executeQuery(queryToRun);
                     return;
                 }
             } else {
-                // It's a raw SQL string, just execute it.
                 executeQuery(queryToRun);
                 return;
             }
         } else {
-            // It was already a SavedQuery object.
             finalQueryDef = queryToRun;
         }
 
@@ -603,11 +651,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const VariableInputModal: React.FC<{
         state: VariableInputState | null;
         onClose: () => void;
-        onExecute: (finalQuery: string, values: Record<string, string>) => void;
+        onExecute: (finalQuery: string, values: Record<string, string>) => Promise<void>;
     }> = ({ state, onClose, onExecute }) => {
         const [values, setValues] = useState<Record<string, string>>({});
-        const firstInputRef = useRef<HTMLInputElement>(null);
-    
+        
         useEffect(() => {
             if (state) {
                 const initialValues = state.variables.reduce((acc, v) => ({ ...acc, [v]: '' }), {});
@@ -617,13 +664,13 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     if (inputs.length > 0) {
                         inputs[0].focus();
                     }
-                }, 300); // After animation
+                }, 150);
             }
         }, [state]);
     
         if (!state) return null;
     
-        const handleSubmit = () => {
+        const handleSubmit = async () => {
             let finalQuery = state.query.query;
             for (const variable of state.variables) {
                 const value = values[variable] || '';
@@ -631,7 +678,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 const regex = new RegExp(`@${variable}\\b`, 'g');
                 finalQuery = finalQuery.replace(regex, `'${escapedValue}'`);
             }
-            onExecute(finalQuery, values);
+            await onExecute(finalQuery, values);
         };
     
         const handleInputChange = (variable: string, value: string) => {
@@ -655,7 +702,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         };
     
         return (
-            <FullScreenModal
+            <CompactModal
+                containerRef={variableModalRef}
                 isOpen={!!state}
                 onClose={onClose}
                 title={`'${state.query.name}' 실행`}
@@ -668,29 +716,26 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     </button>
                 }
             >
-                <div className="p-4">
-                    <p className="text-sm text-gray-600 mb-4">쿼리 실행에 필요한 값을 입력해주세요.</p>
-                    <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
-                        {state.variables.map((variable, index) => (
-                            <div key={variable}>
-                                <label htmlFor={`var-${variable}`} className="block text-sm font-bold text-gray-700 mb-2">
-                                    @{variable}
-                                </label>
-                                <input
-                                    ref={index === 0 ? firstInputRef : null}
-                                    id={`var-${variable}`}
-                                    type="text"
-                                    value={values[variable] || ''}
-                                    onChange={(e) => handleInputChange(variable, e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    className="w-full px-4 py-2.5 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                                    autoComplete="off"
-                                />
-                            </div>
-                        ))}
-                    </form>
-                </div>
-            </FullScreenModal>
+                <p className="text-sm text-gray-600 mb-4">쿼리 실행에 필요한 값을 입력해주세요.</p>
+                <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
+                    {state.variables.map((variable, index) => (
+                        <div key={variable}>
+                            <label htmlFor={`var-${variable}`} className="block text-sm font-bold text-gray-700 mb-2">
+                                @{variable}
+                            </label>
+                            <input
+                                id={`var-${variable}`}
+                                type="text"
+                                value={values[variable] || ''}
+                                onChange={(e) => handleInputChange(variable, e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                className="w-full px-4 py-2.5 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                autoComplete="off"
+                            />
+                        </div>
+                    ))}
+                </form>
+            </CompactModal>
         );
     };
 
@@ -808,7 +853,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     {savedQueries.some(q => q.isQuickRun) && (
                         <>
                             <div className="border-l border-gray-300 h-5 mx-1"></div>
-                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => runQueryWithVariableCheck(q)} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap">{q.name}</button>))}
+                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => runQueryWithVariableCheck(q)} disabled={status === 'loading' || isProcessingVariableQuery.current} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">{q.name}</button>))}
                         </>
                     )}
                 </div>
@@ -820,7 +865,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     autoComplete="off" autoCapitalize="none" spellCheck={false}
                 />
                 <div className="flex gap-2">
-                    <button onMouseDown={handleExecuteStart} onMouseUp={handleExecuteEnd} onMouseLeave={handleExecuteEnd} onTouchStart={handleExecuteStart} onTouchEnd={handleExecuteEnd} onClick={handleExecuteClickWrapped} className={`flex-grow h-12 text-white font-bold rounded-lg flex items-center justify-center gap-2 text-lg transition active:scale-95 shadow-lg select-none ${isAiMode ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/30' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'}`}>
+                    <button onMouseDown={handleExecuteStart} onMouseUp={handleExecuteEnd} onMouseLeave={handleExecuteEnd} onTouchStart={handleExecuteStart} onTouchEnd={handleExecuteEnd} onClick={handleExecuteClickWrapped} disabled={status === 'loading' || isProcessingVariableQuery.current} className={`flex-grow h-12 text-white font-bold rounded-lg flex items-center justify-center gap-2 text-lg transition active:scale-95 shadow-lg select-none ${isAiMode ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/30' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'} disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed`}>
                         {status === 'loading' ? <><StopCircleIcon className="w-7 h-7"/> <span>중지</span></> : <><PlayCircleIcon className="w-7 h-7"/> <span>실행</span></>}
                     </button>
                      <button
@@ -940,6 +985,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
                             <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => {
+                                    if (status === 'loading' || isProcessingVariableQuery.current) return;
                                     setSavedQueriesModalOpen(false);
                                     runQueryWithVariableCheck(q);
                                 }}>{q.name}</p>
@@ -983,7 +1029,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             </FullScreenModal>
             
-            <FullScreenModal 
+            <CompactModal 
                 containerRef={saveModalRef}
                 isOpen={!!saveModalState} 
                 onClose={() => setSaveModalState(null)} 
@@ -1015,23 +1061,23 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 }
             >
                 {saveModalState && (
-                    <div className="flex flex-col h-full space-y-4 p-2">
+                    <div className="flex flex-col space-y-4">
                         <input 
                             type="text" 
                             value={saveModalState.name} 
                             onChange={e => setSaveModalState(s => s ? { ...s, name: e.target.value } : null)} 
                             placeholder="쿼리 이름" 
                             disabled={saveModalState.isGeneratingName}
-                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold flex-shrink-0" />
+                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" />
                         <textarea 
                             value={saveModalState.query} 
                             readOnly 
-                            className="w-full flex-grow p-3 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50 resize-none" />
+                            className="w-full h-48 p-3 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50 resize-none" />
                     </div>
                 )}
-            </FullScreenModal>
+            </CompactModal>
             
-             <FullScreenModal 
+             <CompactModal 
                 containerRef={editQueryModalRef}
                 isOpen={!!editingQuery} 
                 onClose={() => setEditingQuery(null)} 
@@ -1044,25 +1090,25 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 }
              >
                 {editingQuery && (
-                    <div className="flex flex-col h-full space-y-4 p-2">
+                    <div className="flex flex-col space-y-4">
                         <input 
                             type="text" 
                             value={editingQuery.name} 
                             onChange={e => setEditingQuery({ ...editingQuery, name: e.target.value })} 
                             placeholder="쿼리 이름" 
-                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold flex-shrink-0" 
+                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" 
                         />
                         <textarea 
                             value={editingQuery.query} 
                             onChange={e => setEditingQuery({ ...editingQuery, query: e.target.value })} 
                             placeholder="쿼리 내용" 
-                            className="w-full flex-grow p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none" 
+                            className="w-full h-48 p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none" 
                         />
                     </div>
                 )}
-            </FullScreenModal>
+            </CompactModal>
             
-            <FullScreenModal 
+            <CompactModal 
                 containerRef={editLearningModalRef}
                 isOpen={!!editingLearningItem} 
                 onClose={() => setEditingLearningItem(null)} 
@@ -1075,23 +1121,23 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 }
             >
                  {editingLearningItem && (
-                    <div className="flex flex-col h-full space-y-4 p-2">
+                    <div className="flex flex-col space-y-4">
                         <input 
                             type="text" 
                             value={editingLearningItem.title} 
                             onChange={e => setEditingLearningItem({ ...editingLearningItem, title: e.target.value })} 
                             placeholder="규칙 제목" 
-                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold flex-shrink-0"
+                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold"
                         />
                         <textarea 
                             value={editingLearningItem.content} 
                             onChange={e => setEditingLearningItem({ ...editingLearningItem, content: e.target.value })} 
                             placeholder="규칙 내용" 
-                            className="w-full flex-grow p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none"
+                            className="w-full h-32 p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none"
                         />
                     </div>
                  )}
-            </FullScreenModal>
+            </CompactModal>
             
             <VariableInputModal
                 state={variableInputState}
@@ -1099,11 +1145,14 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     setVariableInputState(null);
                     isProcessingVariableQuery.current = false;
                 }}
-                onExecute={(finalQuery) => {
+                onExecute={async (finalQuery) => {
                     const originalQueryName = variableInputState?.query.name;
                     setVariableInputState(null);
-                    isProcessingVariableQuery.current = false;
-                    executeQuery(finalQuery, `@${originalQueryName}`);
+                    try {
+                        await executeQuery(finalQuery, `@${originalQueryName}`);
+                    } finally {
+                        isProcessingVariableQuery.current = false;
+                    }
                 }}
             />
 
