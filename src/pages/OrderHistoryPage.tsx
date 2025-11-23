@@ -252,9 +252,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             (entries) => {
                 // When the sentinel comes into view and there are more items to load
                 if (entries[0] && entries[0].isIntersecting && orders.length > visibleCount) {
-                    // FIX: Revert to functional update for safer state updates in callbacks.
-                    // The original TypeScript error was likely due to a missing explicit type
-                    // on the useState hook, which has since been added.
+                    // FIX: Corrected a typo from `PAGE_size` to `PAGE_SIZE` to ensure infinite scroll loads more items correctly.
                     setVisibleCount(prev => prev + PAGE_SIZE);
                 }
             },

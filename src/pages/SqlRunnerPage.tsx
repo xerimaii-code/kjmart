@@ -77,6 +77,9 @@ const FullScreenModal: React.FC<{
                     <h2 className="text-lg font-bold text-gray-800 truncate">{title}</h2>
                     <div className="absolute top-1/2 right-4 -translate-y-1/2 flex items-center gap-2">
                         {headerActions}
+                        <button onClick={onClose} className="p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
+                            <RemoveIcon className="w-6 h-6"/>
+                        </button>
                     </div>
                 </header>
                 <main className="flex-grow overflow-y-auto">
@@ -84,7 +87,9 @@ const FullScreenModal: React.FC<{
                 </main>
                 {footer && (
                      <footer className="p-3 bg-white border-t border-gray-200 z-10 flex-shrink-0">
-                        {footer}
+                        <div className="max-w-2xl mx-auto">
+                           {footer}
+                        </div>
                     </footer>
                 )}
             </div>
@@ -132,7 +137,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     } | null>(null);
 
     const [variableInputState, setVariableInputState] = useState<VariableInputState | null>(null);
-    const [pendingVariableQuery, setPendingVariableQuery] = useState<SavedQuery | null>(null);
+    const [pendingQuery, setPendingQuery] = useState<SavedQuery | null>(null);
 
     const abortControllerRef = useRef<AbortController | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -243,35 +248,34 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [executeQuery, selectedTables, useSelectedTablesOnly, isAiMode]);
 
+    const initiateQueryExecution = useCallback((query: SavedQuery) => {
+        setPendingQuery(query);
+    }, []);
+
     useEffect(() => {
-        if (pendingVariableQuery) {
+        if (pendingQuery) {
+            const queryText = pendingQuery.query || '';
             const variableRegex = /@([a-zA-Z0-9_]+)/g;
-            const queryText = pendingVariableQuery.query || '';
-            // FIX: Handle null case from .match() to prevent runtime error and fix TypeScript error.
-            const detectedVariables = [...new Set(queryText.match(variableRegex) || [])].map(v => v.substring(1));
-            
-            if (pendingVariableQuery.type === 'sql' && detectedVariables.length > 0) {
+            // FIX: Explicitly type 'v' as a string to resolve a TypeScript inference issue
+            // where 'v' was being treated as 'unknown', causing an error on 'substring'.
+            const detectedVariables = [...new Set(queryText.match(variableRegex) || [])].map((v: string) => v.substring(1));
+    
+            if (pendingQuery.type === 'sql' && detectedVariables.length > 0) {
                 setVariableInputState({
-                    query: pendingVariableQuery,
+                    query: pendingQuery,
                     variables: detectedVariables,
                 });
             } else {
-                if (pendingVariableQuery.type === 'sql') {
-                    executeQuery(pendingVariableQuery.query, `@${pendingVariableQuery.name}`);
+                if (pendingQuery.type === 'sql') {
+                    executeQuery(pendingQuery.query, `@${pendingQuery.name}`);
                 } else {
-                    processNaturalLanguageQuery(pendingVariableQuery.query);
+                    processNaturalLanguageQuery(pendingQuery.query);
                 }
-                setPendingVariableQuery(null);
             }
-        } else {
-            setVariableInputState(null);
+            // Clear the trigger immediately to prevent re-runs
+            setPendingQuery(null);
         }
-    }, [pendingVariableQuery, executeQuery, processNaturalLanguageQuery]);
-
-    const initiateQueryExecution = useCallback((query: SavedQuery) => {
-        if (pendingVariableQuery) return;
-        setPendingVariableQuery(query);
-    }, [pendingVariableQuery]);
+    }, [pendingQuery, executeQuery, processNaturalLanguageQuery]);
 
     const processAndExecute = useCallback(async (input: string) => {
         const currentInput = input.trim();
@@ -580,7 +584,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 const initialValues = state.variables.reduce((acc, v) => ({ ...acc, [v]: '' }), {});
                 setValues(initialValues);
                 setTimeout(() => {
-                    firstInputRef.current?.focus();
+                    const inputs = document.querySelectorAll<HTMLInputElement>('form input[type="text"]');
+                    if (inputs.length > 0) {
+                        inputs[0].focus();
+                    }
                 }, 300); // After animation
             }
         }, [state]);
@@ -904,8 +911,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
                             <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => {
-                                    setSavedQueriesModalOpen(false);
                                     initiateQueryExecution(q);
+                                    setSavedQueriesModalOpen(false);
                                 }}>{q.name}</p>
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                      <button onClick={() => updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
@@ -951,8 +958,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={!!saveModalState} 
                 onClose={() => setSaveModalState(null)} 
                 title="새 쿼리 저장" 
-                headerActions={
-                    <div className="flex items-center gap-2">
+                footer={
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setSaveModalState(null)} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">취소</button>
                         <button 
                             onClick={async () => {
                                 if (saveModalState && saveModalState.name) {
@@ -969,13 +977,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 }
                             }}
                             disabled={saveModalState?.isGeneratingName}
-                            className="relative px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95 flex items-center justify-center disabled:bg-gray-400"
+                            className="relative h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95 disabled:bg-gray-400"
                         >
-                            {saveModalState?.isGeneratingName ? <SpinnerIcon className="w-5 h-5"/> : <SaveIcon className="w-5 h-5" />}
-                            <span className="ml-2">{saveModalState?.isGeneratingName ? '생성중' : '저장'}</span>
-                        </button>
-                        <button onClick={() => setSaveModalState(null)} className="p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
-                            <RemoveIcon className="w-6 h-6"/>
+                            {saveModalState?.isGeneratingName ? <SpinnerIcon className="w-6 h-6"/> : '저장'}
                         </button>
                     </div>
                 }
@@ -1001,13 +1005,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={!!editingQuery} 
                 onClose={() => setEditingQuery(null)} 
                 title={editingQuery?.id === 'new' ? '새 쿼리 추가' : '저장된 쿼리 수정'}
-                headerActions={
-                    <button 
-                        onClick={handleSaveEditingQuery} 
-                        className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95"
-                    >
-                        <SaveIcon className="w-5 h-5" />
-                    </button>
+                footer={
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setEditingQuery(null)} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">취소</button>
+                        <button onClick={handleSaveEditingQuery} className="h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95">저장</button>
+                    </div>
                 }
              >
                 {editingQuery && (
@@ -1033,10 +1035,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={!!editingLearningItem} 
                 onClose={() => setEditingLearningItem(null)} 
                 title={editingLearningItem?.id && !editingLearningItem.id.startsWith('item_') ? 'AI 학습 규칙 수정' : 'AI 학습 규칙 추가'}
-                headerActions={
-                     <button onClick={() => { if (editingLearningItem) handleSaveLearningItem(editingLearningItem); }} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95">
-                        <SaveIcon className="w-5 h-5" />
-                     </button>
+                footer={
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setEditingLearningItem(null)} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">취소</button>
+                        <button onClick={() => { if (editingLearningItem) handleSaveLearningItem(editingLearningItem); }} className="h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95">저장</button>
+                    </div>
                 }
             >
                  {editingLearningItem && (
@@ -1061,11 +1064,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             <VariableInputModal
                 state={variableInputState}
                 onClose={() => {
-                    setPendingVariableQuery(null);
+                    setVariableInputState(null);
                 }}
                 onExecute={(finalQuery) => {
                     const originalQueryName = variableInputState?.query.name;
-                    setPendingVariableQuery(null);
+                    setVariableInputState(null);
                     executeQuery(finalQuery, `@${originalQueryName}`);
                 }}
             />
