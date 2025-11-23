@@ -7,6 +7,7 @@ import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQu
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
 import ToggleSwitch from '../components/ToggleSwitch';
+import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 // --- TYPE DEFINITIONS ---
 type QueryStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -47,7 +48,8 @@ const FullScreenModal: React.FC<{
     children: React.ReactNode;
     footer?: React.ReactNode;
     headerActions?: React.ReactNode;
-}> = ({ isOpen, onClose, title, children, footer, headerActions }) => {
+    containerRef?: React.Ref<HTMLDivElement>;
+}> = ({ isOpen, onClose, title, children, footer, headerActions, containerRef }) => {
     const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
@@ -69,6 +71,7 @@ const FullScreenModal: React.FC<{
             aria-modal="true"
         >
             <div 
+                ref={containerRef}
                 style={{ top: 'calc(3.5rem + env(safe-area-inset-top))' }}
                 className={`absolute bottom-0 left-0 right-0 flex flex-col bg-gray-50 shadow-lg transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.32,1.25,0.37,1.02)] ${isRendered ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'} rounded-t-2xl will-change-[opacity,transform]`}
                 onClick={e => e.stopPropagation()}
@@ -137,10 +140,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     } | null>(null);
 
     const [variableInputState, setVariableInputState] = useState<VariableInputState | null>(null);
-    const [pendingQuery, setPendingQuery] = useState<SavedQuery | null>(null);
 
     const abortControllerRef = useRef<AbortController | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const isProcessingVariableQuery = useRef(false);
 
     const tableButtonLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isTableButtonLongPress = useRef(false);
@@ -151,6 +154,14 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     const dragIndex = useRef<number | null>(null);
     const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+    const saveModalRef = useRef<HTMLDivElement>(null);
+    const editQueryModalRef = useRef<HTMLDivElement>(null);
+    const editLearningModalRef = useRef<HTMLDivElement>(null);
+    
+    useAdjustForKeyboard(saveModalRef, !!saveModalState);
+    useAdjustForKeyboard(editQueryModalRef, !!editingQuery);
+    useAdjustForKeyboard(editLearningModalRef, !!editingLearningItem);
 
 
     useEffect(() => {
@@ -248,34 +259,52 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [executeQuery, selectedTables, useSelectedTablesOnly, isAiMode]);
 
-    const initiateQueryExecution = useCallback((query: SavedQuery) => {
-        setPendingQuery(query);
-    }, []);
+    // FIX: Refactored logic to correctly narrow the type of `queryToRun` before accessing its properties.
+    const runQueryWithVariableCheck = useCallback((queryToRun: SavedQuery | string) => {
+        if (isProcessingVariableQuery.current) return;
 
-    useEffect(() => {
-        if (pendingQuery) {
-            const queryText = pendingQuery.query || '';
-            const variableRegex = /@([a-zA-Z0-9_]+)/g;
-            // FIX: Explicitly type 'v' as a string to resolve a TypeScript inference issue
-            // where 'v' was being treated as 'unknown', causing an error on 'substring'.
-            const detectedVariables = [...new Set(queryText.match(variableRegex) || [])].map((v: string) => v.substring(1));
-    
-            if (pendingQuery.type === 'sql' && detectedVariables.length > 0) {
-                setVariableInputState({
-                    query: pendingQuery,
-                    variables: detectedVariables,
-                });
-            } else {
-                if (pendingQuery.type === 'sql') {
-                    executeQuery(pendingQuery.query, `@${pendingQuery.name}`);
+        let finalQueryDef: SavedQuery;
+
+        if (typeof queryToRun === 'string') {
+            if (queryToRun.startsWith('@')) {
+                const savedQueryName = queryToRun.slice(1).split(/\s+/)[0];
+                const savedQuery = savedQueries.find(q => q.name.toLowerCase() === savedQueryName.toLowerCase());
+                if (savedQuery) {
+                    finalQueryDef = savedQuery;
                 } else {
-                    processNaturalLanguageQuery(pendingQuery.query);
+                    // It's an @ command but not a saved query, so just execute as is.
+                    executeQuery(queryToRun);
+                    return;
                 }
+            } else {
+                // It's a raw SQL string, just execute it.
+                executeQuery(queryToRun);
+                return;
             }
-            // Clear the trigger immediately to prevent re-runs
-            setPendingQuery(null);
+        } else {
+            // It was already a SavedQuery object.
+            finalQueryDef = queryToRun;
         }
-    }, [pendingQuery, executeQuery, processNaturalLanguageQuery]);
+
+        const { query: queryText, name: queryName, type: queryType } = finalQueryDef;
+
+        const variableRegex = /@([a-zA-Z0-9_]+)/g;
+        const detectedVariables = [...new Set(Array.from((queryText || '').matchAll(variableRegex), m => m[1]))];
+        
+        if (queryType === 'sql' && detectedVariables.length > 0) {
+            isProcessingVariableQuery.current = true;
+            setVariableInputState({
+                query: finalQueryDef,
+                variables: detectedVariables,
+            });
+        } else {
+            if (queryType === 'sql') {
+                executeQuery(queryText, `@${queryName}`);
+            } else if (queryType === 'natural') {
+                processNaturalLanguageQuery(queryText);
+            }
+        }
+    }, [savedQueries, executeQuery, processNaturalLanguageQuery]);
 
     const processAndExecute = useCallback(async (input: string) => {
         const currentInput = input.trim();
@@ -290,7 +319,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             const queryName = currentInput.slice(1).split(/\s+/)[0];
             const savedQuery = savedQueries.find(q => q.name.toLowerCase() === queryName.toLowerCase());
             if (savedQuery) {
-                initiateQueryExecution(savedQuery);
+                runQueryWithVariableCheck(savedQuery);
                 return;
             }
         }
@@ -298,7 +327,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         const isLikelySql = /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(currentInput);
         if (isLikelySql && !isAiMode) executeQuery(currentInput);
         else processNaturalLanguageQuery(currentInput);
-    }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery, isAiMode, initiateQueryExecution]);
+    }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery, isAiMode, runQueryWithVariableCheck]);
 
     const handleExecuteStart = () => {
         isExecuteLongPress.current = false;
@@ -779,7 +808,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     {savedQueries.some(q => q.isQuickRun) && (
                         <>
                             <div className="border-l border-gray-300 h-5 mx-1"></div>
-                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => initiateQueryExecution(q)} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap">{q.name}</button>))}
+                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => runQueryWithVariableCheck(q)} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap">{q.name}</button>))}
                         </>
                     )}
                 </div>
@@ -911,8 +940,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
                             <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => {
-                                    initiateQueryExecution(q);
                                     setSavedQueriesModalOpen(false);
+                                    runQueryWithVariableCheck(q);
                                 }}>{q.name}</p>
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                      <button onClick={() => updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
@@ -930,9 +959,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             <FullScreenModal 
                 isOpen={isAiModalOpen} 
                 onClose={() => setAiModalOpen(false)} 
-                title="AI 학습 데이터 관리" 
-                headerActions={
-                    <button onClick={handleAddLearningItem} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95">규칙 추가</button>
+                title="AI 학습 데이터 관리"
+                footer={
+                    <button onClick={handleAddLearningItem} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">규칙 추가</button>
                 }
             >
                 <div className="space-y-2" onDragOver={handleDragOver} onDrop={handleDrop}>
@@ -955,6 +984,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </FullScreenModal>
             
             <FullScreenModal 
+                containerRef={saveModalRef}
                 isOpen={!!saveModalState} 
                 onClose={() => setSaveModalState(null)} 
                 title="새 쿼리 저장" 
@@ -1002,6 +1032,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </FullScreenModal>
             
              <FullScreenModal 
+                containerRef={editQueryModalRef}
                 isOpen={!!editingQuery} 
                 onClose={() => setEditingQuery(null)} 
                 title={editingQuery?.id === 'new' ? '새 쿼리 추가' : '저장된 쿼리 수정'}
@@ -1032,6 +1063,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </FullScreenModal>
             
             <FullScreenModal 
+                containerRef={editLearningModalRef}
                 isOpen={!!editingLearningItem} 
                 onClose={() => setEditingLearningItem(null)} 
                 title={editingLearningItem?.id && !editingLearningItem.id.startsWith('item_') ? 'AI 학습 규칙 수정' : 'AI 학습 규칙 추가'}
@@ -1065,10 +1097,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 state={variableInputState}
                 onClose={() => {
                     setVariableInputState(null);
+                    isProcessingVariableQuery.current = false;
                 }}
                 onExecute={(finalQuery) => {
                     const originalQueryName = variableInputState?.query.name;
                     setVariableInputState(null);
+                    isProcessingVariableQuery.current = false;
                     executeQuery(finalQuery, `@${originalQueryName}`);
                 }}
             />

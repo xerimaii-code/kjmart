@@ -53,7 +53,7 @@ export function useAdjustForKeyboard(modalContentRef: React.RefObject<HTMLElemen
         // before the modal's opening animation completes, resulting in an incorrect
         // initial position calculation.
         // We delay attaching the listener and the initial check to after the animation.
-        const animationDuration = 350; // Slightly longer than the modal's 300ms transition.
+        const animationDuration = 550; // Slightly longer than the modal's 500ms transition.
         const timerId = setTimeout(() => {
             visualViewport.addEventListener('resize', handleResize);
             // Run the check once after the delay to handle pre-existing keyboards.
