@@ -32,6 +32,11 @@ interface LearningItem {
     content: string;
 }
 
+interface VariableInputState {
+    query: SavedQuery;
+    variables: string[];
+}
+
 const INITIAL_VISIBLE_ROWS = 50;
 const ROWS_PER_LOAD = 100;
 
@@ -125,6 +130,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         name: string;
         isGeneratingName: boolean;
     } | null>(null);
+
+    const [variableInputState, setVariableInputState] = useState<VariableInputState | null>(null);
 
     const abortControllerRef = useRef<AbortController | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -357,22 +364,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
     
-    const handleSaveQuery = async () => {
-        const currentQuery = sqlQueryInput.trim();
-        if (!currentQuery) {
-            showAlert("저장할 쿼리가 없습니다.");
-            return;
-        }
-        
-        const isSql = /^(SELECT|UPDATE|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(currentQuery);
-        if (!isSql) {
-            showAlert("자연어 쿼리는 저장할 수 없습니다.\n실행 후 [SQL 쿼리 저장]을 이용해 주세요.");
-            return;
-        }
-    
-        await openSaveQueryModal(currentQuery);
-    };
-    
     const handleSaveGeneratedSql = async () => {
         if (generatedSql) {
             await openSaveQueryModal(generatedSql);
@@ -392,8 +383,24 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleQuickRun = (query: SavedQuery) => {
         setSavedQueriesModalOpen(false);
-        if (query.type === 'sql') executeQuery(query.query, `@${query.name}`);
-        else processNaturalLanguageQuery(query.query);
+
+        // This regex finds @ followed by one or more word characters (letters, numbers, underscore)
+        const variableRegex = /@([a-zA-Z0-9_]+)/g;
+        // Use a Set to get unique variable names from the query string
+        const detectedVariables = [...new Set(query.query.match(variableRegex))];
+
+        if (query.type === 'sql' && detectedVariables.length > 0) {
+            setVariableInputState({
+                query,
+                variables: detectedVariables.map(v => v.substring(1)), // remove '@'
+            });
+        } else {
+            if (query.type === 'sql') {
+                executeQuery(query.query, `@${query.name}`);
+            } else {
+                processNaturalLanguageQuery(query.query);
+            }
+        }
     };
 
     const handleAddNewQuery = () => {
@@ -551,6 +558,98 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const hasRecordset = result?.recordset && result.recordset.length > 0;
     const successText = `쿼리 성공! ${hasRecordset ? `결과: ${result.recordset.length}건` : `영향 받은 행: ${result?.rowsAffected ?? 0}`}`;
+    
+    const VariableInputModal: React.FC<{
+        state: VariableInputState | null;
+        onClose: () => void;
+        onExecute: (finalQuery: string, values: Record<string, string>) => void;
+    }> = ({ state, onClose, onExecute }) => {
+        const [values, setValues] = useState<Record<string, string>>({});
+        const firstInputRef = useRef<HTMLInputElement>(null);
+    
+        useEffect(() => {
+            if (state) {
+                const initialValues = state.variables.reduce((acc, v) => ({ ...acc, [v]: '' }), {});
+                setValues(initialValues);
+                setTimeout(() => {
+                    firstInputRef.current?.focus();
+                }, 300); // After animation
+            }
+        }, [state]);
+    
+        if (!state) return null;
+    
+        const handleSubmit = () => {
+            let finalQuery = state.query.query;
+            for (const variable of state.variables) {
+                const value = values[variable] || '';
+                const escapedValue = value.replace(/'/g, "''");
+                const regex = new RegExp(`@${variable}\\b`, 'g');
+                finalQuery = finalQuery.replace(regex, `'${escapedValue}'`);
+            }
+            onExecute(finalQuery, values);
+        };
+    
+        const handleInputChange = (variable: string, value: string) => {
+            setValues(prev => ({ ...prev, [variable]: value }));
+        };
+        
+        const handleKeyDown = (e: React.KeyboardEvent) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const form = e.currentTarget.closest('form');
+                if (form) {
+                    // FIX: Cast the result of querySelectorAll to HTMLInputElement[] to ensure correct typing for calling .focus().
+                    const inputs = Array.from(form.querySelectorAll('input')) as HTMLInputElement[];
+                    const currentIndex = inputs.findIndex(input => input === e.target);
+                    if (currentIndex > -1 && currentIndex < inputs.length - 1) {
+                        inputs[currentIndex + 1].focus();
+                    } else {
+                        handleSubmit();
+                    }
+                }
+            }
+        };
+    
+        return (
+            <FullScreenModal
+                isOpen={!!state}
+                onClose={onClose}
+                title={`'${state.query.name}' 실행`}
+                footer={
+                    <button
+                        onClick={handleSubmit}
+                        className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30"
+                    >
+                        실행
+                    </button>
+                }
+            >
+                <div className="p-4">
+                    <p className="text-sm text-gray-600 mb-4">쿼리 실행에 필요한 값을 입력해주세요.</p>
+                    <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
+                        {state.variables.map((variable, index) => (
+                            <div key={variable}>
+                                <label htmlFor={`var-${variable}`} className="block text-sm font-bold text-gray-700 mb-2">
+                                    @{variable}
+                                </label>
+                                <input
+                                    ref={index === 0 ? firstInputRef : null}
+                                    id={`var-${variable}`}
+                                    type="text"
+                                    value={values[variable] || ''}
+                                    onChange={(e) => handleInputChange(variable, e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                    className="w-full px-4 py-2.5 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    autoComplete="off"
+                                />
+                            </div>
+                        ))}
+                    </form>
+                </div>
+            </FullScreenModal>
+        );
+    };
 
     const renderUpdatePreviewModal = () => {
         if (!updatePreview) return null;
@@ -661,7 +760,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         <TableCellsIcon className="w-4 h-4"/> 
                         <span className="truncate">{useSelectedTablesOnly ? `선택 (${selectedTables.length})` : '전체 테이블'}</span>
                     </button>
-                    <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><BookmarkSquareIcon className="w-4 h-4"/> <span>저장된 쿼리</span></button>
+                    <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><BookmarkSquareIcon className="w-4 h-4"/> <span>쿼리</span></button>
                     <button onClick={() => setAiModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><SparklesIcon className="w-4 h-4 text-purple-500"/> <span>AI 학습</span></button>
                     {savedQueries.some(q => q.isQuickRun) && (
                         <>
@@ -709,7 +808,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     <div className="flex justify-end items-center mb-2 flex-shrink-0 h-8 pr-8">
                         {status === 'success' && result && (
                             <div className="flex items-center gap-2">
-                                <button onClick={handleSaveQuery} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">이 쿼리 저장</button>
                                 <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>
                                 {generatedSql && !isAiMode && (<button onClick={handleSaveGeneratedSql} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL 쿼리 저장</button>)}
                             </div>
@@ -936,6 +1034,15 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                  )}
             </FullScreenModal>
             
+            <VariableInputModal
+                state={variableInputState}
+                onClose={() => setVariableInputState(null)}
+                onExecute={(finalQuery) => {
+                    setVariableInputState(null);
+                    executeQuery(finalQuery, `@${variableInputState?.query.name}`);
+                }}
+            />
+
             {renderUpdatePreviewModal()}
 
         </div>
