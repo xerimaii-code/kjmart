@@ -1,33 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
-import { ExitFullscreenIcon, SpinnerIcon, DatabaseIcon } from './Icons';
-import { useSyncState } from '../context/AppContext';
-import { checkSqlConnection } from '../services/sqlService';
-
-type SqlServerStatus = 'unknown' | 'connected' | 'error' | 'checking';
+import { ExitFullscreenIcon, SpinnerIcon } from './Icons';
+import { useSyncState, useMiscUI } from '../context/AppContext';
 
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const { isSyncing, syncDataType } = useSyncState();
     const [currentTime, setCurrentTime] = useState(new Date());
-    const [sqlStatus, setSqlStatus] = useState<SqlServerStatus>('unknown');
-    const isCheckingSql = useRef(false);
-
-    const checkSql = useCallback(async () => {
-        if (isCheckingSql.current) return;
-        isCheckingSql.current = true;
-        setSqlStatus('checking');
-        try {
-            await checkSqlConnection();
-            setSqlStatus('connected');
-        } catch (err) {
-            console.error("SQL Connection Check Failed:", err);
-            setSqlStatus('error');
-        } finally {
-            isCheckingSql.current = false;
-        }
-    }, []);
+    const { sqlStatus, checkSql } = useMiscUI();
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -38,16 +19,12 @@ const Header: React.FC = () => {
 
         const timeTimerId = setInterval(() => setCurrentTime(new Date()), 10000);
 
-        checkSql(); // Initial check
-        const sqlTimerId = setInterval(checkSql, 60000); // Check every 60 seconds
-
         return () => {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
             clearInterval(timeTimerId);
-            clearInterval(sqlTimerId);
         };
-    }, [checkSql]);
+    }, []);
 
     const handleExitFullscreen = async () => {
         const exitFullscreen =

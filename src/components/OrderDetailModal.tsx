@@ -25,8 +25,8 @@ const normalizeItemsForComparison = (items: OrderItem[]): Omit<OrderItem, 'price
 // --- Sub-components for the Modal ---
 
 const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; product: Product | undefined; isCompleted: boolean, isNew: boolean, isModified: boolean, onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, product, isCompleted, isNew, isModified, onEdit, onRemove }, ref) => {
-    const saleIsActive = product ? isSaleActive(product.saleEndDate) : false;
-    const hasSalePrice = product ? !!product.salePrice : false;
+    const saleIsActive = product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false;
+    const hasSalePrice = product ? (product.salePrice !== undefined && product.salePrice !== null) : false;
 
     return (
         <div
@@ -61,7 +61,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
                                   className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
                                   style={!saleIsActive ? { fontSize: '80%' } : {}}
                               >
-                                  {product.salePrice}원
+                                  {product.salePrice?.toLocaleString()}원
                               </span>
                           )}
                       </div>
@@ -69,10 +69,10 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
                 </>
                 
                 {/* Sale Period and Supplier */}
-                {product && product.saleEndDate && (
+                {product && (product.saleStartDate || product.saleEndDate) && (
                      <div className="text-xs text-gray-500">
                         <span className={saleIsActive ? 'font-semibold text-blue-600' : 'text-gray-400'}>
-                            행사기간: ~{product.saleEndDate}
+                            행사기간: {product.saleStartDate ? `${product.saleStartDate}~` : `~`}{product.saleEndDate}
                         </span>
                      </div>
                 )}

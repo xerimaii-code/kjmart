@@ -165,12 +165,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [error, setError] = useState<string | null>(null);
     const [status, setStatus] = useState<QueryStatus>('idle');
     const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
-    const [useSelectedTablesOnly, setUseSelectedTablesOnly] = useState(false);
     
-    const [allTables, setAllTables] = useState<string[]>([]);
-    const [selectedTables, setSelectedTables] = useState<string[]>([]);
-
-    const [isTableModalOpen, setTableModalOpen] = useState(false);
     const [isSavedQueriesModalOpen, setSavedQueriesModalOpen] = useState(false);
     const [isAiModalOpen, setAiModalOpen] = useState(false);
     const [learningItems, setLearningItems] = useState<LearningItem[]>([]);
@@ -195,8 +190,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const isProcessingVariableQuery = useRef(false);
 
-    const tableButtonLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const isTableButtonLongPress = useRef(false);
     const executeLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isExecuteLongPress = useRef(false);
     const aiLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -213,16 +206,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
 
     useEffect(() => {
-        if (isActive) {
-            getCachedSchema().then(schema => {
-                if (schema) {
-                    setAllTables(Object.keys(schema).sort());
-                }
-            });
-        }
         const unsubscribe = subscribeToSavedQueries(setSavedQueries);
         return () => unsubscribe();
-    }, [isActive]);
+    }, []);
 
     useEffect(() => {
         if (isAiModalOpen) {
@@ -278,22 +264,18 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         try {
             const schema = await getCachedSchema();
             if (!schema) throw new Error("데이터베이스 스키마 정보를 로드할 수 없습니다.");
-
-            let schemaForQuery = useSelectedTablesOnly && selectedTables.length > 0
-                ? Object.fromEntries(Object.entries(schema).filter(([tableName]) => selectedTables.includes(tableName)))
-                : schema;
             
             const context = await getLearningContext();
             
             const userCurrentDate = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
 
             if (isAiMode) {
-                const response = await aiChat(prompt, schemaForQuery, context, userCurrentDate);
+                const response = await aiChat(prompt, schema, context, userCurrentDate);
                 setResult({ answer: response.answer });
                 setStatus('success');
                 setLastSuccessfulQuery(prompt);
             } else {
-                const { sql } = await naturalLanguageToSql(prompt, schemaForQuery, context);
+                const { sql } = await naturalLanguageToSql(prompt, schema, context);
                 if (sql) {
                     setGeneratedSql(sql);
                     executeQuery(sql, prompt);
@@ -305,7 +287,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             setError(err.message || 'AI 처리 중 오류 발생');
             setStatus('error');
         }
-    }, [executeQuery, selectedTables, useSelectedTablesOnly, isAiMode]);
+    }, [executeQuery, isAiMode]);
 
     const runQueryWithVariableCheck = useCallback((queryToRun: SavedQuery | string) => {
         if (isProcessingVariableQuery.current) return;
@@ -416,36 +398,11 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleAiButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
         if (aiLongPressTimer.current) clearTimeout(aiLongPressTimer.current);
-        if (!isAiLongPress.current) {
-            if (status !== 'loading') processAndExecute(sqlQueryInput);
-        } else if(e.cancelable && e.type !== 'touchend') {
+        if (isAiLongPress.current && e.cancelable && e.type !== 'touchend') {
             e.preventDefault();
+        } else if (!isAiLongPress.current) {
+            setAiModalOpen(true);
         }
-    };
-
-    const handleTableButtonStart = () => {
-        isTableButtonLongPress.current = false;
-        tableButtonLongPressTimer.current = setTimeout(() => {
-            isTableButtonLongPress.current = true;
-            setUseSelectedTablesOnly(prev => {
-                const next = !prev;
-                if(navigator.vibrate) navigator.vibrate(50);
-                showToast(next ? '선택된 테이블만 사용' : '모든 테이블 사용', 'success');
-                return next;
-            });
-        }, 600);
-    };
-
-    const handleTableButtonEnd = (e: React.MouseEvent | React.TouchEvent) => {
-        if (tableButtonLongPressTimer.current) clearTimeout(tableButtonLongPressTimer.current);
-        if (isTableButtonLongPress.current && e.cancelable && e.type !== 'touchend') e.preventDefault();
-    };
-
-    const handleTableButtonClick = () => {
-        if (isTableButtonLongPress.current) {
-            isTableButtonLongPress.current = false; return;
-        }
-        setTableModalOpen(true);
     };
 
     const openSaveQueryModal = async (queryToSave: string, type: 'sql') => {
@@ -604,17 +561,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (text) navigator.clipboard.writeText(text).then(() => showToast('복사 완료.', 'success'), () => showToast('복사 실패.', 'error'));
     };
     
-    const sortedTables = useMemo(() => {
-        const s = new Set(selectedTables);
-        return [...allTables].sort((a, b) => {
-            const aSel = s.has(a); const bSel = s.has(b);
-            if (aSel !== bSel) return aSel ? -1 : 1;
-            return a.localeCompare(b, 'ko');
-        });
-    }, [allTables, selectedTables]);
-
-    const toggleTable = (t: string) => setSelectedTables(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
-
     const handleSaveLearningItem = async (itemToSave: LearningItem) => {
         const isNew = !learningItems.some(item => item.id === itemToSave.id);
         const newItems = isNew
@@ -801,20 +747,21 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <tbody>
                                 {changes.map((change, index) => (
                                     <React.Fragment key={index}>
-                                        <tr className="bg-blue-50">
-                                            <td colSpan={3} className="p-1 font-bold text-blue-800 border-t-4 border-gray-50">
-                                                #{index + 1} {primaryKeys.map(pk => `${pk}: ${change.afterRow[pk]}`).join(', ')}
+                                        <tr className="bg-gray-50 border-t border-b">
+                                            <td colSpan={3} className="p-1.5 font-bold text-gray-700">
+                                                #{index + 1}
+                                                {primaryKeys.length > 0 && ` (${primaryKeys.map(pk => `${pk}: ${change.afterRow[pk]}`).join(', ')})`}
                                             </td>
                                         </tr>
                                         {allKeys.map(key => {
-                                            const beforeValue = String(change.beforeRow?.[key] ?? 'N/A');
-                                            const afterValue = String(change.afterRow?.[key] ?? 'N/A');
-                                            const isChanged = beforeValue !== afterValue;
+                                            const beforeValue = change.beforeRow?.[key];
+                                            const afterValue = change.afterRow[key];
+                                            const isChanged = String(beforeValue) !== String(afterValue);
                                             return (
                                                 <tr key={key} className={`border-b ${isChanged ? 'bg-yellow-50' : ''}`}>
-                                                    <td className="p-2 font-semibold border-r">{key}</td>
-                                                    <td className={`p-2 font-mono ${isChanged ? 'text-red-600 line-through' : 'text-gray-500'}`}>{beforeValue}</td>
-                                                    <td className={`p-2 font-mono ${isChanged ? 'text-green-700 font-bold' : ''}`}>{afterValue}</td>
+                                                    <td className="p-2 font-semibold text-gray-600 border-r align-top">{key}</td>
+                                                    <td className="p-2 align-top break-all font-mono">{String(beforeValue ?? 'NULL')}</td>
+                                                    <td className={`p-2 align-top break-all font-mono ${isChanged ? 'font-bold text-blue-700' : ''}`}>{String(afterValue ?? 'NULL')}</td>
                                                 </tr>
                                             );
                                         })}
@@ -828,342 +775,382 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         );
     };
 
-    return (
-        <div className="h-full flex flex-col bg-gray-50">
-            <div className="p-2 bg-white border-b border-gray-200 z-10 flex flex-col gap-2 flex-shrink-0">
-                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                    <button 
-                        onMouseDown={handleTableButtonStart}
-                        onMouseUp={handleTableButtonEnd}
-                        onMouseLeave={handleTableButtonEnd}
-                        onTouchStart={handleTableButtonStart}
-                        onTouchEnd={handleTableButtonEnd}
-                        onClick={handleTableButtonClick}
-                        className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg font-semibold text-xs active:scale-95 transition select-none ${useSelectedTablesOnly ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
-                    >
-                        <TableCellsIcon className="w-4 h-4"/> 
-                        <span className="truncate">{useSelectedTablesOnly ? `선택 (${selectedTables.length})` : '전체 테이블'}</span>
-                    </button>
-                    <button onClick={() => setSavedQueriesModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><BookmarkSquareIcon className="w-4 h-4"/> <span>쿼리</span></button>
-                    <button onClick={() => setAiModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 text-xs active:scale-95 transition"><SparklesIcon className="w-4 h-4 text-purple-500"/> <span>AI 학습</span></button>
-                    {savedQueries.some(q => q.isQuickRun) && (
-                        <>
-                            <div className="border-l border-gray-300 h-5 mx-1"></div>
-                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => runQueryWithVariableCheck(q)} disabled={status === 'loading' || isProcessingVariableQuery.current} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">{q.name}</button>))}
-                        </>
-                    )}
+    const renderResult = () => {
+        if (status === 'loading') {
+            return (
+                <div className="h-full flex flex-col items-center justify-center p-4">
+                    <SpinnerIcon className="w-10 h-10 text-blue-500" />
+                    <p className="mt-4 text-gray-600 font-semibold">쿼리 실행 중...</p>
+                    <p className="text-sm text-gray-500">{isAiMode ? "AI가 답변을 생성하고 있습니다." : "데이터베이스에서 결과를 기다립니다."}</p>
                 </div>
-                <textarea 
-                    ref={textareaRef} value={sqlQueryInput} onChange={(e) => setSqlQueryInput(e.target.value)}
-                    placeholder={isAiMode ? "AI에게 자유롭게 질문하세요..." : "자연어나 SQL 쿼리를 입력하세요..."}
-                    className={`w-full h-12 p-3 border rounded-lg font-mono text-base text-gray-900 bg-white select-text transition-colors resize-none ${isAiMode ? 'border-purple-400 ring-1 ring-purple-400 focus:ring-purple-500 focus:border-purple-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
-                    style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-                    autoComplete="off" autoCapitalize="none" spellCheck={false}
-                />
-                <div className="flex gap-2">
-                    <button onMouseDown={handleExecuteStart} onMouseUp={handleExecuteEnd} onMouseLeave={handleExecuteEnd} onTouchStart={handleExecuteStart} onTouchEnd={handleExecuteEnd} onClick={handleExecuteClickWrapped} disabled={status === 'loading' || isProcessingVariableQuery.current} className={`flex-grow h-12 text-white font-bold rounded-lg flex items-center justify-center gap-2 text-lg transition active:scale-95 shadow-lg select-none ${isAiMode ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/30' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'} disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed`}>
-                        {status === 'loading' ? <><StopCircleIcon className="w-7 h-7"/> <span>중지</span></> : <><PlayCircleIcon className="w-7 h-7"/> <span>실행</span></>}
-                    </button>
-                     <button
-                        onClick={handleBarcodeScan}
-                        className="flex items-center justify-center border rounded-lg font-semibold bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:scale-95 transition shadow-sm w-16"
-                        aria-label="바코드 스캔"
-                        title="바코드 스캔"
-                    >
-                        <BarcodeScannerIcon className="w-7 h-7" />
-                    </button>
-                    <button onMouseDown={handleAiButtonStart} onMouseUp={handleAiButtonEnd} onMouseLeave={handleAiButtonEnd} onTouchStart={handleAiButtonStart} onTouchEnd={handleAiButtonEnd} className={`flex items-center justify-center border rounded-lg font-semibold hover:opacity-90 active:scale-95 transition shadow-sm ${isAiMode ? 'bg-purple-100 border-purple-300 text-purple-600 px-3 w-auto' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 w-16'}`} aria-label="AI 모드" title="짧게 누르면 AI 실행, 길게 누르면 AI 모드 전환">
-                        <SparklesIcon className="w-7 h-7"/>
-                        {isAiMode && <span className="ml-1 text-sm whitespace-nowrap">AI 모드</span>}
-                    </button>
+            );
+        }
+        if (status === 'error' && error) {
+            return (
+                <div className="h-full flex flex-col items-center justify-center p-4 text-center">
+                    <div className="bg-red-50 p-6 rounded-xl border border-red-200 max-w-md w-full">
+                         <h3 className="font-bold text-red-700 text-lg mb-2">오류 발생</h3>
+                         <p className="text-red-600 text-sm whitespace-pre-wrap break-words">{error}</p>
+                    </div>
+                </div>
+            );
+        }
+        if (status === 'success' && result) {
+            if (result.answer) {
+                return (
+                    <div className="p-4 space-y-4">
+                         <div className="bg-green-50 p-4 rounded-xl border border-green-200">
+                            <h3 className="font-bold text-green-800 text-lg mb-2">AI 답변</h3>
+                            <p className="text-green-700 whitespace-pre-wrap">{result.answer}</p>
+                        </div>
+                         <button onClick={handleCopyResults} className="w-full h-11 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition">답변 복사</button>
+                    </div>
+                );
+            }
+            if (hasRecordset) {
+                const headers = Object.keys(result.recordset[0]);
+                const visibleRows = result.recordset.slice(0, visibleResultCount);
+                return (
+                    <div className="p-2 space-y-3">
+                         <div className="bg-green-50 p-3 rounded-lg border border-green-200 text-center">
+                            <p className="font-semibold text-green-800">{successText}</p>
+                        </div>
+                        <div className="overflow-auto">
+                            <table className="w-full text-xs text-left border-collapse">
+                                <thead className="bg-gray-100 sticky top-0 z-10">
+                                    <tr>
+                                        {headers.map(header => <th key={header} className="p-2 font-bold border-b-2 border-gray-300">{header}</th>)}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visibleRows.map((row, i) => (
+                                        <tr key={i} className="border-b border-gray-200 hover:bg-gray-50">
+                                            {headers.map(header => <td key={header} className="p-2 font-mono whitespace-pre-wrap break-all">{String(row[header])}</td>)}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {result.recordset.length > visibleResultCount && (
+                            <button
+                                onClick={() => setVisibleResultCount(prev => prev + ROWS_PER_LOAD)}
+                                className="w-full h-11 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition"
+                            >
+                                {result.recordset.length - visibleResultCount}개 더 보기
+                            </button>
+                        )}
+                        <button onClick={handleCopyResults} className="w-full h-11 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition">결과 복사</button>
+                    </div>
+                );
+            }
+             return (
+                <div className="h-full flex flex-col items-center justify-center p-4">
+                     <div className="bg-green-50 p-6 rounded-xl border border-green-200 text-center">
+                        <CheckCircleIcon className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                        <p className="font-bold text-green-800 text-lg">{successText}</p>
+                    </div>
+                </div>
+            );
+        }
+        return (
+             <div className="h-full flex items-center justify-center p-4">
+                 <div className="text-center text-gray-400">
+                    <SparklesIcon className="w-16 h-16 mx-auto mb-2 text-gray-300" />
+                    <p className="font-semibold">쿼리를 실행하여 결과를 확인하세요.</p>
                 </div>
             </div>
-            <main className="flex-grow p-3 flex overflow-hidden">
-                <div className="relative bg-white p-4 rounded-xl border border-gray-200 shadow-sm w-full flex flex-col h-full">
-                    {(status === 'success' || status === 'error') && (
-                        <button
-                            onClick={() => { setResult(null); setError(null); setStatus('idle'); setGeneratedSql(null); }}
-                            className="absolute top-2 right-2 z-10 p-1 text-gray-400 hover:bg-gray-100 rounded-full transition-colors"
-                            aria-label="결과 지우기" title="결과 지우기"
-                        >
-                            <RemoveIcon className="w-4 h-4" />
-                        </button>
-                    )}
-                    <div className="flex justify-end items-center mb-2 flex-shrink-0 h-8 pr-8">
-                        {status === 'success' && result && (
-                            <div className="flex items-center gap-2">
-                                <button onClick={handleCopyResults} className="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-md hover:bg-gray-200">결과 복사</button>
-                                {generatedSql && !isAiMode && (<button onClick={handleSaveGeneratedSql} className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">SQL 쿼리 저장</button>)}
-                            </div>
-                        )}
-                    </div>
-                    <div className="flex-grow overflow-auto select-text" data-no-swipe="true" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
-                        {status === 'loading' && <div className="flex justify-center items-center h-full"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>}
-                        {status === 'error' && <div className="p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 font-medium">{error}</div>}
-                        {status === 'success' && result && (
-                            <div>
-                                {result.answer ? (<div className="prose prose-sm max-w-none bg-purple-50 p-4 rounded-lg border border-purple-100"><p className="whitespace-pre-wrap text-gray-800 leading-relaxed">{result.answer}</p></div>) : (
-                                    <>
-                                        <p className="text-sm text-green-600 font-semibold mb-2 flex items-center gap-2"><CheckCircleIcon className="w-5 h-5"/>{successText}</p>
-                                        {hasRecordset ? (
-                                            <>
-                                                <div className="border border-gray-200 rounded-lg overflow-auto">
-                                                    <table className="w-full text-sm text-left">
-                                                        <thead className="bg-gray-100 sticky top-0 z-10">
-                                                            <tr className="border-b">{Object.keys(result.recordset[0]).map(k => <th key={k} className="p-2 font-bold whitespace-nowrap">{k}</th>)}</tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {result.recordset.slice(0, visibleResultCount).map((r, i) => (
-                                                                <tr key={i} className="border-b last:border-b-0 hover:bg-gray-50">
-                                                                    {Object.values(r).map((v: any, j) => <td key={j} className="p-2 whitespace-nowrap">{v === null ? 'NULL' : String(v)}</td>)}
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                                {result.recordset.length > visibleResultCount && (
-                                                    <div className="text-center mt-4">
-                                                        <p className="text-sm text-gray-500 mb-2">총 {result.recordset.length.toLocaleString()}개 결과 중 {Math.min(visibleResultCount, result.recordset.length).toLocaleString()}개 표시</p>
-                                                        <button onClick={() => setVisibleResultCount(prev => prev + ROWS_PER_LOAD)} className="px-6 py-2 bg-gray-100 text-gray-800 font-bold rounded-lg hover:bg-gray-200 transition active:scale-95 shadow-sm">더 보기</button>
-                                                    </div>
-                                                )}
-                                            </>
-                                        ) : <p className="text-gray-500">결과 데이터가 없습니다.</p>}
-                                    </>
-                                )}
-                            </div>
-                        )}
-                        {status === 'idle' && !result && !error && (
-                            <div className="flex flex-col justify-center items-center h-full text-gray-400 text-center p-4">
-                                <div className="text-left text-xs space-y-2 bg-gray-100 p-4 rounded-lg text-gray-500 max-w-md w-full">
-                                    <h4 className="font-bold text-gray-600 mb-1">💡 숨겨진 기능 팁</h4>
-                                    <p><strong>- 실행 버튼 (길게 누르기):</strong> 입력창 내용을 초기화합니다.</p>
-                                    <p><strong>- AI 버튼 (길게 누르기):</strong> 'AI 모드'를 활성화/비활성화합니다.</p>
-                                    <p><strong>- 빠른 실행:</strong> '저장된 쿼리'에서 별표(★)를 눌러 단축 버튼을 만들 수 있습니다.</p>
+        );
+    };
+
+
+    return (
+        <div className="h-full flex flex-col bg-gray-100">
+            <div className="flex-grow flex flex-col overflow-hidden">
+                <div className="flex-grow overflow-y-auto">
+                    {renderResult()}
+                </div>
+            
+                <div className="flex-shrink-0 p-2 bg-white border-t border-gray-200 mt-auto">
+                     {generatedSql && (
+                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 mb-2">
+                             <div className="flex justify-between items-center mb-1">
+                                <h4 className="text-sm font-bold text-blue-800">생성된 SQL</h4>
+                                <div className="flex gap-2">
+                                     <button onClick={handleSaveGeneratedSql} className="text-xs font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded-md">저장</button>
                                 </div>
                             </div>
-                        )}
+                            <pre className="text-xs text-blue-700 bg-white p-2 rounded whitespace-pre-wrap font-mono">{generatedSql}</pre>
+                        </div>
+                    )}
+                    
+                    <div className="relative">
+                        <textarea
+                            ref={textareaRef}
+                            value={sqlQueryInput}
+                            onChange={(e) => setSqlQueryInput(e.target.value)}
+                            placeholder={isAiMode ? "AI에게 질문해보세요..." : "SQL 쿼리 또는 질문을 입력하세요 (@쿼리이름 실행 가능)"}
+                            className="w-full p-3 pr-12 text-base bg-gray-100 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            rows={3}
+                            disabled={status === 'loading'}
+                        />
+                        <div className="absolute top-2 right-2">
+                             <button onClick={handleBarcodeScan} className="p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="바코드 스캔">
+                                <BarcodeScannerIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div className="mt-2 flex items-stretch gap-2">
+                        <button
+                            onMouseDown={handleExecuteStart}
+                            onMouseUp={handleExecuteEnd}
+                            onTouchStart={handleExecuteStart}
+                            onTouchEnd={handleExecuteEnd}
+                            onClick={handleExecuteClickWrapped}
+                            className={`relative flex-grow h-14 px-4 rounded-lg font-bold text-lg transition shadow-md flex items-center justify-center active:scale-95 ${
+                                status === 'loading' ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/30 text-white'
+                                : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30 text-white'
+                            }`}
+                        >
+                            {status === 'loading' ? <StopCircleIcon className="w-7 h-7" /> : <PlayCircleIcon className="w-7 h-7" />}
+                            <span className="ml-2">{status === 'loading' ? '중단' : '실행'}</span>
+                        </button>
+
+                        <button onClick={() => setSavedQueriesModalOpen(true)} className="h-14 w-20 bg-gray-200 text-gray-700 rounded-lg font-semibold text-xs hover:bg-gray-300 transition shadow-sm flex flex-col items-center justify-center active:scale-95">
+                            <BookmarkSquareIcon className="w-6 h-6 mb-1"/>
+                            <span>쿼리</span>
+                        </button>
+                        <button
+                            onMouseDown={handleAiButtonStart}
+                            onMouseUp={handleAiButtonEnd}
+                            onTouchStart={handleAiButtonStart}
+                            onTouchEnd={handleAiButtonEnd}
+                            className={`h-14 w-14 rounded-lg font-semibold text-xs transition shadow-sm flex flex-col items-center justify-center active:scale-95 ${isAiMode ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-700'}`}
+                        >
+                            <SparklesIcon className="w-6 h-6 mb-1" />
+                            <span>AI 학습</span>
+                        </button>
                     </div>
                 </div>
-            </main>
-
-            <FullScreenModal isOpen={isTableModalOpen} onClose={() => setTableModalOpen(false)} title="테이블 선택">
-                <div className="p-4 bg-white rounded-xl border border-gray-200">
-                    <ToggleSwitch id="table-scope" label="선택된 테이블만 AI가 참고" checked={useSelectedTablesOnly} onChange={setUseSelectedTablesOnly} color="blue" />
-                </div>
-                <div className="mt-3 space-y-1">
-                    {sortedTables.map(t => (
-                        <div key={t} onClick={() => toggleTable(t)} className={`p-3 rounded-lg font-medium cursor-pointer transition-colors ${selectedTables.includes(t) ? 'bg-blue-100 text-blue-800' : 'bg-white hover:bg-gray-100 text-gray-700'}`}>
-                           <label className="flex items-center gap-3 w-full cursor-pointer">
-                                <input type="checkbox" checked={selectedTables.includes(t)} onChange={() => {}} className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                                <span>{t}</span>
-                            </label>
-                        </div>
-                    ))}
-                </div>
-            </FullScreenModal>
+            </div>
             
-            <FullScreenModal 
-                isOpen={isSavedQueriesModalOpen} 
-                onClose={() => setSavedQueriesModalOpen(false)} 
-                title="쿼리"
+            <FullScreenModal
+                isOpen={isSavedQueriesModalOpen}
+                onClose={() => setSavedQueriesModalOpen(false)}
+                title="저장된 쿼리"
                 footer={
-                    <button 
-                        onClick={handleAddNewQuery} 
-                        className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30"
-                    >
-                        쿼리 추가
+                    <button onClick={handleAddNewQuery} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">
+                        새 쿼리 추가
                     </button>
                 }
             >
-                <div className="space-y-2">
+                <div className="p-2 space-y-2">
                     {savedQueries.map(q => (
-                        <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
-                            <div className="flex items-center gap-2">
-                                <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => {
-                                    if (status === 'loading' || isProcessingVariableQuery.current) return;
-                                    setSavedQueriesModalOpen(false);
-                                    runQueryWithVariableCheck(q);
-                                }}>{q.name}</p>
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                     <button onClick={() => updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
-                                        <StarIcon className="w-5 h-5"/>
-                                    </button>
-                                    <button onClick={() => setEditingQuery(q)} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-100" title="수정"><PencilSquareIcon className="w-5 h-5"/></button>
-                                    <button onClick={() => showAlert(`'${q.name}' 쿼리를 삭제하시겠습니까?`, () => deleteSavedQuery(q.id), '삭제', 'bg-rose-500')} className="p-1.5 rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600" title="삭제"><TrashIcon className="w-5 h-5"/></button>
-                                </div>
+                        <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 flex items-center gap-3">
+                             <button
+                                onClick={() => runQueryWithVariableCheck(q)}
+                                className="flex-grow text-left"
+                             >
+                                <p className="font-bold text-gray-800 flex items-center gap-2">
+                                    {q.isQuickRun && <StarIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />}
+                                    <span>{q.name}</span>
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1 font-mono truncate">{q.query}</p>
+                            </button>
+                            <div className="flex-shrink-0 flex items-center gap-1">
+                                <button
+                                    onClick={() => { setSavedQueriesModalOpen(false); setEditingQuery(q); }}
+                                    className="p-2 text-gray-500 hover:bg-gray-200 rounded-full"
+                                >
+                                    <PencilSquareIcon className="w-5 h-5"/>
+                                </button>
+                                <button
+                                    onClick={() => showAlert(`'${q.name}' 쿼리를 삭제하시겠습니까?`, () => deleteSavedQuery(q.id), '삭제', 'bg-rose-500')}
+                                    className="p-2 text-gray-500 hover:bg-rose-100 hover:text-rose-600 rounded-full"
+                                >
+                                    <TrashIcon className="w-5 h-5"/>
+                                </button>
                             </div>
                         </div>
                     ))}
+                    {savedQueries.length === 0 && <p className="text-center text-gray-500 p-8">저장된 쿼리가 없습니다.</p>}
                 </div>
-            </FullScreenModal>
-
-            <FullScreenModal 
-                isOpen={isAiModalOpen} 
-                onClose={() => setAiModalOpen(false)} 
-                title="AI 학습 데이터 관리"
-                footer={
-                    <button onClick={handleAddLearningItem} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">규칙 추가</button>
-                }
-            >
-                <div className="space-y-2" onDragOver={handleDragOver} onDrop={handleDrop}>
-                    {learningItems.map((item, index) => (
-                         <React.Fragment key={item.id}>
-                            {dropIndex === index && <div className="drag-over-placeholder !h-16" />}
-                            <div onDragStart={(e) => handleDragStart(e, index)} onDragEnter={(e) => handleDragEnter(e, index)} onDragEnd={handleDragEnd} draggable className="bg-white p-3 rounded-lg border border-gray-200 cursor-grab" onClick={() => {
-                                setAiModalOpen(false);
-                                setEditingLearningItem(item)
-                            }}>
-                                <div className="flex items-center justify-between gap-2">
-                                    <p className="font-bold text-gray-800 flex-grow truncate">{item.title}</p>
-                                    <button onClick={(e) => handleDeleteLearningItem(e, item.id)} className="p-1.5 rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 flex-shrink-0" title="삭제"><TrashIcon className="w-5 h-5"/></button>
-                                </div>
-                            </div>
-                         </React.Fragment>
-                    ))}
-                    {dropIndex === learningItems.length && <div className="drag-over-placeholder !h-16" />}
-                </div>
-            </FullScreenModal>
-            
-            <CompactModal 
-                containerRef={saveModalRef}
-                isOpen={!!saveModalState} 
-                onClose={() => setSaveModalState(null)} 
-                title="새 쿼리 저장" 
-                footer={
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setSaveModalState(null)} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">취소</button>
-                        <button 
-                            onClick={async () => {
-                                if (saveModalState && saveModalState.name) {
-                                    await addSavedQuery({
-                                        name: saveModalState.name,
-                                        query: saveModalState.query,
-                                        type: saveModalState.type,
-                                        isQuickRun: false
-                                    });
-                                    showToast('쿼리가 저장되었습니다.', 'success');
-                                    setSaveModalState(null);
-                                } else {
-                                    showAlert('쿼리 이름을 입력해주세요.');
-                                }
-                            }}
-                            disabled={saveModalState?.isGeneratingName}
-                            className="relative h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95 disabled:bg-gray-400"
-                        >
-                            {saveModalState?.isGeneratingName ? <SpinnerIcon className="w-6 h-6"/> : '저장'}
-                        </button>
-                    </div>
-                }
-            >
-                {saveModalState && (
-                    <div className="flex flex-col space-y-4">
-                        <input 
-                            type="text" 
-                            value={saveModalState.name} 
-                            onChange={e => setSaveModalState(s => s ? { ...s, name: e.target.value } : null)} 
-                            placeholder="쿼리 이름" 
-                            disabled={saveModalState.isGeneratingName}
-                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" />
-                        <textarea 
-                            value={saveModalState.query} 
-                            readOnly 
-                            className="w-full h-48 p-3 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50 resize-none" />
-                    </div>
-                )}
-            </CompactModal>
-            
-            <FullScreenModal 
-                isOpen={!!editingQuery} 
-                onClose={() => setEditingQuery(null)} 
-                title={editingQuery?.id === 'new' ? '새 쿼리 추가' : '저장된 쿼리 수정'}
-                footer={
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setEditingQuery(null)} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">취소</button>
-                        <button onClick={handleSaveEditingQuery} className="h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95">저장</button>
-                    </div>
-                }
-            >
-                {editingQuery && (
-                    <div className="p-4 h-full flex flex-col space-y-3">
-                        <div>
-                            <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 이름</label>
-                            <input 
-                                type="text" 
-                                value={editingQuery.name} 
-                                onChange={e => setEditingQuery({ ...editingQuery, name: e.target.value })} 
-                                placeholder="저장할 쿼리의 이름" 
-                                className="w-full p-2.5 border border-gray-300 rounded-lg text-base font-semibold" 
-                            />
-                        </div>
-                        <div className="flex flex-col flex-grow">
-                            <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 내용</label>
-                            <textarea 
-                                value={editingQuery.query} 
-                                onChange={e => setEditingQuery({ ...editingQuery, query: e.target.value })} 
-                                placeholder="SELECT * FROM ..." 
-                                className="w-full flex-grow p-2.5 border border-gray-300 rounded-lg font-mono text-sm resize-none" 
-                            />
-                        </div>
-                    </div>
-                )}
             </FullScreenModal>
             
             <FullScreenModal
-                isOpen={!!editingLearningItem} 
-                onClose={() => setEditingLearningItem(null)} 
-                title={editingLearningItem?.id && !editingLearningItem.id.startsWith('item_') ? 'AI 학습 규칙 수정' : 'AI 학습 규칙 추가'}
+                isOpen={isAiModalOpen}
+                onClose={() => setAiModalOpen(false)}
+                title="AI 학습 및 규칙"
                 footer={
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setEditingLearningItem(null)} className="h-12 px-4 bg-gray-200 text-gray-700 rounded-lg font-semibold text-base hover:bg-gray-300 transition shadow-sm flex items-center justify-center active:scale-95">취소</button>
-                        <button onClick={() => { if (editingLearningItem) handleSaveLearningItem(editingLearningItem); }} className="h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95">저장</button>
-                    </div>
+                     <button onClick={handleAddLearningItem} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">
+                        새 규칙 추가
+                    </button>
                 }
             >
-                 {editingLearningItem && (
-                    <div className="p-4 h-full flex flex-col space-y-3">
+                <div className="p-2" onDragOver={handleDragOver} onDrop={handleDrop}>
+                    {learningItems.map((item, index) => (
+                        <React.Fragment key={item.id}>
+                            {dropIndex === index && <div className="h-1 bg-blue-300 rounded-full my-1"/>}
+                            <div
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, index)}
+                                onDragEnter={(e) => handleDragEnter(e, index)}
+                                onDragEnd={handleDragEnd}
+                                className="bg-white p-3 rounded-lg border border-gray-200 flex items-center gap-3 cursor-grab mb-2"
+                            >
+                                <div className="flex-grow" onClick={() => { setAiModalOpen(false); setEditingLearningItem(item); }}>
+                                    <p className="font-bold text-gray-800">{item.title}</p>
+                                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.content}</p>
+                                </div>
+                                 <button
+                                    onClick={(e) => handleDeleteLearningItem(e, item.id)}
+                                    className="p-2 text-gray-500 hover:bg-rose-100 hover:text-rose-600 rounded-full flex-shrink-0"
+                                >
+                                    <TrashIcon className="w-5 h-5"/>
+                                </button>
+                            </div>
+                         </React.Fragment>
+                    ))}
+                    {dropIndex === learningItems.length && <div className="h-1 bg-blue-300 rounded-full my-1"/>}
+                    {learningItems.length === 0 && <p className="text-center text-gray-500 p-8">학습된 규칙이 없습니다.</p>}
+                </div>
+            </FullScreenModal>
+            
+            {editingQuery && (
+                <FullScreenModal
+                    isOpen={true}
+                    onClose={() => setEditingQuery(null)}
+                    title={editingQuery.id === 'new' ? '새 쿼리 추가' : '쿼리 편집'}
+                    footer={<button onClick={handleSaveEditingQuery} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg">저장</button>}
+                >
+                    <div className="p-4 space-y-4">
                         <div>
-                            <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 제목</label>
-                            <input 
-                                type="text" 
-                                value={editingLearningItem.title} 
-                                onChange={e => setEditingLearningItem({ ...editingLearningItem, title: e.target.value })} 
-                                placeholder="AI가 기억할 규칙의 제목" 
-                                className="w-full p-2.5 border border-gray-300 rounded-lg text-base font-semibold"
+                            <label className="text-sm font-bold text-gray-700 mb-2 block">쿼리 이름</label>
+                            <input
+                                type="text"
+                                value={editingQuery.name}
+                                onChange={e => setEditingQuery({ ...editingQuery, name: e.target.value })}
+                                className="w-full p-3 border border-gray-300 rounded-lg text-base"
                             />
                         </div>
-                        <div className="flex flex-col flex-grow">
-                             <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 내용</label>
-                            <textarea 
-                                value={editingLearningItem.content} 
-                                onChange={e => setEditingLearningItem({ ...editingLearningItem, content: e.target.value })} 
-                                placeholder="예: '재고'는 'parts' 테이블의 'onhand' 컬럼을 의미합니다." 
-                                className="w-full flex-grow p-2.5 border border-gray-300 rounded-lg text-sm resize-none"
+                        <div>
+                             <label className="text-sm font-bold text-gray-700 mb-2 block">쿼리 내용</label>
+                            <textarea
+                                value={editingQuery.query}
+                                onChange={e => setEditingQuery({ ...editingQuery, query: e.target.value })}
+                                className="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm"
+                                rows={8}
+                            />
+                        </div>
+                        <div className="flex bg-gray-100 rounded-lg p-1">
+                            <button onClick={() => setEditingQuery({ ...editingQuery, type: 'sql' })} className={`flex-1 py-2 text-sm font-bold ${editingQuery.type === 'sql' ? 'bg-white shadow rounded' : ''}`}>SQL</button>
+                            <button onClick={() => setEditingQuery({ ...editingQuery, type: 'natural' })} className={`flex-1 py-2 text-sm font-bold ${editingQuery.type === 'natural' ? 'bg-white shadow rounded' : ''}`}>자연어</button>
+                        </div>
+                        <div className="pt-2">
+                             <ToggleSwitch id="quick-run" label="빠른 실행 쿼리" checked={!!editingQuery.isQuickRun} onChange={c => setEditingQuery({ ...editingQuery, isQuickRun: c })} color="blue" />
+                        </div>
+                    </div>
+                </FullScreenModal>
+            )}
+
+            {editingLearningItem && (
+                 <FullScreenModal
+                    isOpen={true}
+                    onClose={() => setEditingLearningItem(null)}
+                    title={learningItems.some(i => i.id === editingLearningItem.id) ? '규칙 편집' : '새 규칙 추가'}
+                    footer={<button onClick={() => handleSaveLearningItem(editingLearningItem)} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg">저장</button>}
+                >
+                    <div className="p-4 space-y-4 flex flex-col h-full">
+                        <div>
+                            <label className="text-sm font-bold text-gray-700 mb-2 block">규칙 제목</label>
+                            <input
+                                type="text"
+                                placeholder="예: 인기 상품 기준"
+                                value={editingLearningItem.title}
+                                onChange={e => setEditingLearningItem({ ...editingLearningItem, title: e.target.value })}
+                                className="w-full p-3 border border-gray-300 rounded-lg text-base"
+                            />
+                        </div>
+                        <div className="flex-grow flex flex-col">
+                            <label className="text-sm font-bold text-gray-700 mb-2 block">규칙 내용</label>
+                            <textarea
+                                placeholder="AI에게 알려줄 규칙이나 맥락을 자유롭게 작성하세요."
+                                value={editingLearningItem.content}
+                                onChange={e => setEditingLearningItem({ ...editingLearningItem, content: e.target.value })}
+                                className="w-full p-3 border border-gray-300 rounded-lg text-sm flex-grow"
                             />
                         </div>
                     </div>
-                 )}
-            </FullScreenModal>
+                </FullScreenModal>
+            )}
+
+            {saveModalState && (
+                <CompactModal
+                    containerRef={saveModalRef}
+                    isOpen={true}
+                    onClose={() => setSaveModalState(null)}
+                    title="쿼리 저장"
+                    footer={
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => setSaveModalState(null)} className="h-12 bg-gray-200 text-gray-700 rounded-lg font-semibold">취소</button>
+                            <button
+                                onClick={async () => {
+                                    if (saveModalState.name) {
+                                        await addSavedQuery({
+                                            name: saveModalState.name,
+                                            query: saveModalState.query,
+                                            type: saveModalState.type,
+                                        });
+                                        showToast('쿼리가 저장되었습니다.', 'success');
+                                        setSaveModalState(null);
+                                    }
+                                }}
+                                className="h-12 bg-blue-600 text-white font-bold rounded-lg"
+                                disabled={!saveModalState.name || saveModalState.isGeneratingName}
+                            >
+                                저장
+                            </button>
+                        </div>
+                    }
+                >
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-sm font-bold text-gray-700 mb-2 block">쿼리 이름</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={saveModalState.name}
+                                    onChange={e => setSaveModalState({ ...saveModalState, name: e.target.value })}
+                                    className="w-full p-3 border border-gray-300 rounded-lg text-base"
+                                    disabled={saveModalState.isGeneratingName}
+                                />
+                                {saveModalState.isGeneratingName && <SpinnerIcon className="w-5 h-5 text-blue-500 absolute top-1/2 right-3 -translate-y-1/2" />}
+                            </div>
+                        </div>
+                        <div>
+                             <label className="text-sm font-bold text-gray-700 mb-2 block">쿼리 내용</label>
+                            <textarea
+                                readOnly
+                                value={saveModalState.query}
+                                className="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50"
+                                rows={5}
+                            />
+                        </div>
+                    </div>
+                </CompactModal>
+            )}
             
             <VariableInputModal
                 state={variableInputState}
-                onClose={() => {
-                    setVariableInputState(null);
-                    isProcessingVariableQuery.current = false;
-                }}
+                onClose={() => { setVariableInputState(null); isProcessingVariableQuery.current = false; }}
                 onExecute={async (finalQuery) => {
-                    const originalQueryName = variableInputState?.query.name;
                     setVariableInputState(null);
-                    try {
-                        await executeQuery(finalQuery, `@${originalQueryName}`);
-                    } finally {
-                        isProcessingVariableQuery.current = false;
-                    }
+                    await executeQuery(finalQuery);
+                    isProcessingVariableQuery.current = false;
                 }}
             />
 
             {renderUpdatePreviewModal()}
-
         </div>
     );
 };

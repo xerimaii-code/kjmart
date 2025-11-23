@@ -14,33 +14,27 @@ async function fetchApi(body: object, signal?: AbortSignal) {
         if (!response.ok) {
             let errorDetails = `Server responded with status ${response.status}`;
             try {
-                // Try to parse error response as JSON
                 const errorData = await response.json();
                 errorDetails = errorData.details || errorData.error || errorDetails;
             } catch (e) {
-                // If not JSON, try to get text content
                 try {
                     errorDetails = await response.text();
                 } catch (textErr) {
-                    // Fallback if text() also fails
+                    // Fallback
                 }
             }
             throw new Error(errorDetails);
         }
         
-        // Check if response has content before trying to parse JSON
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.indexOf("application/json") !== -1) {
             return await response.json();
         } else {
-            // Handle cases where the server might return a non-JSON success response
             return { success: true, message: await response.text() };
         }
 
     } catch (err: any) {
-        // Re-throw network errors or errors from the above block
         if (err instanceof SyntaxError) {
-            // This happens if response.json() fails
             throw new Error(`Failed to parse server response as JSON. The server may have returned an error page. Raw message: ${err.message}`);
         }
         throw new Error(err.message || 'API 요청에 실패했습니다.');
@@ -106,14 +100,15 @@ export async function syncCustomersAndProductsFromDb(): Promise<{ customers: any
 
 export async function syncCustomersFromDb(): Promise<any[]> {
     const result = await fetchApi({ type: 'syncCustomers' });
-    // FIX: Safely access recordset from the result object.
-    // This prevents a "map is not a function" error if the result is not an array.
     return result?.recordset || [];
 }
 
 export async function syncProductsIncrementally(lastSyncDate: string | null): Promise<any[]> {
     const result = await fetchApi({ type: 'syncProductsIncrementally', lastSyncDate });
-    // FIX: Safely access recordset from the result object.
-    // This prevents a "forEach is not a function" error if the result is not an array.
+    return result?.recordset || [];
+}
+
+export async function searchProductsOnline(searchTerm: string): Promise<any[]> {
+    const result = await fetchApi({ type: 'searchProductsOnline', searchTerm });
     return result?.recordset || [];
 }

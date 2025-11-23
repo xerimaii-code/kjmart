@@ -159,98 +159,6 @@ const SyncSection: React.FC<{
                 accept=".xlsx, .xls"
             />
             <h4 className="text-base font-bold text-gray-700">{dataTypeKorean} 데이터</h4>
-            {/*
-            <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
-                <div className="space-y-3">
-                     <p className="text-xs text-center text-gray-500 -mt-1">Google Drive의 엑셀 파일과 동기화합니다.</p>
-                    {settings?.fileId ? (
-                        <>
-                            <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-gray-200">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                    <DocumentIcon className="w-5 h-5 text-gray-500 flex-shrink-0" />
-                                    <span className="text-sm text-gray-800 font-medium truncate" title={settings.fileName}>{settings.fileName}</span>
-                                </div>
-                                <button onClick={handleDisconnect} className="text-xs font-semibold text-red-600 hover:underline flex-shrink-0">연결 해제</button>
-                            </div>
-                            {settings.lastSyncTime && (
-                                <p className="text-xs text-center text-gray-500">
-                                    마지막 동기화: {new Date(settings.lastSyncTime).toLocaleString()}
-                                </p>
-                            )}
-                            <div className="p-2.5 bg-white rounded-lg border border-gray-200 flex justify-center">
-                                <ToggleSwitch
-                                    id={`autosync-${dataType}`}
-                                    label="자동 동기화 (미구현)"
-                                    checked={settings.autoSync}
-                                    onChange={handleAutoSyncToggle}
-                                    color="blue"
-                                    disabled
-                                />
-                            </div>
-                        </>
-                    ) : (
-                        <p className="text-sm text-gray-500 text-center py-2">연결된 Google Drive 파일이 없습니다.</p>
-                    )}
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                        <button
-                            onClick={handleSelectFile}
-                            disabled={isOperationInProgress}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                        >
-                            {isPicking ? <SpinnerIcon className="w-5 h-5" /> : <GoogleDriveIcon className="w-5 h-5" />}
-                            <span>파일 선택</span>
-                        </button>
-                        <button
-                            onClick={handleSyncFromDrive}
-                            disabled={isOperationInProgress || !settings?.fileId}
-                            className="relative w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                        >
-                            {isCurrentSyncForThisType && syncSource === 'drive' ? (
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                    <SpinnerIcon className="w-5 h-5" />
-                                </div>
-                            ) : (
-                                <>
-                                    <GoogleDriveIcon className="w-5 h-5" />
-                                    <span>동기화</span>
-                                </>
-                            )}
-                        </button>
-                    </div>
-                </div>
-            </div>
-            */}
-            {/*
-             <div className="p-4 border border-gray-200 rounded-xl bg-gray-50/50">
-                <div className="space-y-3">
-                    <p className="text-xs text-center text-gray-500">기기에 저장된 엑셀 파일로 1회성 동기화를 합니다.</p>
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isOperationInProgress}
-                        className="relative w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 transition active:scale-95 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                    >
-                        {isCurrentSyncForThisType && syncSource === 'local' ? (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                                <SpinnerIcon className="w-5 h-5" />
-                            </div>
-                        ) : (
-                           <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                </svg>
-                                <span>로컬 파일로 동기화</span>
-                           </>
-                        )}
-                    </button>
-                </div>
-                {isCurrentSyncForThisType && (
-                    <div className="mt-3 text-center text-sm text-blue-600 font-medium">
-                        <p>{syncStatusText}</p>
-                    </div>
-                )}
-            </div>
-            */}
         </div>
     );
 };
@@ -291,10 +199,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         scanSettings, 
         logRetentionDays,
         googleDriveSyncSettings,
+        dataSourceSettings,
         setSelectedCameraId, 
         setScanSettings,
         setLogRetentionDays,
         setGoogleDriveSyncSettings,
+        setDataSourceSettings,
     } = useDeviceSettings();
 
     const { resetData, forceFullSync, syncWithDb } = useDataActions();
@@ -387,7 +297,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 try {
                     await forceFullSync();
                 } catch (e) {
-                    // This error is already handled by forceFullSync internally with an alert
                     console.error("Force sync failed from SettingsPage:", e);
                 }
             },
@@ -464,6 +373,44 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         )}
                     </CollapsibleCard>
 
+                    <CollapsibleCard title="데이터 소스 설정" icon={<DatabaseIcon className="w-6 h-6 text-gray-500" />}>
+                        <div className="space-y-4">
+                            <div>
+                                <h4 className="font-bold text-gray-700 mb-2">신규 발주</h4>
+                                <div className="flex bg-gray-100 rounded-lg p-1">
+                                    <button onClick={() => setDataSourceSettings({ newOrder: 'offline' })} className={`flex-1 py-2 px-4 rounded-md text-sm font-bold transition-colors ${dataSourceSettings.newOrder === 'offline' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
+                                        오프라인 우선
+                                    </button>
+                                    <button onClick={() => setDataSourceSettings({ newOrder: 'online' })} className={`flex-1 py-2 px-4 rounded-md text-sm font-bold transition-colors ${dataSourceSettings.newOrder === 'online' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
+                                        온라인 우선
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-gray-700 mb-2">상품 조회</h4>
+                                <div className="flex bg-gray-100 rounded-lg p-1">
+                                    <button onClick={() => setDataSourceSettings({ productInquiry: 'offline' })} className={`flex-1 py-2 px-4 rounded-md text-sm font-bold transition-colors ${dataSourceSettings.productInquiry === 'offline' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
+                                        오프라인 우선
+                                    </button>
+                                    <button onClick={() => setDataSourceSettings({ productInquiry: 'online' })} className={`flex-1 py-2 px-4 rounded-md text-sm font-bold transition-colors ${dataSourceSettings.productInquiry === 'online' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
+                                        온라인 우선
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="border-t border-gray-200/80 my-2 pt-4">
+                                <div className="flex justify-between items-center p-3 bg-gray-50/80 rounded-lg">
+                                    <ToggleSwitch 
+                                        id="auto-switch"
+                                        label="통신 신호가 약할 때 자동 오프라인 전환"
+                                        checked={dataSourceSettings.autoSwitch}
+                                        onChange={(checked) => setDataSourceSettings({ autoSwitch: checked })}
+                                        color="blue"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </CollapsibleCard>
+
                     <CollapsibleCard title="데이터 동기화" icon={<DatabaseIcon className="w-6 h-6 text-gray-500" />}>
                         <div className="p-4 border border-blue-200 rounded-xl bg-blue-50/50 mb-4">
                             <div className="space-y-3">
@@ -487,19 +434,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 </button>
                             </div>
                         </div>
-                        {/*
-                        <SyncSection 
-                            dataType="customers" 
-                            settings={googleDriveSyncSettings.customers}
-                            onSettingsChange={(s) => setGoogleDriveSyncSettings('customers', s)}
-                        />
-                        <div className="border-t border-gray-200/80 my-4" />
-                        <SyncSection 
-                            dataType="products"
-                            settings={googleDriveSyncSettings.products}
-                            onSettingsChange={(s) => setGoogleDriveSyncSettings('products', s)}
-                        />
-                        */}
                     </CollapsibleCard>
                     
                     <CollapsibleCard title="데이터 관리" icon={<UserCircleIcon className="w-6 h-6 text-gray-500" />}>

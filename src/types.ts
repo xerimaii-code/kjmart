@@ -7,10 +7,12 @@ export interface Customer {
 export interface Product {
     barcode: string;
     name: string;
-    costPrice: number;      // 단가 (매입가)
-    sellingPrice: number;   // 판가 (판매가)
-    salePrice?: string;     // 행사가
-    saleEndDate?: string;   // 행사 종료일 (YYYY-MM-DD)
+    costPrice: number;      // 매입가
+    sellingPrice: number;   // 판매가
+    eventCostPrice?: number; // 행사매입가
+    salePrice?: number;     // 행사판매가
+    saleStartDate?: string; // 행사시작일 (YYYY-MM-DD)
+    saleEndDate?: string;   // 행사종료일 (YYYY-MM-DD)
     supplierName?: string;  // 거래처명
     lastModified?: string;
 }
@@ -89,5 +91,10 @@ export interface DeviceSettings {
     googleDriveSyncSettings: {
         customers: SyncSettings | null;
         products: SyncSettings | null;
+    };
+    dataSourceSettings: {
+        newOrder: 'offline' | 'online';
+        productInquiry: 'offline' | 'online';
+        autoSwitch: boolean;
     };
 }

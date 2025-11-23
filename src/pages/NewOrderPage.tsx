@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
-import { useDataState, useDataActions, useAlert, useScanner, useMiscUI, useModals } from '../context/AppContext';
+import { useDataState, useDataActions, useAlert, useScanner, useMiscUI, useModals, useDeviceSettings } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
 import { RemoveIcon, SpinnerIcon, ChatBubbleLeftIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
@@ -8,6 +8,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from '../components/SearchDropdown';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
+import { searchProductsOnline } from '../services/sqlService';
 
 const DRAFT_KEY = 'new-order-draft';
 const MAX_SEARCH_RESULTS = 50;
@@ -15,6 +16,19 @@ const MAX_SEARCH_RESULTS = 50;
 interface NewOrderPageProps {
     isActive: boolean;
 }
+
+const mapSqlResultToProduct = (r: any): Product => ({
+    barcode: String(r.바코드 || ''),
+    name: String(r.상품명 || ''),
+    costPrice: parseFloat(String(r.매입가 || 0)),
+    sellingPrice: parseFloat(String(r.판매가 || 0)),
+    eventCostPrice: r.행사매입가 ? parseFloat(String(r.행사매입가)) : undefined,
+    salePrice: r.행사판매가 ? parseFloat(String(r.행사판매가)) : undefined,
+    saleStartDate: r.행사시작일 || undefined,
+    saleEndDate: r.행사종료일 || undefined,
+    supplierName: r.거래처명 || undefined,
+    lastModified: r.upday1 || undefined,
+});
 
 const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
     if (!show) return null;
@@ -26,8 +40,8 @@ const DraftLoadedToast: React.FC<{ show: boolean }> = ({ show }) => {
 };
 
 const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: OrderItem; product: Product | undefined; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void; index: number; }) => {
-    const saleIsActive = product ? isSaleActive(product.saleEndDate) : false;
-    const hasSalePrice = product ? !!product.salePrice : false;
+    const saleIsActive = product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false;
+    const hasSalePrice = product ? (product.salePrice !== undefined && product.salePrice !== null) : false;
 
     return (
         <div
@@ -58,15 +72,15 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: O
                                 className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
                                 style={!saleIsActive ? { fontSize: '80%' } : {}}
                             >
-                                {product.salePrice}원
+                                {product.salePrice?.toLocaleString()}원
                             </span>
                         )}
                     </div>
                 )}
-                 {product && product.saleEndDate && (
+                 {product && (product.saleStartDate || product.saleEndDate) && (
                      <div className="text-xs text-gray-500">
                         <span className={saleIsActive ? 'font-semibold text-blue-600' : 'text-gray-400'}>
-                            행사기간: ~{product.saleEndDate}
+                            행사기간: {product.saleStartDate ? `${product.saleStartDate}~` : `~`}{product.saleEndDate}
                         </span>
                      </div>
                 )}
@@ -94,8 +108,9 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     const { addOrder } = useDataActions();
     const { showAlert } = useAlert();
     const { openScanner } = useScanner();
-    const { setLastModifiedOrderId } = useMiscUI();
+    const { setLastModifiedOrderId, sqlStatus } = useMiscUI();
     const { openAddItemModal, openEditItemModal } = useModals();
+    const { dataSourceSettings } = useDeviceSettings();
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
@@ -105,6 +120,8 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
     
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
     const [showProductDropdown, setShowProductDropdown] = useState(false);
+    const [productSearchResults, setProductSearchResults] = useState<Product[]>([]);
+    const [isSearchingProducts, setIsSearchingProducts] = useState(false);
 
     const isCustomerSelected = !!selectedCustomer; 
 
@@ -195,21 +212,42 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
         return customers.filter(c => c.name.toLowerCase().includes(searchTerm) || c.comcode.includes(searchTerm));
     }, [customers, debouncedCustomerSearch, isCustomerSelected]);
 
-    const filteredProducts = useMemo(() => {
-        const searchTerm = debouncedProductSearch.trim().toLowerCase();
-        if (!searchTerm) return [];
-        
-        const results: Product[] = [];
-        for (const p of products) {
-            if (p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm)) {
-                results.push(p);
-                if (results.length >= MAX_SEARCH_RESULTS) {
-                    break;
-                }
-            }
+    useEffect(() => {
+        if (!isCustomerSelected || !debouncedProductSearch) {
+            setProductSearchResults([]);
+            return;
         }
-        return results;
-    }, [products, debouncedProductSearch]);
+    
+        const search = async () => {
+            const preferredSource = dataSourceSettings.newOrder;
+            const canGoOnline = sqlStatus === 'connected';
+            const useOnline = preferredSource === 'online' && canGoOnline;
+    
+            setIsSearchingProducts(true);
+            if (useOnline) {
+                try {
+                    const results = await searchProductsOnline(debouncedProductSearch);
+                    setProductSearchResults(results.map(mapSqlResultToProduct).slice(0, MAX_SEARCH_RESULTS));
+                } catch (e) {
+                    console.error("Online product search failed in NewOrderPage:", e);
+                    if (dataSourceSettings.autoSwitch) {
+                        const searchTerm = debouncedProductSearch.trim().toLowerCase();
+                        const filtered = products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm)).slice(0, MAX_SEARCH_RESULTS);
+                        setProductSearchResults(filtered);
+                    }
+                } finally {
+                    setIsSearchingProducts(false);
+                }
+            } else {
+                const searchTerm = debouncedProductSearch.trim().toLowerCase();
+                const filtered = products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm)).slice(0, MAX_SEARCH_RESULTS);
+                setProductSearchResults(filtered);
+                setIsSearchingProducts(false);
+            }
+        };
+    
+        search();
+    }, [debouncedProductSearch, isCustomerSelected, dataSourceSettings, sqlStatus, products]);
 
     // --- Drag and Drop State and Handlers ---
     const dragIndex = useRef<number | null>(null);
@@ -449,13 +487,18 @@ const NewOrderPage: React.FC<NewOrderPageProps> = ({ isActive }) => {
                                 className={`w-full px-3 h-11 border ${isCustomerSelected ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-100'} rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400 transition-colors duration-200 text-base pr-28`}
                                 autoComplete="off"
                             />
+                             {isSearchingProducts && (
+                                <div className="absolute top-1/2 left-3 -translate-y-1/2">
+                                    <SpinnerIcon className="w-5 h-5 text-blue-500" />
+                                </div>
+                            )}
                             <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
                                 <ToggleSwitch id="new-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
                             </div>
                             <SearchDropdown<Product>
-                                items={filteredProducts}
+                                items={productSearchResults}
                                 renderItem={(p) => <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />}
-                                show={showProductDropdown}
+                                show={showProductDropdown && !!debouncedProductSearch}
                             />
                         </div>
                     </div>

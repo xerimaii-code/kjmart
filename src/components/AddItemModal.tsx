@@ -78,8 +78,8 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         });
     };
     
-    const saleIsActive = isSaleActive(product.saleEndDate);
-    const hasSalePrice = !!product.salePrice;
+    const saleIsActive = isSaleActive(product.saleStartDate, product.saleEndDate);
+    const hasSalePrice = product.salePrice !== undefined && product.salePrice !== null;
 
     return (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
@@ -98,16 +98,16 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                                     className={`${saleIsActive ? 'text-red-600 font-bold' : 'text-gray-500'}`}
                                     style={!saleIsActive ? { fontSize: '80%' } : {}}
                                 >
-                                    {product.salePrice}원
+                                    {product.salePrice?.toLocaleString()}원
                                 </span>
                             )}
                         </div>
-                        {(product.saleEndDate || product.supplierName) && (
+                        {(product.saleStartDate || product.saleEndDate || product.supplierName) && (
                             <div className="text-xs text-gray-500">
                                 <div className="flex items-center justify-center gap-x-3">
-                                    {product.saleEndDate && (
+                                    {(product.saleStartDate || product.saleEndDate) && (
                                         <span className={saleIsActive ? 'font-semibold text-blue-600' : 'text-gray-400'}>
-                                            ~{product.saleEndDate}
+                                            {product.saleStartDate ? `${product.saleStartDate}~` : `~`}{product.saleEndDate}
                                         </span>
                                     )}
                                     {product.supplierName && (

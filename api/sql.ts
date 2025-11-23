@@ -51,21 +51,28 @@ WHERE
     comp.isuse <> '0';
 `;
 
-// Using a subquery for stability in the Vercel build environment
 const fullProductSyncQuery = `
 SELECT * FROM (
     SELECT
         comp.comname AS 거래처명,
         parts.barcode AS 바코드,
         (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN parts.descr + ' [' + parts.spec + ']' ELSE parts.descr END) AS 상품명,
-        parts.money0vat AS 매입가가,
+        parts.money0vat AS 매입가,
         parts.money1 AS 판매가,
-        parts.salemoney0 AS 행사가,
+        parts.salemoney0 AS 행사매입가,
+        sr.salemoney1 AS 행사판매가,
+        sr.startday AS 행사시작일,
         parts.saleendday AS 행사종료일,
         parts.upday1,
         parts.isuse
     FROM
-        comp INNER JOIN parts ON comp.comcode = parts.comcode
+        comp
+    INNER JOIN
+        parts ON comp.comcode = parts.comcode
+    LEFT JOIN
+        dbo.sale_ready AS sr ON parts.barcode = sr.barcode AND parts.comcode = sr.comcode
+        AND sr.isappl = 'Y'
+        AND CONVERT(VARCHAR(10), GETDATE(), 121) BETWEEN sr.startday AND sr.endday
 ) AS ProductData
 WHERE
     (
@@ -81,7 +88,7 @@ WHERE
         )
         AND ProductData.바코드 IS NOT NULL
         AND ProductData.상품명 NOT LIKE N'%*---*%'
-        AND ProductData.매입가가 <> 0
+        AND ProductData.매입가 <> 0
         AND ProductData.isuse <> '0'
     )
     OR (ProductData.바코드 NOT LIKE '0000000%')
@@ -94,14 +101,22 @@ SELECT
     comp.comname AS 거래처명,
     parts.barcode AS 바코드,
     (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN parts.descr + ' [' + parts.spec + ']' ELSE parts.descr END) AS 상품명,
-    parts.money0vat AS 매입가가,
+    parts.money0vat AS 매입가,
     parts.money1 AS 판매가,
-    parts.salemoney0 AS 행사가,
+    parts.salemoney0 AS 행사매입가,
+    sr.salemoney1 AS 행사판매가,
+    sr.startday AS 행사시작일,
     parts.saleendday AS 행사종료일,
     parts.upday1,
     parts.isuse
 FROM
-    comp INNER JOIN parts ON comp.comcode = parts.comcode
+    comp
+INNER JOIN
+    parts ON comp.comcode = parts.comcode
+LEFT JOIN
+    dbo.sale_ready AS sr ON parts.barcode = sr.barcode AND parts.comcode = sr.comcode
+    AND sr.isappl = 'Y'
+    AND CONVERT(VARCHAR(10), GETDATE(), 121) BETWEEN sr.startday AND sr.endday
 WHERE
     parts.upday1 >= @lastSyncDate;
 `;
@@ -129,7 +144,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         if (/^\s*update\s/i.test(lowerCaseQuery) && !confirmed) {
-            // UPDATE preview logic
             const transaction = new sql.Transaction(pool);
             try {
                 await transaction.begin();
@@ -149,12 +163,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const selectQuery = `SELECT * FROM ${tableName} ${whereClause}`;
 
                 const beforeResult = await transaction.request().query(selectQuery);
-                await transaction.request().query(query); // Execute the actual update
+                await transaction.request().query(query);
                 const afterResult = await transaction.request().query(selectQuery);
                 
-                await transaction.rollback(); // IMPORTANT: Rollback the changes
+                await transaction.rollback();
 
-                // Get primary keys for the table to help UI diffing
                 const primaryKeyResult = await pool.request().query(`
                     SELECT KU.column_name
                     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
@@ -177,10 +190,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (transaction.active) {
                     await transaction.rollback();
                 }
-                throw err; // Let the main error handler catch it
+                throw err;
             }
         } else {
-            // Regular SELECT or confirmed UPDATE
             const request = pool.request();
             const signal = (req as any).signal;
             if (signal) {
@@ -234,7 +246,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         const response = await ai.models.generateContent({
-          // FIX: Updated deprecated `gemini-pro` model to a recommended alternative.
           model: 'gemini-2.5-flash',
           contents: `Schema:\n${schemaString}\n\nQuestion: ${naturalLanguagePrompt}`,
           config: { systemInstruction }
@@ -254,7 +265,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { query, resultSummary } = req.body;
         const systemInstruction = "You are a helpful assistant that creates a short, descriptive name in Korean for a given query and its result summary. The name should be concise and reflect the purpose of the query. Do not add any extra text, just the name.";
         const response = await ai.models.generateContent({
-          // FIX: Updated deprecated `gemini-pro` model to a recommended alternative.
           model: 'gemini-2.5-flash',
           contents: [{ role: 'user', parts: [{ text: `Query: ${query}\nResult: ${resultSummary}\n\nGenerate a short, descriptive name for this query in Korean.` }] }],
           config: { systemInstruction }
@@ -284,13 +294,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'syncProductsIncrementally': {
         const { lastSyncDate } = req.body;
         if (!lastSyncDate) {
-            // If no date, it implies a full sync is needed, but this endpoint is for incremental.
-            // Returning empty is safer than returning all data. Client should handle initial sync.
             return res.status(200).json({ recordset: [], rowsAffected: 0 });
         }
         const request = pool.request();
         request.input('lastSyncDate', sql.NVarChar, lastSyncDate);
         const result = await request.query(incrementalProductSyncQuery);
+        res.status(200).json({ recordset: result.recordset, rowsAffected: result.rowsAffected[0] });
+        break;
+      }
+
+      case 'searchProductsOnline': {
+        const { searchTerm } = req.body;
+        if (!searchTerm) {
+          return res.status(200).json({ recordset: [], rowsAffected: 0 });
+        }
+        
+        const request = pool.request();
+        request.input('searchTerm', sql.NVarChar, `%${searchTerm}%`);
+        
+        const searchProductsQuery = `
+          SELECT * FROM (
+              SELECT
+                  comp.comname AS 거래처명,
+                  parts.barcode AS 바코드,
+                  (CASE WHEN parts.spec IS NOT NULL AND parts.spec <> '' THEN parts.descr + ' [' + parts.spec + ']' ELSE parts.descr END) AS 상품명,
+                  parts.money0vat AS 매입가,
+                  parts.money1 AS 판매가,
+                  parts.salemoney0 AS 행사매입가,
+                  sr.salemoney1 AS 행사판매가,
+                  sr.startday AS 행사시작일,
+                  parts.saleendday AS 행사종료일,
+                  parts.upday1,
+                  parts.isuse
+              FROM
+                  comp
+              INNER JOIN
+                  parts ON comp.comcode = parts.comcode
+              LEFT JOIN
+                  dbo.sale_ready AS sr ON parts.barcode = sr.barcode AND parts.comcode = sr.comcode
+                  AND sr.isappl = 'Y'
+                  AND CONVERT(VARCHAR(10), GETDATE(), 121) BETWEEN sr.startday AND sr.endday
+          ) AS ProductData
+          WHERE
+              (
+                  (
+                      (
+                          ProductData.거래처명 NOT LIKE N'%야채%' AND
+                          ProductData.거래처명 NOT LIKE N'%과일%' AND
+                          ProductData.거래처명 NOT LIKE N'%생선%' AND
+                          ProductData.거래처명 NOT LIKE N'%정육%' AND
+                          ProductData.거래처명 NOT LIKE N'%식품%' AND
+                          ProductData.거래처명 NOT LIKE N'%비식품%' AND
+                          ProductData.거래처명 NOT LIKE N'%기획%' AND
+                          ProductData.거래처명 NOT LIKE N'%경진청과%'
+                      )
+                      AND ProductData.바코드 IS NOT NULL
+                      AND ProductData.상품명 NOT LIKE N'%*---*%'
+                      AND ProductData.매입가 <> 0
+                      AND ProductData.isuse <> '0'
+                  )
+                  OR (ProductData.바코드 NOT LIKE '0000000%')
+              )
+              AND (ProductData.상품명 LIKE @searchTerm OR ProductData.바코드 LIKE @searchTerm)
+          ORDER BY
+              ProductData.상품명;
+        `;
+        
+        const result = await request.query(searchProductsQuery);
         res.status(200).json({ recordset: result.recordset, rowsAffected: result.rowsAffected[0] });
         break;
       }

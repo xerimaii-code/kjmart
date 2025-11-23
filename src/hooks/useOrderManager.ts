@@ -7,12 +7,21 @@ interface UseOrderManagerProps {
 }
 
 // Helper to check if a sale is active for a product
-export const isSaleActive = (saleEndDate?: string): boolean => {
+export const isSaleActive = (saleStartDate?: string, saleEndDate?: string): boolean => {
     if (!saleEndDate) return false;
     try {
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // Set to start of today for accurate date comparison
+        today.setHours(0, 0, 0, 0);
         const endDate = new Date(saleEndDate);
+        
+        if (saleStartDate) {
+            const startDate = new Date(saleStartDate);
+            // Ensure dates are valid before comparing
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return false;
+            return startDate <= today && endDate >= today;
+        }
+        
+        if (isNaN(endDate.getTime())) return false;
         return endDate >= today;
     } catch {
         return false;
