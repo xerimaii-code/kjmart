@@ -234,6 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         const response = await ai.models.generateContent({
+          // FIX: Updated deprecated `gemini-pro` model to a recommended alternative.
           model: 'gemini-2.5-flash',
           contents: `Schema:\n${schemaString}\n\nQuestion: ${naturalLanguagePrompt}`,
           config: { systemInstruction }
@@ -253,6 +254,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { query, resultSummary } = req.body;
         const systemInstruction = "You are a helpful assistant that creates a short, descriptive name in Korean for a given query and its result summary. The name should be concise and reflect the purpose of the query. Do not add any extra text, just the name.";
         const response = await ai.models.generateContent({
+          // FIX: Updated deprecated `gemini-pro` model to a recommended alternative.
           model: 'gemini-2.5-flash',
           contents: [{ role: 'user', parts: [{ text: `Query: ${query}\nResult: ${resultSummary}\n\nGenerate a short, descriptive name for this query in Korean.` }] }],
           config: { systemInstruction }
