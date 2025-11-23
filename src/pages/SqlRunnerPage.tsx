@@ -47,7 +47,8 @@ const FullScreenModal: React.FC<{
     title: string;
     children: React.ReactNode;
     footer?: React.ReactNode;
-}> = ({ isOpen, onClose, title, children, footer }) => {
+    headerActions?: React.ReactNode;
+}> = ({ isOpen, onClose, title, children, footer, headerActions }) => {
     const [isRendered, setIsRendered] = useState(false);
 
     useEffect(() => {
@@ -75,9 +76,15 @@ const FullScreenModal: React.FC<{
             >
                 <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">
                     <h2 className="text-lg font-bold text-gray-800 truncate">{title}</h2>
-                    <button onClick={onClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
-                        <RemoveIcon className="w-6 h-6"/>
-                    </button>
+                    {headerActions ? (
+                        <div className="absolute top-1/2 right-4 -translate-y-1/2">
+                            {headerActions}
+                        </div>
+                    ) : (
+                        <button onClick={onClose} className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
+                            <RemoveIcon className="w-6 h-6"/>
+                        </button>
+                    )}
                 </header>
                 <main className="flex-grow overflow-y-auto">
                     {children}
@@ -145,6 +152,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     const dragIndex = useRef<number | null>(null);
     const [dropIndex, setDropIndex] = useState<number | null>(null);
+    const variableCheckLock = useRef(false);
 
 
     useEffect(() => {
@@ -243,15 +251,17 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, [executeQuery, selectedTables, useSelectedTablesOnly, isAiMode]);
     
     const runQueryWithVariableCheck = useCallback((query: SavedQuery) => {
-        // This regex finds @ followed by one or more word characters (letters, numbers, underscore)
+        if (variableCheckLock.current) {
+            return; 
+        }
         const variableRegex = /@([a-zA-Z0-9_]+)/g;
-        // Use a Set to get unique variable names from the query string
         const detectedVariables = [...new Set(query.query.match(variableRegex))];
 
         if (query.type === 'sql' && detectedVariables.length > 0) {
+            variableCheckLock.current = true;
             setVariableInputState({
                 query,
-                variables: detectedVariables.map(v => v.substring(1)), // remove '@'
+                variables: detectedVariables.map(v => v.substring(1)), 
             });
         } else {
             if (query.type === 'sql') {
@@ -384,15 +394,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
     
-    const handleSaveQuery = () => {
-        const isNaturalQuery = !/^(SELECT|UPDATE|DELETE|INSERT)\b/i.test(lastSuccessfulQuery.trim());
-        if (isNaturalQuery) {
-            showAlert('자연어 쿼리는 저장할 수 없습니다.\n실행 후 "SQL 쿼리 저장"을 이용해주세요.');
-            return;
-        }
-        openSaveQueryModal(lastSuccessfulQuery, 'sql');
-    };
-
     const handleSaveGeneratedSql = async () => {
         if (generatedSql) {
             await openSaveQueryModal(generatedSql, 'sql');
@@ -409,11 +410,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             false
         );
     }, [openScanner, setSqlQueryInput]);
-
-    const handleQuickRun = (query: SavedQuery) => {
-        setSavedQueriesModalOpen(false);
-        runQueryWithVariableCheck(query);
-    };
 
     const handleAddNewQuery = () => {
         setSavedQueriesModalOpen(false);
@@ -436,7 +432,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
 
         if (id === 'new') {
-            // Add new query
             addSavedQuery({ name, query, type, isQuickRun })
                 .then(() => {
                     showToast('쿼리가 추가되었습니다.', 'success');
@@ -447,7 +442,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     showAlert('쿼리 추가에 실패했습니다.');
                 });
         } else {
-            // Update existing query
             updateSavedQuery(id, { name, query, type, isQuickRun })
                 .then(() => {
                     showToast('쿼리가 수정되었습니다.', 'success');
@@ -462,6 +456,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
 
     const handleAddLearningItem = () => {
+        setAiModalOpen(false);
         const id = 'item_' + Date.now();
         const newItem = { id, title: '', content: '' };
         setEditingLearningItem(newItem);
@@ -611,7 +606,6 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 e.preventDefault();
                 const form = e.currentTarget.closest('form');
                 if (form) {
-                    // FIX: Cast the result of querySelectorAll to HTMLInputElement[] to ensure correct typing for calling .focus().
                     const inputs = Array.from(form.querySelectorAll('input')) as HTMLInputElement[];
                     const currentIndex = inputs.findIndex(input => input === e.target);
                     if (currentIndex > -1 && currentIndex < inputs.length - 1) {
@@ -894,7 +888,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             <FullScreenModal 
                 isOpen={isSavedQueriesModalOpen} 
                 onClose={() => setSavedQueriesModalOpen(false)} 
-                title="저장된 쿼리"
+                title="쿼리"
                 footer={
                     <button 
                         onClick={handleAddNewQuery} 
@@ -908,7 +902,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     {savedQueries.map(q => (
                         <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
                             <div className="flex items-center gap-2">
-                                <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => runQueryWithVariableCheck(q)}>{q.name}</p>
+                                <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => {
+                                    setSavedQueriesModalOpen(false);
+                                    runQueryWithVariableCheck(q);
+                                }}>{q.name}</p>
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                      <button onClick={() => updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
                                         <StarIcon className="w-5 h-5"/>
@@ -926,14 +923,18 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={isAiModalOpen} 
                 onClose={() => setAiModalOpen(false)} 
                 title="AI 학습 데이터 관리" 
-                footer={
-                 <button onClick={handleAddLearningItem} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">규칙 추가</button>
-            }>
+                headerActions={
+                    <button onClick={handleAddLearningItem} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95">규칙 추가</button>
+                }
+            >
                 <div className="space-y-2" onDragOver={handleDragOver} onDrop={handleDrop}>
                     {learningItems.map((item, index) => (
                          <React.Fragment key={item.id}>
                             {dropIndex === index && <div className="drag-over-placeholder !h-16" />}
-                            <div onDragStart={(e) => handleDragStart(e, index)} onDragEnter={(e) => handleDragEnter(e, index)} onDragEnd={handleDragEnd} draggable className="bg-white p-3 rounded-lg border border-gray-200 cursor-grab" onClick={() => setEditingLearningItem(item)}>
+                            <div onDragStart={(e) => handleDragStart(e, index)} onDragEnter={(e) => handleDragEnter(e, index)} onDragEnd={handleDragEnd} draggable className="bg-white p-3 rounded-lg border border-gray-200 cursor-grab" onClick={() => {
+                                setAiModalOpen(false);
+                                setEditingLearningItem(item)
+                            }}>
                                 <div className="flex items-center justify-between gap-2">
                                     <p className="font-bold text-gray-800 flex-grow truncate">{item.title}</p>
                                     <button onClick={(e) => handleDeleteLearningItem(e, item.id)} className="p-1.5 rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 flex-shrink-0" title="삭제"><TrashIcon className="w-5 h-5"/></button>
@@ -949,7 +950,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={!!saveModalState} 
                 onClose={() => setSaveModalState(null)} 
                 title="새 쿼리 저장" 
-                footer={
+                headerActions={
                     <button 
                         onClick={async () => {
                             if (saveModalState && saveModalState.name) {
@@ -966,9 +967,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             }
                         }}
                         disabled={saveModalState?.isGeneratingName}
-                        className="relative w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30 flex items-center justify-center disabled:bg-gray-400"
+                        className="relative px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95 flex items-center justify-center disabled:bg-gray-400"
                     >
-                        {saveModalState?.isGeneratingName ? <SpinnerIcon className="w-6 h-6"/> : '저장'}
+                        {saveModalState?.isGeneratingName ? <SpinnerIcon className="w-5 h-5"/> : '저장'}
                     </button>
                 }
             >
@@ -993,14 +994,15 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={!!editingQuery} 
                 onClose={() => setEditingQuery(null)} 
                 title={editingQuery?.id === 'new' ? '새 쿼리 추가' : '저장된 쿼리 수정'}
-                footer={
-                 <button 
-                    onClick={handleSaveEditingQuery} 
-                    className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30"
-                >
-                    저장
-                </button>
-             }>
+                headerActions={
+                    <button 
+                        onClick={handleSaveEditingQuery} 
+                        className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95"
+                    >
+                        저장
+                    </button>
+                }
+             >
                 {editingQuery && (
                     <div className="flex flex-col h-full space-y-4 p-2">
                         <input 
@@ -1024,9 +1026,10 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={!!editingLearningItem} 
                 onClose={() => setEditingLearningItem(null)} 
                 title={editingLearningItem?.id && !editingLearningItem.id.startsWith('item_') ? 'AI 학습 규칙 수정' : 'AI 학습 규칙 추가'}
-                footer={
-                 <button onClick={() => { if (editingLearningItem) handleSaveLearningItem(editingLearningItem); }} className="w-full h-12 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">저장</button>
-            }>
+                headerActions={
+                     <button onClick={() => { if (editingLearningItem) handleSaveLearningItem(editingLearningItem); }} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg transition text-sm hover:bg-blue-700 active:scale-95">저장</button>
+                }
+            >
                  {editingLearningItem && (
                     <div className="flex flex-col h-full space-y-4 p-2">
                         <input 
@@ -1048,8 +1051,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             
             <VariableInputModal
                 state={variableInputState}
-                onClose={() => setVariableInputState(null)}
+                onClose={() => {
+                    variableCheckLock.current = false;
+                    setVariableInputState(null);
+                }}
                 onExecute={(finalQuery) => {
+                    variableCheckLock.current = false;
                     setVariableInputState(null);
                     executeQuery(finalQuery, `@${variableInputState?.query.name}`);
                 }}
