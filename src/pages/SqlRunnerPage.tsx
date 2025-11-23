@@ -241,6 +241,26 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             setStatus('error');
         }
     }, [executeQuery, selectedTables, useSelectedTablesOnly, isAiMode]);
+    
+    const runQueryWithVariableCheck = useCallback((query: SavedQuery) => {
+        // This regex finds @ followed by one or more word characters (letters, numbers, underscore)
+        const variableRegex = /@([a-zA-Z0-9_]+)/g;
+        // Use a Set to get unique variable names from the query string
+        const detectedVariables = [...new Set(query.query.match(variableRegex))];
+
+        if (query.type === 'sql' && detectedVariables.length > 0) {
+            setVariableInputState({
+                query,
+                variables: detectedVariables.map(v => v.substring(1)), // remove '@'
+            });
+        } else {
+            if (query.type === 'sql') {
+                executeQuery(query.query, `@${query.name}`);
+            } else {
+                processNaturalLanguageQuery(query.query);
+            }
+        }
+    }, [executeQuery, processNaturalLanguageQuery]);
 
     const processAndExecute = useCallback(async (input: string) => {
         const currentInput = input.trim();
@@ -255,8 +275,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             const queryName = currentInput.slice(1).split(/\s+/)[0];
             const savedQuery = savedQueries.find(q => q.name.toLowerCase() === queryName.toLowerCase());
             if (savedQuery) {
-                if (savedQuery.type === 'sql') executeQuery(savedQuery.query, `@${savedQuery.name}`);
-                else processNaturalLanguageQuery(savedQuery.query);
+                runQueryWithVariableCheck(savedQuery);
                 return;
             }
         }
@@ -264,7 +283,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         const isLikelySql = /^(SELECT|UPDATE|DELETE|INSERT|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(currentInput);
         if (isLikelySql && !isAiMode) executeQuery(currentInput);
         else processNaturalLanguageQuery(currentInput);
-    }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery, isAiMode]);
+    }, [executeQuery, savedQueries, showAlert, processNaturalLanguageQuery, isAiMode, runQueryWithVariableCheck]);
 
     const handleExecuteStart = () => {
         isExecuteLongPress.current = false;
@@ -341,7 +360,12 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setTableModalOpen(true);
     };
 
-    const openSaveQueryModal = async (queryToSave: string) => {
+    const openSaveQueryModal = async (queryToSave: string, type: 'sql') => {
+        if (type === 'sql' && !/select/i.test(queryToSave)) {
+            showAlert('SELECT 쿼리만 저장할 수 있습니다.');
+            return;
+        }
+
         setSaveModalState({
             query: queryToSave,
             type: 'sql',
@@ -350,12 +374,8 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         });
 
         try {
-            const summary = result?.answer
-                ? `AI Answer: ${result.answer.substring(0, 100)}...`
-                : `Result: ${result?.recordset?.length ?? result?.rowsAffected ?? 0} rows.`;
-            
+            const summary = `Result: ${result?.recordset?.length ?? result?.rowsAffected ?? 0} rows.`;
             const { name: suggestedName } = await generateQueryName(queryToSave, summary);
-            
             setSaveModalState(prevState => prevState ? { ...prevState, name: suggestedName || '', isGeneratingName: false } : null);
         } catch (err) {
             console.error(err);
@@ -364,9 +384,18 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     };
     
+    const handleSaveQuery = () => {
+        const isNaturalQuery = !/^(SELECT|UPDATE|DELETE|INSERT)\b/i.test(lastSuccessfulQuery.trim());
+        if (isNaturalQuery) {
+            showAlert('자연어 쿼리는 저장할 수 없습니다.\n실행 후 "SQL 쿼리 저장"을 이용해주세요.');
+            return;
+        }
+        openSaveQueryModal(lastSuccessfulQuery, 'sql');
+    };
+
     const handleSaveGeneratedSql = async () => {
         if (generatedSql) {
-            await openSaveQueryModal(generatedSql);
+            await openSaveQueryModal(generatedSql, 'sql');
         }
     };
     
@@ -383,24 +412,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleQuickRun = (query: SavedQuery) => {
         setSavedQueriesModalOpen(false);
-
-        // This regex finds @ followed by one or more word characters (letters, numbers, underscore)
-        const variableRegex = /@([a-zA-Z0-9_]+)/g;
-        // Use a Set to get unique variable names from the query string
-        const detectedVariables = [...new Set(query.query.match(variableRegex))];
-
-        if (query.type === 'sql' && detectedVariables.length > 0) {
-            setVariableInputState({
-                query,
-                variables: detectedVariables.map(v => v.substring(1)), // remove '@'
-            });
-        } else {
-            if (query.type === 'sql') {
-                executeQuery(query.query, `@${query.name}`);
-            } else {
-                processNaturalLanguageQuery(query.query);
-            }
-        }
+        runQueryWithVariableCheck(query);
     };
 
     const handleAddNewQuery = () => {
@@ -765,7 +777,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     {savedQueries.some(q => q.isQuickRun) && (
                         <>
                             <div className="border-l border-gray-300 h-5 mx-1"></div>
-                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => handleQuickRun(q)} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap">{q.name}</button>))}
+                            {savedQueries.filter(q => q.isQuickRun).map(q => (<button key={q.id} onClick={() => runQueryWithVariableCheck(q)} className="flex-shrink-0 px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-bold hover:bg-blue-200 active:scale-95 transition whitespace-nowrap">{q.name}</button>))}
                         </>
                     )}
                 </div>
@@ -896,7 +908,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     {savedQueries.map(q => (
                         <div key={q.id} className="bg-white p-3 rounded-lg border border-gray-200 group">
                             <div className="flex items-center gap-2">
-                                <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => handleQuickRun(q)}>{q.name}</p>
+                                <p className="font-bold text-gray-800 flex-grow cursor-pointer truncate" onClick={() => runQueryWithVariableCheck(q)}>{q.name}</p>
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                      <button onClick={() => updateSavedQuery(q.id, { isQuickRun: !q.isQuickRun })} className={`p-1.5 rounded-full transition-colors ${q.isQuickRun ? 'text-yellow-500 bg-yellow-100' : 'text-gray-400 hover:bg-gray-100'}`} title="빠른 실행 등록/해제">
                                         <StarIcon className="w-5 h-5"/>
