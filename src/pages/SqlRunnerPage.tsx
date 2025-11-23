@@ -77,7 +77,7 @@ const FullScreenModal: React.FC<{
                 onClick={e => e.stopPropagation()}
             >
                 <header className="relative bg-white p-4 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center">
-                    <h2 className="text-lg font-bold text-gray-800 truncate">{title}</h2>
+                    <h2 className="text-base font-bold text-gray-800 truncate">{title}</h2>
                     <div className="absolute top-1/2 right-4 -translate-y-1/2 flex items-center gap-2">
                         {headerActions}
                         <button onClick={onClose} className="p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">
@@ -134,10 +134,10 @@ const CompactModal: React.FC<{
                 className={`bg-white rounded-xl shadow-lg w-full max-w-sm transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
                 onClick={e => e.stopPropagation()}
             >
-                <header className="relative p-5 border-b border-gray-200">
-                    <h2 className="text-xl font-bold text-gray-800 text-center">{title}</h2>
+                <header className="relative p-4 border-b border-gray-200">
+                    <h2 className="text-lg font-bold text-gray-800 text-center">{title}</h2>
                 </header>
-                <main className="p-5 max-h-[60vh] overflow-y-auto">
+                <main className="p-4 max-h-[60vh] overflow-y-auto">
                     {children}
                 </main>
                 {footer && (
@@ -206,13 +206,9 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [dropIndex, setDropIndex] = useState<number | null>(null);
 
     const saveModalRef = useRef<HTMLDivElement>(null);
-    const editQueryModalRef = useRef<HTMLDivElement>(null);
-    const editLearningModalRef = useRef<HTMLDivElement>(null);
     const variableModalRef = useRef<HTMLDivElement>(null);
     
     useAdjustForKeyboard(saveModalRef, !!saveModalState);
-    useAdjustForKeyboard(editQueryModalRef, !!editingQuery);
-    useAdjustForKeyboard(editLearningModalRef, !!editingLearningItem);
     useAdjustForKeyboard(variableModalRef, !!variableInputState);
 
 
@@ -1077,8 +1073,7 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 )}
             </CompactModal>
             
-             <CompactModal 
-                containerRef={editQueryModalRef}
+            <FullScreenModal 
                 isOpen={!!editingQuery} 
                 onClose={() => setEditingQuery(null)} 
                 title={editingQuery?.id === 'new' ? '새 쿼리 추가' : '저장된 쿼리 수정'}
@@ -1088,28 +1083,33 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         <button onClick={handleSaveEditingQuery} className="h-12 bg-blue-600 text-white px-4 rounded-lg font-bold text-base hover:bg-blue-700 transition shadow-lg shadow-blue-500/40 flex items-center justify-center active:scale-95">저장</button>
                     </div>
                 }
-             >
+            >
                 {editingQuery && (
-                    <div className="flex flex-col space-y-4">
-                        <input 
-                            type="text" 
-                            value={editingQuery.name} 
-                            onChange={e => setEditingQuery({ ...editingQuery, name: e.target.value })} 
-                            placeholder="쿼리 이름" 
-                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold" 
-                        />
-                        <textarea 
-                            value={editingQuery.query} 
-                            onChange={e => setEditingQuery({ ...editingQuery, query: e.target.value })} 
-                            placeholder="쿼리 내용" 
-                            className="w-full h-48 p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none" 
-                        />
+                    <div className="p-4 h-full flex flex-col space-y-3">
+                        <div>
+                            <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 이름</label>
+                            <input 
+                                type="text" 
+                                value={editingQuery.name} 
+                                onChange={e => setEditingQuery({ ...editingQuery, name: e.target.value })} 
+                                placeholder="저장할 쿼리의 이름" 
+                                className="w-full p-2.5 border border-gray-300 rounded-lg text-base font-semibold" 
+                            />
+                        </div>
+                        <div className="flex flex-col flex-grow">
+                            <label className="text-sm font-bold text-gray-700 mb-1 block">쿼리 내용</label>
+                            <textarea 
+                                value={editingQuery.query} 
+                                onChange={e => setEditingQuery({ ...editingQuery, query: e.target.value })} 
+                                placeholder="SELECT * FROM ..." 
+                                className="w-full flex-grow p-2.5 border border-gray-300 rounded-lg font-mono text-sm resize-none" 
+                            />
+                        </div>
                     </div>
                 )}
-            </CompactModal>
+            </FullScreenModal>
             
-            <CompactModal 
-                containerRef={editLearningModalRef}
+            <FullScreenModal
                 isOpen={!!editingLearningItem} 
                 onClose={() => setEditingLearningItem(null)} 
                 title={editingLearningItem?.id && !editingLearningItem.id.startsWith('item_') ? 'AI 학습 규칙 수정' : 'AI 학습 규칙 추가'}
@@ -1121,23 +1121,29 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 }
             >
                  {editingLearningItem && (
-                    <div className="flex flex-col space-y-4">
-                        <input 
-                            type="text" 
-                            value={editingLearningItem.title} 
-                            onChange={e => setEditingLearningItem({ ...editingLearningItem, title: e.target.value })} 
-                            placeholder="규칙 제목" 
-                            className="w-full p-3 border border-gray-300 rounded-lg text-lg font-bold"
-                        />
-                        <textarea 
-                            value={editingLearningItem.content} 
-                            onChange={e => setEditingLearningItem({ ...editingLearningItem, content: e.target.value })} 
-                            placeholder="규칙 내용" 
-                            className="w-full h-32 p-3 border border-gray-300 rounded-lg font-mono text-sm resize-none"
-                        />
+                    <div className="p-4 h-full flex flex-col space-y-3">
+                        <div>
+                            <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 제목</label>
+                            <input 
+                                type="text" 
+                                value={editingLearningItem.title} 
+                                onChange={e => setEditingLearningItem({ ...editingLearningItem, title: e.target.value })} 
+                                placeholder="AI가 기억할 규칙의 제목" 
+                                className="w-full p-2.5 border border-gray-300 rounded-lg text-base font-semibold"
+                            />
+                        </div>
+                        <div className="flex flex-col flex-grow">
+                             <label className="text-sm font-bold text-gray-700 mb-1 block">규칙 내용</label>
+                            <textarea 
+                                value={editingLearningItem.content} 
+                                onChange={e => setEditingLearningItem({ ...editingLearningItem, content: e.target.value })} 
+                                placeholder="예: '재고'는 'parts' 테이블의 'onhand' 컬럼을 의미합니다." 
+                                className="w-full flex-grow p-2.5 border border-gray-300 rounded-lg text-sm resize-none"
+                            />
+                        </div>
                     </div>
                  )}
-            </CompactModal>
+            </FullScreenModal>
             
             <VariableInputModal
                 state={variableInputState}
