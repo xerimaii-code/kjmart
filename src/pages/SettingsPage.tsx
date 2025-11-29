@@ -1,8 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, LogoutIcon, TrashIcon, DatabaseIcon, UserCircleIcon, WarningIcon, SettingsIcon } from '../components/Icons';
-// FIX: Changed to a default import for ToggleSwitch as it's exported as a default member.
 import ToggleSwitch from '../components/ToggleSwitch';
 import CollapsibleCard from '../components/CollapsibleCard';
 
@@ -38,7 +38,6 @@ const ActionButton: React.FC<{
         </div>
     </button>
 );
-
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const { 

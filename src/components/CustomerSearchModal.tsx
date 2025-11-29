@@ -77,12 +77,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         if (!searchInput.trim()) return;
 
         const targetQueryName = '고객검색';
+        // Fallback to a basic search query if not saved
+        const defaultSearchQuery = `SELECT comcode as [고객번호], comname as [고객명], tel as [전화번호], point as [포인트] FROM comp WITH(NOLOCK) WHERE isuse <> '0' AND (comname LIKE '%@kw%' OR comcode LIKE '%@kw%' OR tel LIKE '%@kw%')`;
+        
         const savedQuery = savedQueries.find(q => q.name === targetQueryName);
-
-        if (!savedQuery) {
-            showAlert(`'${targetQueryName}' 쿼리를 찾을 수 없습니다.\n[설정] > [SQL Runner] 메뉴에서 해당 쿼리를 먼저 등록해주세요.`);
-            return;
-        }
+        const queryToUse = savedQuery ? savedQuery.query : defaultSearchQuery;
 
         setStatus('loading');
         setResults(null);
@@ -91,7 +90,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             const kw = searchInput.trim().replace(/'/g, "''");
             const dummyDate = new Date().toISOString().slice(0,10);
 
-            let sql = savedQuery.query
+            let sql = queryToUse
                 .replace(/@kw\b/g, kw)
                 .replace(/@startDate\b/g, dummyDate)
                 .replace(/@endDate\b/g, dummyDate);
@@ -115,19 +114,22 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
         const targetQueryName = '고객_기간별매출';
         const savedQuery = savedQueries.find(q => q.name === targetQueryName);
-
+        
         if (!savedQuery) {
-            setDetailStatus('error');
-            showAlert(`'${targetQueryName}' 쿼리를 찾을 수 없습니다.\n[설정] > [SQL Runner]에서 쿼리를 등록해주세요.`);
+            showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정 > 데이터 관리]에서 쿼리를 확인해주세요.`, 'error');
+            setDetailStatus('idle');
             return;
         }
+        
+        const queryToUse = savedQuery.query;
 
         try {
             const safeTarget = String(customerId).replace(/'/g, "''");
             const safeStart = String(start).replace(/'/g, "''");
             const safeEnd = String(end).replace(/'/g, "''");
 
-            let sql = savedQuery.query;
+            let sql = queryToUse;
+            // Handle both styles of variables if user modified query
             sql = sql.replace(/'@startDate'/gi, '@startDate');
             sql = sql.replace(/'@endDate'/gi, '@endDate');
             sql = sql.replace(/'@target'/gi, '@target');
@@ -152,8 +154,13 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         const values = Object.values(row);
         if (values.length < 1) return;
 
-        const customerId = String(values[0]);
-        const customerName = values.length > 1 ? String(values[1]) : customerId;
+        // Try to find correct column by name, otherwise fallback to index 0/1
+        const keys = Object.keys(row);
+        const codeKey = keys.find(k => k.includes('코드') || k.includes('번호') || k.includes('code'));
+        const nameKey = keys.find(k => k.includes('명') || k.includes('name'));
+
+        const customerId = codeKey ? String(row[codeKey]) : String(values[0]);
+        const customerName = nameKey ? String(row[nameKey]) : (values.length > 1 ? String(values[1]) : customerId);
 
         setSelectedCustomer({ name: customerName, id: customerId });
         setDefaultDates();
@@ -188,21 +195,20 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         // 전표번호: 숫자, 보통 4자리 이상이거나 0으로 시작하는 문자열
         const isJunnoLike = (v: string) => /^\d+$/.test(v) && v.length >= 1; 
 
-        // 1. Column Name Detection (Prioritized)
+        // 1. Column Name Detection (Prioritized based on provided query aliases)
         const dateKey = keys.find(k => {
             const lower = k.toLowerCase();
-            return lower.includes('일자') || lower.includes('날짜') || lower.includes('date') || lower.includes('day');
+            return lower.includes('판매일') || lower.includes('일자') || lower.includes('date');
         });
         
         const posKey = keys.find(k => {
             const lower = k.toLowerCase();
-            return lower.includes('포스') || lower.includes('기기') || lower === 'pos' || lower === 'posno';
+            return lower.includes('포스') || lower === 'pos' || lower === 'posno';
         });
 
         const junnoKey = keys.find(k => {
             const lower = k.toLowerCase();
-            // Exclude 'pos' to avoid matching 'posno' as 'no'
-            return lower.includes('전표') || lower.includes('영수') || lower.includes('순번') || lower.includes('jun') || (lower.includes('no') && !lower.includes('pos'));
+            return lower.includes('전표') || lower.includes('jun') || (lower.includes('no') && !lower.includes('pos'));
         });
 
         let date = dateKey ? String(row[dateKey]).trim() : '';
@@ -210,43 +216,21 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         let junno = junnoKey ? String(row[junnoKey]).trim() : '';
 
         // 2. Value Format Detection (Fallback if keys failed or values are weird)
-        // If date is missing or invalid format, scan all values
         if (!date || !isDateLike(date)) {
             const found = values.find(v => isDateLike(v));
             if (found) date = found;
         }
+        if (!pos) { const f = values.find(v => isPosLike(v) && v !== date); if (f) pos = f; else pos='01'; }
+        if (!junno) { const f = values.find(v => isJunnoLike(v) && v !== date && (posKey ? true : v !== pos)); if (f) junno = f; }
 
-        // If pos is missing, scan remaining values
-        if (!pos) {
-            // Find a value that looks like a POS number (short digits) and is NOT the date we found
-            const found = values.find(v => isPosLike(v) && v !== date);
-            if (found) pos = found;
-            else pos = '01'; // Default only if absolutely nothing found
-        }
-
-        // If junno is missing
-        if (!junno) {
-            // Find a value that looks like a Junno (numeric) and is NOT date. 
-            // Note: We allow junno === pos if they are the same in the list (e.g. pos 1, receipt 1) but distinct columns.
-            // But if we are searching values blindly, we try to find one that isn't the POS we just found, unless there's only one number.
-            const found = values.find(v => isJunnoLike(v) && v !== date && (posKey ? true : v !== pos));
-            if (found) junno = found;
-        }
-
+        const rowKey = `${date.replace(/[-./]/g, '')}_${pos}_${junno}`;
+        const isExpanded = expandedRows.has(rowKey);
+        
         // 3. Validation Check
         if (!date || !junno) {
             showToast(`상세 정보를 조회할 수 없습니다.\n(날짜: ${date || '없음'}, 전표: ${junno || '없음'})`, 'error');
-            console.error("Row toggle failed. Extracted:", { date, pos, junno, row });
             return;
         }
-
-        // 4. Sanitize for SQL
-        // Remove separators from date: 2024-05-20 -> 20240520
-        const cleanDate = date.replace(/[-./]/g, '');
-        const cleanPos = pos;
-        const cleanJunno = junno;
-
-        const rowKey = `${cleanDate}_${cleanPos}_${cleanJunno}`;
 
         const newExpanded = new Set(expandedRows);
         if (newExpanded.has(rowKey)) {
@@ -263,19 +247,27 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
             const targetQueryName = '고객_기간별매출_상세';
             const savedQuery = savedQueries.find(q => q.name === targetQueryName);
-
+            
             if (!savedQuery) {
+                showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정] > [SQL Runner]에서 해당 쿼리를 추가해주세요.`, 'error');
                 setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [] } }));
-                showToast(`'${targetQueryName}' 쿼리가 없습니다.`, 'error');
                 return;
             }
+            
+            const queryToUse = savedQuery.query;
 
             try {
-                // IMPORTANT: Replace the specific parameters expected by the query provided
-                let sql = savedQuery.query
+                const cleanDate = date.replace(/[-./]/g, '');
+                const cleanPos = pos;
+                const cleanJunno = junno;
+
+                let sql = queryToUse
                     .replace(/@date\b/gi, `'${cleanDate}'`)
                     .replace(/@pos\b/gi, `'${cleanPos}'`)
                     .replace(/@junno\b/gi, `'${cleanJunno}'`);
+                
+                // Fallback for original date format if the query uses it (e.g., if user modified query)
+                sql = sql.replace(/@date\b/gi, `'${date}'`); 
                 
                 sql = sql.replace(/`/g, '');
 
@@ -453,7 +445,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                 const isPosLike = (v: string) => /^\d{1,3}$/.test(v);
                                                 const isJunnoLike = (v: string) => /^\d+$/.test(v) && v.length >= 1;
 
-                                                const dateKey = keys.find(k => { const l = k.toLowerCase(); return l.includes('일자') || l.includes('날짜') || l.includes('date') || l.includes('day'); });
+                                                const dateKey = keys.find(k => { const l = k.toLowerCase(); return l.includes('일자') || l.includes('날짜') || l.includes('date') || l.includes('day') || l.includes('판매일'); });
                                                 const posKey = keys.find(k => { const l = k.toLowerCase(); return l.includes('포스') || l.includes('기기') || l === 'pos' || l === 'posno'; });
                                                 const junnoKey = keys.find(k => { const l = k.toLowerCase(); return l.includes('전표') || l.includes('영수') || l.includes('순번') || l.includes('jun') || (l.includes('no') && !l.includes('pos')); });
 
