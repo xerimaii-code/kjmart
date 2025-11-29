@@ -69,7 +69,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         const savedQuery = savedQueries.find(q => q.name === targetQueryName);
 
         if (!savedQuery) {
-            showAlert(`'${targetQueryName}' 쿼리를 찾을 수 없습니다.\n[저장된 쿼리] 메뉴에서 해당 쿼리를 먼저 등록해주세요.`);
+            showAlert(`'${targetQueryName}' 쿼리를 찾을 수 없습니다.\n[설정] > [SQL Runner] 메뉴에서 해당 쿼리를 먼저 등록해주세요.`);
             return;
         }
 
@@ -79,10 +79,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         try {
             const kw = searchInput.trim().replace(/'/g, "''");
             
+            // Use word boundary \b to avoid replacing substrings in other variable names
             let sql = savedQuery.query
-                .replace(/@kw/g, kw)
-                .replace(/@startDate/g, startDate)
-                .replace(/@endDate/g, endDate);
+                .replace(/@kw\b/g, kw)
+                .replace(/@startDate\b/g, startDate)
+                .replace(/@endDate\b/g, endDate);
 
             sql = sql.replace(/`/g, '');
 
@@ -112,16 +113,31 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         const savedQuery = savedQueries.find(q => q.name === targetQueryName);
 
         if (!savedQuery) {
-            setDetailStatus('error'); // Will show error message in UI
+            setDetailStatus('error');
+            showAlert(`'${targetQueryName}' 쿼리를 찾을 수 없습니다.\n[설정] > [SQL Runner]에서 쿼리를 등록해주세요.`);
             return;
         }
 
         try {
-            // Replace variables: @startDate, @endDate, @target
-            let sql = savedQuery.query
-                .replace(/@startDate/g, `'${startDate}'`)
-                .replace(/@endDate/g, `'${endDate}'`)
-                .replace(/@target/g, `'${customerId}'`);
+            // Escape single quotes for safety
+            const safeTarget = String(customerId).replace(/'/g, "''");
+            const safeStart = String(startDate).replace(/'/g, "''");
+            const safeEnd = String(endDate).replace(/'/g, "''");
+
+            let sql = savedQuery.query;
+
+            // 1. Remove user-added quotes around variables in the source query if they exist
+            // This prevents double quoting like ''value'' if the user saved the query as '@target'
+            sql = sql.replace(/'@startDate'/gi, '@startDate');
+            sql = sql.replace(/'@endDate'/gi, '@endDate');
+            sql = sql.replace(/'@target'/gi, '@target');
+
+            // 2. Replace variables with values, using word boundary (\b) to avoid clobbering @target_yy_mm
+            // @target must match exactly @target, not be part of @target_something
+            sql = sql
+                .replace(/@startDate\b/gi, `'${safeStart}'`)
+                .replace(/@endDate\b/gi, `'${safeEnd}'`)
+                .replace(/@target\b/gi, `'${safeTarget}'`);
             
             sql = sql.replace(/`/g, '');
 
@@ -278,15 +294,15 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                         <thead className="bg-gray-50 text-gray-700 font-semibold border-b">
                                             <tr>
                                                 {Object.keys(detailResults.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="p-3 whitespace-nowrap">{key}</th>
+                                                    <th key={key} className={`p-3 whitespace-nowrap ${key === '순매출' || key === '금액' ? 'text-right' : ''}`}>{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-100">
                                             {detailResults.recordset.map((row, idx) => (
                                                 <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                                                    {Object.values(row).map((val, vIdx) => (
-                                                        <td key={vIdx} className="p-3 whitespace-nowrap font-mono text-gray-600">
+                                                    {Object.entries(row).map(([key, val], vIdx) => (
+                                                        <td key={vIdx} className={`p-3 whitespace-nowrap font-mono text-gray-600 ${key === '순매출' || key === '금액' ? 'text-right' : ''}`}>
                                                             {String(val)}
                                                         </td>
                                                     ))}
@@ -296,7 +312,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                     </table>
                                 </div>
                                 {detailResults.recordset.length === 0 && (
-                                    <p className="p-8 text-center text-gray-500 font-medium">구매 내역이 없습니다.</p>
+                                    <p className="p-8 text-center text-gray-500 font-medium">조회된 내역이 없습니다.</p>
                                 )}
                             </div>
                         )}
