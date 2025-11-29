@@ -359,11 +359,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                 </div>
                             ) : (
                                 <div className="absolute inset-0 overflow-auto">
-                                    <table className="w-full text-sm text-left border-collapse">
+                                    <table className="min-w-full text-xs text-left border-collapse">
                                         <thead className="bg-gray-50 text-gray-700 font-bold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(results.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="p-3 whitespace-nowrap bg-gray-100">{key}</th>
+                                                    <th key={key} className="px-2 py-2 whitespace-nowrap bg-gray-100">{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -375,7 +375,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                     className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100"
                                                 >
                                                     {Object.values(row).map((val, vIdx) => (
-                                                        <td key={vIdx} className="p-3 whitespace-nowrap text-gray-700">
+                                                        <td key={vIdx} className="px-2 py-2 whitespace-nowrap text-gray-700">
                                                             {String(val)}
                                                         </td>
                                                     ))}
@@ -427,120 +427,103 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
                     {/* Master List */}
                     <div className="flex-grow overflow-hidden relative bg-gray-50">
-                        {detailStatus === 'loading' && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3 z-20">
-                                <SpinnerIcon className="w-8 h-8 text-blue-500" />
-                                <p className="text-gray-500 font-medium">매출 내역 조회 중...</p>
+                        {detailStatus === 'idle' && (
+                            <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                                <CalendarIcon className="w-16 h-16 text-gray-300 mb-3" />
+                                <p className="text-lg font-medium">기간을 선택하고 조회해주세요.</p>
                             </div>
                         )}
-                        {detailStatus === 'error' && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 z-20">
-                                <p className="text-red-500 font-bold mb-2">조회 실패</p>
-                                <p className="text-sm text-gray-500">오류가 발생했습니다.</p>
+                        {detailStatus === 'loading' && (
+                            <div className="flex flex-col items-center justify-center h-full">
+                                <SpinnerIcon className="w-10 h-10 text-blue-500" />
+                                <p className="text-gray-500 mt-3 font-medium">매출 내역 조회 중...</p>
                             </div>
                         )}
                         {detailStatus === 'success' && detailResults?.recordset && (
-                            <div className="absolute inset-0 overflow-auto">
-                                <table className="w-full text-xs text-left border-collapse">
-                                    <thead className="bg-gray-200 text-gray-800 font-bold sticky top-0 z-10 shadow-sm border-b border-gray-300">
-                                        <tr>
-                                            <th className="p-3 w-8 bg-gray-200"></th>
-                                            {Object.keys(detailResults.recordset[0] || {}).map((key) => (
-                                                <th key={key} className={`p-3 whitespace-nowrap bg-gray-200 ${key.includes('매출') || key.includes('금액') || key === '카드' || key === '포인트' ? 'text-right' : ''}`}>{key}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white">
-                                        {detailResults.recordset.length === 0 ? (
+                            detailResults.recordset.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                                    <p>선택한 기간에 매출 내역이 없습니다.</p>
+                                </div>
+                            ) : (
+                                <div className="absolute inset-0 overflow-auto">
+                                    <table className="min-w-full text-xs text-left border-collapse">
+                                        <thead className="bg-gray-50 text-gray-700 font-bold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
-                                                <td colSpan={10} className="p-8 text-center text-gray-500 font-medium">조회된 기간에 매출 내역이 없습니다.</td>
+                                                <th className="px-2 py-2 w-8"></th>
+                                                {Object.keys(detailResults.recordset[0] || {}).map((key) => (
+                                                    <th key={key} className="px-2 py-2 whitespace-nowrap bg-gray-100">{key}</th>
+                                                ))}
                                             </tr>
-                                        ) : (
-                                            detailResults.recordset.map((row, idx) => {
-                                                // Create a normalized key for row expansion tracking
-                                                const rawDate = row['판매일'] || row['day1'] || '';
-                                                const normDate = normalizeDate(rawDate);
-                                                
-                                                const isExpanded = expandedRows.has(
-                                                    `${normDate.replace(/[-]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`
-                                                );
-                                                
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100 bg-white">
+                                            {detailResults.recordset.map((row, idx) => {
+                                                let date = row['판매일'] || row['일자'] || row['day1'] || row['date'] || '';
+                                                let pos = row['포스'] || row['기기'] || row['posno'] || row['pos'] || '';
+                                                let junno = row['전표'] || row['영수증'] || row['순번'] || row['junno'] || row['no'] || '';
+                                                const values = Object.values(row);
+                                                if (!date && values.length > 0) date = values[0];
+                                                date = normalizeDate(date);
+                                                pos = String(pos || '').trim();
+                                                junno = String(junno || '').trim();
+                                                if (!pos || pos === 'undefined') pos = '01';
+
+                                                const rowKey = `${date.replace(/[-]/g, '')}_${pos}_${junno}`;
+                                                const isExpanded = expandedRows.has(rowKey);
+                                                const details = rowDetails[rowKey];
                                                 return (
                                                     <React.Fragment key={idx}>
-                                                        <tr 
-                                                            className={`cursor-pointer transition-colors border-b border-gray-100 ${isExpanded ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                                                            onClick={() => toggleRow(row, idx)}
-                                                        >
-                                                            <td className="p-3 text-center text-gray-400">
-                                                                <ChevronDownIcon className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180 text-blue-600' : ''}`} />
+                                                        <tr onClick={() => toggleRow(row, idx)} className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100">
+                                                            <td className="px-2 py-2 w-8 text-center">
+                                                                <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform inline-block ${isExpanded ? 'rotate-180' : ''}`} />
                                                             </td>
-                                                            {Object.entries(row).map(([key, val], vIdx) => (
-                                                                <td key={vIdx} className={`p-3 whitespace-nowrap font-mono text-gray-600 ${key.includes('매출') || key.includes('금액') || key === '카드' || key === '포인트' ? 'text-right' : ''}`}>
+                                                            {Object.values(row).map((val, vIdx) => (
+                                                                <td key={vIdx} className="px-2 py-2 whitespace-nowrap text-gray-700">
                                                                     {String(val)}
                                                                 </td>
                                                             ))}
                                                         </tr>
                                                         {isExpanded && (
-                                                            <tr className="bg-blue-50/30 shadow-inner">
-                                                                <td colSpan={Object.keys(row).length + 1} className="p-2 sm:p-4">
-                                                                    <div className="bg-white rounded-lg border border-blue-200 overflow-hidden shadow-sm">
-                                                                        {(() => {
-                                                                            // Re-derive key to find details
-                                                                            const dKey = `${normDate.replace(/[-]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`;
-                                                                            const detail = rowDetails[dKey];
-                                                                            
-                                                                            if (!detail || detail.status === 'loading') {
-                                                                                return (
-                                                                                    <div className="p-4 flex justify-center text-blue-500 gap-2 items-center">
-                                                                                        <SpinnerIcon className="w-4 h-4" />
-                                                                                        <span className="text-xs">상세 품목 불러오는 중...</span>
-                                                                                    </div>
-                                                                                );
-                                                                            }
-                                                                            if (detail.status === 'error') {
-                                                                                return (
-                                                                                    <div className="p-4 text-center text-red-500 text-xs">
-                                                                                        <p className="font-bold">상세 내역 로드 실패</p>
-                                                                                        {detail.error && <p className="mt-1 text-gray-500">{detail.error}</p>}
-                                                                                    </div>
-                                                                                );
-                                                                            }
-                                                                            return (
-                                                                                <table className="w-full text-xs">
-                                                                                    <thead className="bg-blue-100/50 text-blue-800 border-b border-blue-100">
-                                                                                        <tr>
-                                                                                            {Object.keys(detail.data[0] || {}).map(k => (
-                                                                                                <th key={k} className="p-2 text-left font-semibold">{k}</th>
+                                                            <tr>
+                                                                <td colSpan={Object.keys(row).length + 1} className="p-0">
+                                                                    <div className="px-1 py-2 bg-blue-50 border-t border-blue-200">
+                                                                        {details?.status === 'loading' && <SpinnerIcon className="w-6 h-6 mx-auto text-blue-500" />}
+                                                                        {details?.status === 'error' && <p className="text-center text-red-500 text-xs py-2">{details.error}</p>}
+                                                                        {details?.status === 'success' && details.data.length > 0 && (
+                                                                            <table className="min-w-full text-xs text-left bg-white rounded-md shadow-inner overflow-hidden">
+                                                                                <thead className="bg-blue-100">
+                                                                                    <tr>
+                                                                                        {Object.keys(details.data[0] || {}).map(key => (
+                                                                                            <th key={key} className="px-1.5 py-1.5 font-semibold text-blue-800">{key}</th>
+                                                                                        ))}
+                                                                                    </tr>
+                                                                                </thead>
+                                                                                <tbody>
+                                                                                    {details.data.map((detailRow, dIdx) => (
+                                                                                        <tr key={dIdx} className="border-t border-blue-100">
+                                                                                            {Object.values(detailRow).map((val, dvIdx) => (
+                                                                                                <td key={dvIdx} className="px-1.5 py-1.5 text-gray-600 font-mono">
+                                                                                                    {String(val)}
+                                                                                                </td>
                                                                                             ))}
                                                                                         </tr>
-                                                                                    </thead>
-                                                                                    <tbody className="divide-y divide-gray-100">
-                                                                                        {detail.data.length === 0 ? (
-                                                                                            <tr><td colSpan={5} className="p-3 text-center text-gray-400">품목 정보 없음</td></tr>
-                                                                                        ) : (
-                                                                                            detail.data.map((dRow: any, dIdx: number) => (
-                                                                                                <tr key={dIdx} className="hover:bg-gray-50">
-                                                                                                    {Object.values(dRow).map((v: any, i) => (
-                                                                                                        <td key={i} className="p-2 font-mono text-gray-600 truncate max-w-[150px]">{String(v)}</td>
-                                                                                                    ))}
-                                                                                                </tr>
-                                                                                            ))
-                                                                                        )}
-                                                                                    </tbody>
-                                                                                </table>
-                                                                            );
-                                                                        })()}
+                                                                                    ))}
+                                                                                </tbody>
+                                                                            </table>
+                                                                        )}
+                                                                        {details?.status === 'success' && details.data.length === 0 && (
+                                                                            <p className="text-center text-gray-500 text-xs py-2">상세 내역이 없습니다.</p>
+                                                                        )}
                                                                     </div>
                                                                 </td>
                                                             </tr>
                                                         )}
                                                     </React.Fragment>
                                                 );
-                                            })
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )
                         )}
                     </div>
                 </div>
