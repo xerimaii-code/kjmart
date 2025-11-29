@@ -155,8 +155,12 @@ export const SqlRunnerView: React.FC<{
     const abortControllerRef = useRef<AbortController | null>(null);
     const isProcessingVariableQuery = useRef(false);
     
+    // Drag & Drop Refs
     const savedQueriesDragIndex = useRef<number | null>(null);
     const [savedQueriesDropIndex, setSavedQueriesDropIndex] = useState<number | null>(null);
+    
+    const learningDragIndex = useRef<number | null>(null);
+    const [learningDropIndex, setLearningDropIndex] = useState<number | null>(null);
 
     const saveModalRef = useRef<HTMLDivElement>(null);
     const variableModalRef = useRef<HTMLDivElement>(null);
@@ -224,6 +228,14 @@ export const SqlRunnerView: React.FC<{
                         id: value?.id || key,
                     }));
                 }
+                
+                // Sort "기본규칙" to the top
+                items.sort((a, b) => {
+                    if (a.title === '기본규칙') return -1;
+                    if (b.title === '기본규칙') return 1;
+                    return 0;
+                });
+                
                 setLearningItems(items);
             });
         }
@@ -622,25 +634,9 @@ export const SqlRunnerView: React.FC<{
             async () => {
                 const newItems = learningItems.filter(item => item.id !== id);
                 
-                if (newItems.length === 0) {
-                     try {
-                        await setValue('learning/sqlContext', null);
-                        setLearningItems([]);
-                        showToast('규칙이 삭제되었습니다.', 'success');
-                    } catch (err) {
-                        showAlert('규칙 삭제에 실패했습니다.');
-                    }
-                    return;
-                }
-
-                const newItemsObject = newItems.reduce((acc, item) => {
-                    const { id, ...rest } = item;
-                    acc[id] = rest;
-                    return acc;
-                }, {} as { [key: string]: Omit<LearningItem, 'id'> });
-
                 try {
-                    await setValue('learning/sqlContext', newItemsObject);
+                    // Save as array to maintain order
+                    await setValue('learning/sqlContext', newItems);
                     setLearningItems(newItems);
                     showToast('규칙이 삭제되었습니다.', 'success');
                 } catch (err) {
@@ -652,6 +648,61 @@ export const SqlRunnerView: React.FC<{
         );
     };
     
+    // Learning Items Drag & Drop
+    const handleLearningDragStart = (e: React.DragEvent, index: number) => {
+        // Prevent dragging the first item if it is "기본규칙"
+        if (index === 0 && learningItems[0]?.title === '기본규칙') {
+            e.preventDefault();
+            return;
+        }
+        learningDragIndex.current = index;
+        e.dataTransfer.effectAllowed = 'move';
+        (e.currentTarget as HTMLElement).classList.add('dragging');
+    };
+
+    const handleLearningDragEnter = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        // Prevent dropping above "기본규칙" (index 0)
+        if (index === 0 && learningItems[0]?.title === '기본규칙') return;
+        
+        if (learningDragIndex.current !== index) {
+            setLearningDropIndex(index);
+        }
+    };
+
+    const handleLearningDragEnd = (e: React.DragEvent) => {
+        (e.currentTarget as HTMLElement).classList.remove('dragging');
+        learningDragIndex.current = null;
+        setLearningDropIndex(null);
+    };
+
+    const handleLearningDragOver = (e: React.DragEvent) => e.preventDefault();
+
+    const handleLearningDrop = async () => {
+        if (learningDragIndex.current !== null && learningDropIndex !== null) {
+            const from = learningDragIndex.current;
+            const to = learningDropIndex > from ? learningDropIndex - 1 : learningDropIndex;
+            
+            // Validate: cannot move to index 0 if it's reserved for "기본규칙"
+            if (to === 0 && learningItems[0]?.title === '기본규칙') return;
+
+            if (from !== to) {
+                const newItems = [...learningItems];
+                const [removed] = newItems.splice(from, 1);
+                newItems.splice(to, 0, removed);
+                
+                try {
+                    // Save the reordered array directly to maintain order
+                    await setValue('learning/sqlContext', newItems);
+                    setLearningItems(newItems);
+                    showToast('규칙 순서가 저장되었습니다.', 'success');
+                } catch (err) {
+                    showAlert('순서 저장에 실패했습니다.');
+                }
+            }
+        }
+    };
+
     // Saved Queries D&D
     const handleSavedQueriesDragStart = (e: React.DragEvent, index: number) => {
         savedQueriesDragIndex.current = index; e.dataTransfer.effectAllowed = 'move';
@@ -717,14 +768,16 @@ export const SqlRunnerView: React.FC<{
             ? [editLearningForm, ...learningItems]
             : learningItems.map(item => item.id === editLearningForm.id ? editLearningForm : item);
         
-        const newItemsObject = finalItems.reduce((acc, item) => {
-            const { id, ...rest } = item;
-            acc[id] = rest;
-            return acc;
-        }, {} as { [key: string]: Omit<LearningItem, 'id'> });
+        // Ensure "기본규칙" stays at top if it exists
+        finalItems.sort((a, b) => {
+            if (a.title === '기본규칙') return -1;
+            if (b.title === '기본규칙') return 1;
+            return 0;
+        });
 
         try {
-            await setValue('learning/sqlContext', newItemsObject);
+            // Save as array to maintain order
+            await setValue('learning/sqlContext', finalItems);
             setLearningItems(finalItems);
             showToast('AI 학습 데이터가 저장되었습니다.', 'success');
             setEditingLearningItem(null);
@@ -939,122 +992,6 @@ export const SqlRunnerView: React.FC<{
                 </div>
             </ActionModal>
         );
-    };
-
-    const renderResult = () => {
-        if (status === 'loading') {
-            return (
-                <div className="flex items-center justify-center h-full">
-                    <SpinnerIcon className="w-10 h-10 text-blue-500" />
-                </div>
-            );
-        }
-
-        if (status === 'error') {
-            return (
-                <div className="p-4 bg-red-50 text-red-700 h-full overflow-y-auto">
-                    <h3 className="font-bold mb-2 flex items-center gap-2">
-                        <WarningIcon className="w-5 h-5" />
-                        오류 발생
-                    </h3>
-                    <pre className="whitespace-pre-wrap text-sm font-mono">{error}</pre>
-                </div>
-            );
-        }
-
-        if (status === 'success' && result) {
-            if (result.answer) {
-                // AI Answer
-                return (
-                    <div className="p-4 bg-blue-50 h-full overflow-y-auto">
-                        <div className="bg-white p-4 rounded-lg shadow-sm border border-blue-100">
-                            <h3 className="font-bold mb-2 text-blue-800 flex items-center gap-2">
-                                <SparklesIcon className="w-5 h-5" />
-                                AI 답변
-                            </h3>
-                            <p className="whitespace-pre-wrap text-gray-800 leading-relaxed">{result.answer}</p>
-                        </div>
-                    </div>
-                );
-            }
-
-            if (result.recordset) {
-                if (result.recordset.length === 0) {
-                    return (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                            <p className="font-semibold">결과가 없습니다.</p>
-                            {result.rowsAffected !== undefined && (
-                                <p className="text-sm mt-1">({result.rowsAffected} 행 적용됨)</p>
-                            )}
-                        </div>
-                    );
-                }
-
-                const columns = Object.keys(result.recordset[0]);
-                
-                return (
-                    <div className="h-full flex flex-col">
-                        <div className="flex-shrink-0 bg-gray-100 p-2 text-xs text-gray-600 border-b flex justify-between items-center">
-                            <span>{result.recordset.length}개의 결과</span>
-                            <div className="flex gap-2">
-                                <button onClick={handleCopyResults} className="px-2 py-1 bg-white border rounded hover:bg-gray-50 flex items-center gap-1">
-                                    <ClipboardIcon className="w-3 h-3" /> 복사
-                                </button>
-                                <button onClick={handleClearResults} className="px-2 py-1 bg-white border rounded hover:bg-gray-50 flex items-center gap-1 text-red-600">
-                                    <TrashIcon className="w-3 h-3" /> 지우기
-                                </button>
-                            </div>
-                        </div>
-                        <div className="flex-grow overflow-auto">
-                            <table className="w-full text-sm text-left border-collapse">
-                                <thead className="bg-gray-50 text-gray-700 font-semibold sticky top-0 shadow-sm z-10">
-                                    <tr>
-                                        {columns.map((col) => (
-                                            <th key={col} className="p-3 border-b whitespace-nowrap min-w-[100px] bg-gray-50">{col}</th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {result.recordset.slice(0, visibleResultCount).map((row, i) => (
-                                        <tr key={i} className="hover:bg-gray-50 transition-colors">
-                                            {columns.map((col) => (
-                                                <td key={col} className="p-3 border-b whitespace-nowrap font-mono text-xs text-gray-600 max-w-xs truncate" title={String(row[col])}>
-                                                    {String(row[col] ?? 'NULL')}
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            {result.recordset.length > visibleResultCount && (
-                                <div className="p-4 text-center">
-                                    <button 
-                                        onClick={() => setVisibleResultCount(c => c + ROWS_PER_LOAD)}
-                                        className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100"
-                                    >
-                                        더 보기 ({result.recordset.length - visibleResultCount}행 남음)
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                );
-            }
-            
-            if (result.rowsAffected !== undefined) {
-                 return (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                        <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4">
-                            <CheckCircleIcon className="w-8 h-8" />
-                        </div>
-                        <p className="font-bold text-lg text-gray-800">실행 완료</p>
-                        <p className="mt-2">{result.rowsAffected}개의 행이 영향을 받았습니다.</p>
-                    </div>
-                );
-            }
-        }
-
-        return null;
     };
 
     return (
@@ -1434,25 +1371,51 @@ export const SqlRunnerView: React.FC<{
                     </button>
                 }
             >
-                <div className="p-2">
+                <div className="p-2" onDragOver={handleLearningDragOver} onDrop={handleLearningDrop}>
                     {learningItems.length === 0 ? (
                         <p className="text-center text-gray-500 py-8">저장된 학습 규칙이 없습니다.</p>
                     ) : (
                         <div className="space-y-2">
-                            {learningItems.map(item => (
-                                <div 
-                                    key={item.id} 
-                                    className="bg-white p-3 rounded-lg border border-gray-200 flex items-center gap-2"
-                                >
-                                    <div className="flex-grow min-w-0 cursor-pointer" onClick={() => { setEditingLearningItem(item); setAiModalOpen(false); }}>
-                                        <p className="font-bold text-gray-800 truncate">{item.title}</p>
-                                        <p className="text-xs text-gray-500 truncate mt-1">{item.content}</p>
-                                    </div>
-                                    <button onClick={(e) => handleDeleteLearningItem(e, item.id)} className="p-2 text-gray-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition-colors flex-shrink-0">
-                                        <TrashIcon className="w-5 h-5" />
-                                    </button>
-                                </div>
-                            ))}
+                            {learningItems.map((item, index) => {
+                                const isDefaultRule = item.title === '기본규칙';
+                                return (
+                                    <React.Fragment key={item.id}>
+                                        {learningDropIndex === index && <div className="h-12 bg-blue-100 border-2 border-dashed border-blue-400 rounded-lg" />}
+                                        <div 
+                                            draggable={!isDefaultRule}
+                                            onDragStart={(e) => handleLearningDragStart(e, index)}
+                                            onDragEnter={(e) => handleLearningDragEnter(e, index)}
+                                            onDragEnd={handleLearningDragEnd}
+                                            className={`bg-white p-3 rounded-lg border flex items-center gap-3 ${
+                                                isDefaultRule 
+                                                    ? 'border-blue-200 bg-blue-50/50' 
+                                                    : 'border-gray-200'
+                                            }`}
+                                        >
+                                            {isDefaultRule ? (
+                                                <div className="p-1" title="고정됨">
+                                                    <StarIcon className="w-5 h-5 text-blue-500 flex-shrink-0" fill="currentColor" />
+                                                </div>
+                                            ) : (
+                                                <div className="cursor-grab p-1" title="순서 변경">
+                                                    <DragHandleIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                                                </div>
+                                            )}
+                                            
+                                            <div className="flex-grow min-w-0 cursor-pointer" onClick={() => { setEditingLearningItem(item); setAiModalOpen(false); }}>
+                                                <p className={`font-bold truncate ${isDefaultRule ? 'text-blue-800' : 'text-gray-800'}`}>
+                                                    {item.title}
+                                                </p>
+                                            </div>
+                                            
+                                            <button onClick={(e) => handleDeleteLearningItem(e, item.id)} className="p-2 text-gray-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition-colors flex-shrink-0">
+                                                <TrashIcon className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </React.Fragment>
+                                );
+                            })}
+                            {learningDropIndex === learningItems.length && <div className="h-12 bg-blue-100 border-2 border-dashed border-blue-400 rounded-lg" />}
                         </div>
                     )}
                 </div>

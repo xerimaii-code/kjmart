@@ -184,14 +184,33 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
     // --- Accordion Logic ---
     const toggleRow = async (row: any, index: number) => {
-        // Unique key for the row: Date + POS + Receipt
-        // Assuming columns: [0]POS, [1]Date, [2]Junno(Receipt) based on previous query structure
+        // 스마트 컬럼 감지: 컬럼명을 기반으로 날짜, 포스, 전표번호를 찾습니다.
+        const keys = Object.keys(row);
+        const findKey = (keywords: string[]) => keys.find(k => keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase())));
+
+        const dateKey = findKey(['일자', '날짜', 'date', 'day']);
+        const posKey = findKey(['포스', '기기', 'pos']);
+        const junnoKey = findKey(['전표', '영수증', '순번', 'jun', 'No']);
+
         const values = Object.values(row);
-        const pos = String(values[0] || '');
-        const date = String(values[1] || '');
-        const junno = String(values[2] || '');
         
-        const rowKey = `${date}_${pos}_${junno}`;
+        // 키를 찾았으면 값을 쓰고, 못 찾았으면 인덱스 기반으로 추정합니다.
+        // 보통 순서: [일자, 포스, 전표] 또는 [일자, 전표, ...]
+        let date = dateKey ? String(row[dateKey]) : String(values[0] || '');
+        let pos = posKey ? String(row[posKey]) : String(values[1] || '01'); 
+        let junno = junnoKey ? String(row[junnoKey]) : String(values[2] || '');
+
+        // 데이터 검증 및 교정 (Swap Logic)
+        // 날짜가 너무 짧고(예: '01'), 포스번호가 날짜처럼 생겼다면(예: '2023...') 서로 바뀐 것으로 간주
+        if (date.length < 6 && pos.length > 6 && !isNaN(Number(pos.replace(/-/g, '')))) {
+            const temp = date;
+            date = pos;
+            pos = temp;
+        }
+
+        // 날짜 포맷 정리 (YYYY-MM-DD -> YYYYMMDD) - 키 생성용
+        const cleanDate = date.replace(/-/g, '');
+        const rowKey = `${cleanDate}_${pos}_${junno}`;
 
         const newExpanded = new Set(expandedRows);
         if (newExpanded.has(rowKey)) {
@@ -393,8 +412,23 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                             </tr>
                                         ) : (
                                             detailResults.recordset.map((row, idx) => {
-                                                const rowValues = Object.values(row);
-                                                const rowKey = `${rowValues[1]}_${rowValues[0]}_${rowValues[2]}`; // Date_POS_Junno
+                                                // Generate key based on sanitized column data to avoid index dependency
+                                                const keys = Object.keys(row);
+                                                const findKey = (keywords: string[]) => keys.find(k => keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase())));
+                                                const dKey = findKey(['일자', '날짜', 'date', 'day']);
+                                                const pKey = findKey(['포스', '기기', 'pos']);
+                                                const jKey = findKey(['전표', '영수증', '순번', 'jun', 'No']);
+                                                
+                                                const vals = Object.values(row);
+                                                let dVal = dKey ? String(row[dKey]) : String(vals[0] || '');
+                                                let pVal = pKey ? String(row[pKey]) : String(vals[1] || '01');
+                                                let jVal = jKey ? String(row[jKey]) : String(vals[2] || '');
+
+                                                if (dVal.length < 6 && pVal.length > 6 && !isNaN(Number(pVal.replace(/-/g, '')))) {
+                                                    const t = dVal; dVal = pVal; pVal = t;
+                                                }
+
+                                                const rowKey = `${dVal.replace(/-/g, '')}_${pVal}_${jVal}`;
                                                 const isExpanded = expandedRows.has(rowKey);
                                                 const detail = rowDetails[rowKey];
 
