@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAlert, useMiscUI } from '../context/AppContext';
@@ -896,6 +895,105 @@ export const SqlRunnerView: React.FC<{
                 </form>
             </CompactModal>
         );
+    };
+
+    const renderResult = () => {
+        if (!result && status !== 'error') return null;
+
+        if (status === 'error') {
+            return (
+                <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                    <WarningIcon className="w-16 h-16 text-red-400 mb-4" />
+                    <p className="text-lg font-bold text-gray-800 mb-2">오류 발생</p>
+                    <p className="text-sm text-gray-600 break-words w-full max-w-md bg-red-50 p-4 rounded-lg border border-red-100">
+                        {error}
+                    </p>
+                </div>
+            );
+        }
+
+        if (result?.answer) {
+            return (
+                <div className="p-4 h-full flex flex-col items-center justify-center text-center">
+                    <SparklesIcon className="w-12 h-12 text-blue-500 mb-4" />
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 max-w-lg w-full">
+                        <p className="text-lg text-gray-800 leading-relaxed font-medium whitespace-pre-wrap">{result.answer}</p>
+                    </div>
+                </div>
+            );
+        }
+
+        if (result?.rowsAffected !== undefined && !result.recordset) {
+            return (
+                <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                    <CheckCircleIcon className="w-16 h-16 text-green-500 mb-4" />
+                    <p className="text-xl font-bold text-gray-800">실행 완료</p>
+                    <p className="text-gray-600 mt-2">{result.rowsAffected}개 행이 영향을 받았습니다.</p>
+                </div>
+            );
+        }
+
+        if (result?.recordset) {
+            if (result.recordset.length === 0) {
+                return (
+                    <div className="flex flex-col items-center justify-center h-full text-center p-4 text-gray-500">
+                        <p>조회 결과가 없습니다.</p>
+                    </div>
+                );
+            }
+
+            const columns = Object.keys(result.recordset[0]);
+            
+            return (
+                <div className="flex flex-col h-full">
+                    <div className="flex-shrink-0 bg-gray-50 p-2 border-b flex justify-between items-center text-xs text-gray-500">
+                        <span>총 {result.recordset.length}개 결과</span>
+                        <div className="flex gap-2">
+                            <button onClick={handleCopyResults} className="flex items-center gap-1 hover:text-blue-600 transition-colors">
+                                <ClipboardIcon className="w-4 h-4" /> <span>복사</span>
+                            </button>
+                            <button onClick={handleClearResults} className="flex items-center gap-1 hover:text-red-600 transition-colors">
+                                <TrashIcon className="w-4 h-4" /> <span>지우기</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex-grow overflow-auto">
+                        <table className="w-full text-sm text-left border-collapse">
+                            <thead className="bg-gray-100 text-gray-700 font-bold sticky top-0 z-10 shadow-sm border-b">
+                                <tr>
+                                    {columns.map((col) => (
+                                        <th key={col} className="p-3 whitespace-nowrap bg-gray-100 border-r last:border-r-0 border-gray-200">{col}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-100">
+                                {result.recordset.slice(0, visibleResultCount).map((row, rowIndex) => (
+                                    <tr key={rowIndex} className="hover:bg-blue-50 transition-colors">
+                                        {columns.map((col, colIndex) => (
+                                            <td key={`${rowIndex}-${colIndex}`} className="p-3 whitespace-nowrap border-r last:border-r-0 border-gray-100 text-gray-600 font-mono">
+                                                {row[col] === null ? <span className="text-gray-300 italic">NULL</span> : String(row[col])}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {result.recordset.length > visibleResultCount && (
+                            <div className="p-4 text-center">
+                                <button 
+                                    onClick={() => setVisibleResultCount(prev => prev + ROWS_PER_LOAD)}
+                                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 text-sm font-semibold transition-colors"
+                                >
+                                    더 보기 ({result.recordset.length - visibleResultCount}개 남음)
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        return null;
     };
 
     const renderUpdatePreviewModal = () => {
