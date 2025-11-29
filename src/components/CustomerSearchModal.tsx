@@ -138,7 +138,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         const savedQuery = savedQueries.find(q => q.name === targetQueryName);
         
         if (!savedQuery) {
-            showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정 > 데이터 관리]에서 쿼리를 확인해주세요.`, 'error');
+            showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정 > SQL Runner]에서 쿼리를 추가해주세요.`, 'error');
             setDetailStatus('idle');
             return;
         }
@@ -151,7 +151,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             const safeEnd = String(end).replace(/'/g, "''");
 
             let sql = queryToUse;
-            // Handle both styles of variables if user modified query
+            // Handle both styles of variables
             sql = sql.replace(/'@startDate'/gi, '@startDate');
             sql = sql.replace(/'@endDate'/gi, '@endDate');
             sql = sql.replace(/'@target'/gi, '@target');
@@ -242,7 +242,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         const rowKey = `${date.replace(/[-]/g, '')}_${pos}_${junno}`;
         
         // 6. Validation Check
-        if (!junno || !date || date.length < 10) { // Check for full YYYY-MM-DD length
+        if (!junno || !date || date.length < 10) { 
             console.warn("Detail Query Params Missing or Invalid:", { date, pos, junno, row });
             showToast(`상세 정보를 조회할 수 없습니다.\n필수 정보 누락 (날짜: ${date}, 전표: ${junno})`, 'error');
             return;
@@ -265,7 +265,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             const savedQuery = savedQueries.find(q => q.name === targetQueryName);
             
             if (!savedQuery) {
-                showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정] > [SQL Runner]에서 해당 쿼리를 추가해주세요.`, 'error');
+                showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정 > SQL Runner]에서 쿼리를 추가해주세요.`, 'error');
                 setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [], error: '쿼리를 찾을 수 없습니다.' } }));
                 return;
             }
@@ -274,7 +274,6 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
             try {
                 // Pass values exactly as extracted
-                // Supports both standard variables (@date) and non-colliding alias variables (@searchDate)
                 let sql = queryToUse
                     .replace(/@searchDate\b/gi, `'${date}'`)
                     .replace(/@searchPos\b/gi, `'${pos}'`)
@@ -296,7 +295,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                 
                 // User-friendly error message for common table missing issue
                 if (errorMessage.includes("Invalid object name")) {
-                    errorMessage = `매출 상세 테이블(outd/outs)을 찾을 수 없습니다.\n(날짜: ${date})`;
+                    errorMessage = `매출 상세 테이블(outd)을 찾을 수 없습니다.\n(날짜: ${date})`;
                 }
 
                 setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [], error: errorMessage } }));
