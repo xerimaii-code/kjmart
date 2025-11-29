@@ -201,7 +201,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
         const junnoKey = keys.find(k => {
             const lower = k.toLowerCase();
-            // Exclude 'pos' to avoid matching 'posno'
+            // Exclude 'pos' to avoid matching 'posno' as 'no'
             return lower.includes('전표') || lower.includes('영수') || lower.includes('순번') || lower.includes('jun') || (lower.includes('no') && !lower.includes('pos'));
         });
 
@@ -209,34 +209,39 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         let pos = posKey ? String(row[posKey]).trim() : '';
         let junno = junnoKey ? String(row[junnoKey]).trim() : '';
 
-        // 2. Value Format Detection (Fallback)
+        // 2. Value Format Detection (Fallback if keys failed or values are weird)
+        // If date is missing or invalid format, scan all values
         if (!date || !isDateLike(date)) {
             const found = values.find(v => isDateLike(v));
             if (found) date = found;
         }
 
-        // 포스번호가 없거나 날짜와 겹친다면, 남은 값 중 '짧은 숫자'를 찾음
-        if (!pos || isDateLike(pos)) {
-            // 날짜가 아닌 값 중, 3자리 이하 숫자(1, 2, 3 등)를 우선 찾음
+        // If pos is missing, scan remaining values
+        if (!pos) {
+            // Find a value that looks like a POS number (short digits) and is NOT the date we found
             const found = values.find(v => isPosLike(v) && v !== date);
             if (found) pos = found;
-            else if (!pos) pos = '01'; // 기본값
+            else pos = '01'; // Default only if absolutely nothing found
         }
 
-        // 전표번호가 없거나 날짜/포스와 겹친다면
-        if (!junno || isDateLike(junno) || junno === pos) {
-            // 날짜와 포스가 아닌 값 중 숫자로 된 것을 찾음
-            const found = values.find(v => isJunnoLike(v) && v !== date && v !== pos);
+        // If junno is missing
+        if (!junno) {
+            // Find a value that looks like a Junno (numeric) and is NOT date. 
+            // Note: We allow junno === pos if they are the same in the list (e.g. pos 1, receipt 1) but distinct columns.
+            // But if we are searching values blindly, we try to find one that isn't the POS we just found, unless there's only one number.
+            const found = values.find(v => isJunnoLike(v) && v !== date && (posKey ? true : v !== pos));
             if (found) junno = found;
         }
 
-        // 3. Validation & Sanitize
-        if (!date) {
-            showToast('날짜 정보를 찾을 수 없습니다.', 'error');
+        // 3. Validation Check
+        if (!date || !junno) {
+            showToast(`상세 정보를 조회할 수 없습니다.\n(날짜: ${date || '없음'}, 전표: ${junno || '없음'})`, 'error');
+            console.error("Row toggle failed. Extracted:", { date, pos, junno, row });
             return;
         }
-        
-        // 날짜 포맷 통일: YYYY-MM-DD -> YYYYMMDD
+
+        // 4. Sanitize for SQL
+        // Remove separators from date: 2024-05-20 -> 20240520
         const cleanDate = date.replace(/[-./]/g, '');
         const cleanPos = pos;
         const cleanJunno = junno;
@@ -261,12 +266,12 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
             if (!savedQuery) {
                 setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [] } }));
-                showToast(`'${targetQueryName}' 쿼리를 찾을 수 없습니다.`, 'error');
+                showToast(`'${targetQueryName}' 쿼리가 없습니다.`, 'error');
                 return;
             }
 
             try {
-                // 파라미터 매핑: @date, @pos, @junno
+                // IMPORTANT: Replace the specific parameters expected by the query provided
                 let sql = savedQuery.query
                     .replace(/@date\b/gi, `'${cleanDate}'`)
                     .replace(/@pos\b/gi, `'${cleanPos}'`)
@@ -457,8 +462,12 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                 let junno = junnoKey ? String(row[junnoKey]).trim() : '';
 
                                                 if (!date || !isDateLike(date)) { const f = values.find(v => isDateLike(v)); if (f) date = f; }
-                                                if (!pos || isDateLike(pos)) { const f = values.find(v => isPosLike(v) && v !== date); if (f) pos = f; else if(!pos) pos='01'; }
-                                                if (!junno || isDateLike(junno) || junno === pos) { const f = values.find(v => isJunnoLike(v) && v !== date && v !== pos); if (f) junno = f; }
+                                                
+                                                // Fallback for POS: short number, not date
+                                                if (!pos) { const f = values.find(v => isPosLike(v) && v !== date); if (f) pos = f; else pos='01'; }
+                                                
+                                                // Fallback for Junno: number, not date. 
+                                                if (!junno) { const f = values.find(v => isJunnoLike(v) && v !== date && (posKey ? true : v !== pos)); if (f) junno = f; }
 
                                                 const rowKey = `${date.replace(/[-./]/g, '')}_${pos}_${junno}`;
                                                 const isExpanded = expandedRows.has(rowKey);
