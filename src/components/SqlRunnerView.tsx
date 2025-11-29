@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAlert, useMiscUI } from '../context/AppContext';
-import { SpinnerIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, BookmarkSquareIcon, StopCircleIcon, SparklesIcon, StarIcon, ClipboardIcon, DragHandleIcon, WarningIcon, CheckCircleIcon, CalendarIcon } from './Icons';
+import { SpinnerIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, BookmarkSquareIcon, StopCircleIcon, SparklesIcon, StarIcon, ClipboardIcon, DragHandleIcon, WarningIcon, CheckCircleIcon, CalendarIcon, RemoveIcon } from './Icons';
 import { querySql, naturalLanguageToSql, aiChat, generateQueryName, UpdatePreview, QuerySqlResponse } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue, db, ref, update } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
@@ -133,6 +133,12 @@ export const SqlRunnerView: React.FC<{
     const [activeReportTab, setActiveReportTab] = useState<'시간대별매출' | '거래처별매출' | '대분류별매출'>('시간대별매출');
     const [reportResult, setReportResult] = useState<QuerySqlResponse | null>(null);
     const [reportStatus, setReportStatus] = useState<QueryStatus>('idle');
+    
+    // --- Real-time Report Detail State ---
+    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+    const [detailTitle, setDetailTitle] = useState('');
+    const [detailResult, setDetailResult] = useState<QuerySqlResponse | null>(null);
+    const [detailStatus, setDetailStatus] = useState<QueryStatus>('idle');
     // ----------------------------
 
     const [saveModalState, setSaveModalState] = useState<{
@@ -259,6 +265,44 @@ export const SqlRunnerView: React.FC<{
 
     }, [isRealTimeReportModalOpen, activeReportTab, reportDate, savedQueries]);
     
+    // --- Detail Report Logic ---
+    const handleReportRowClick = async (row: any) => {
+        // Assume the first column is the key (Time, Vendor Name, Category Name)
+        const keys = Object.keys(row);
+        if (keys.length === 0) return;
+        
+        const targetValue = row[keys[0]];
+        const targetQueryName = `${activeReportTab}_상세`;
+        
+        const savedQuery = savedQueries.find(q => q.name === targetQueryName);
+        
+        if (!savedQuery) {
+            showToast(`'${targetQueryName}' 쿼리를 찾을 수 없습니다.`, 'error');
+            return;
+        }
+
+        setIsDetailModalOpen(true);
+        setDetailTitle(`${targetValue} 상세 내역`);
+        setDetailStatus('loading');
+        setDetailResult(null);
+
+        try {
+            // Replace @date and @target variables
+            let sql = savedQuery.query
+                .replace(/@date\b/g, `'${reportDate}'`)
+                .replace(/@target\b/g, `'${targetValue}'`);
+            
+            sql = sql.replace(/`/g, '');
+
+            const data = await querySql(sql, new AbortController().signal);
+            setDetailResult(data);
+            setDetailStatus('success');
+        } catch (err: any) {
+            console.error("Detail report execution failed:", err);
+            setDetailStatus('error');
+        }
+    };
+
     const executeQuery = useCallback(async (sql: string, naturalLang?: string, confirmed?: boolean) => {
         setStatus('loading');
         setResult(null);
@@ -1161,7 +1205,7 @@ export const SqlRunnerView: React.FC<{
                                         </thead>
                                         <tbody className="divide-y divide-gray-100">
                                             {reportResult.recordset.map((row, idx) => (
-                                                <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                <tr key={idx} onClick={() => handleReportRowClick(row)} className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100">
                                                     {Object.values(row).map((val, vIdx) => (
                                                         <td key={vIdx} className="p-3 whitespace-nowrap font-mono text-gray-600">
                                                             {String(val)}
@@ -1174,6 +1218,61 @@ export const SqlRunnerView: React.FC<{
                                 </div>
                                 {reportResult.recordset.length === 0 && (
                                     <p className="p-8 text-center text-gray-500 font-medium">데이터가 없습니다.</p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </ActionModal>
+
+            <ActionModal
+                isOpen={isDetailModalOpen}
+                onClose={() => setIsDetailModalOpen(false)}
+                title={detailTitle}
+                zIndexClass="z-[100]"
+            >
+                <div className="flex flex-col h-full bg-gray-50">
+                    <div className="flex-grow overflow-auto p-2">
+                        {detailStatus === 'loading' && (
+                            <div className="flex flex-col items-center justify-center h-48 space-y-3">
+                                <SpinnerIcon className="w-8 h-8 text-blue-500" />
+                                <p className="text-gray-500 font-medium">상세 내역 조회 중...</p>
+                            </div>
+                        )}
+                        {detailStatus === 'error' && (
+                            <div className="flex flex-col items-center justify-center h-48 text-center p-4">
+                                <p className="text-red-500 font-bold mb-2">조회 실패</p>
+                                <p className="text-sm text-gray-500">
+                                    상세 데이터를 불러오는 중 오류가 발생했습니다.
+                                </p>
+                            </div>
+                        )}
+                        {detailStatus === 'success' && detailResult?.recordset && (
+                            <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-xs text-left">
+                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b">
+                                            <tr>
+                                                {Object.keys(detailResult.recordset[0] || {}).map((key) => (
+                                                    <th key={key} className="p-3 whitespace-nowrap">{key}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {detailResult.recordset.map((row, idx) => (
+                                                <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                    {Object.values(row).map((val, vIdx) => (
+                                                        <td key={vIdx} className="p-3 whitespace-nowrap font-mono text-gray-600">
+                                                            {String(val)}
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {detailResult.recordset.length === 0 && (
+                                    <p className="p-8 text-center text-gray-500 font-medium">상세 내역이 없습니다.</p>
                                 )}
                             </div>
                         )}
