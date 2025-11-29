@@ -2,13 +2,14 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAlert, useMiscUI } from '../context/AppContext';
-import { SpinnerIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, BookmarkSquareIcon, StopCircleIcon, SparklesIcon, StarIcon, ClipboardIcon, DragHandleIcon, WarningIcon, CheckCircleIcon, CalendarIcon, RemoveIcon } from './Icons';
+import { SpinnerIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, BookmarkSquareIcon, StopCircleIcon, SparklesIcon, StarIcon, ClipboardIcon, DragHandleIcon, WarningIcon, CheckCircleIcon, CalendarIcon, RemoveIcon, ShieldCheckIcon } from './Icons';
 import { querySql, naturalLanguageToSql, aiChat, generateQueryName, UpdatePreview, QuerySqlResponse } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue, db, ref, update } from '../services/dbService';
 import { getCachedSchema } from '../services/schemaService';
 import { getLearningContext } from '../services/learningService';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 import ActionModal from './ActionModal';
+import ToggleSwitch from './ToggleSwitch';
 
 // --- TYPE DEFINITIONS ---
 type QueryStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -19,6 +20,7 @@ interface SavedQuery {
     query: string;
     type: 'sql' | 'natural';
     isQuickRun?: boolean;
+    isImportant?: boolean;
     order?: number;
 }
 
@@ -519,13 +521,14 @@ export const SqlRunnerView: React.FC<{
             query: '',
             type: 'sql',
             isQuickRun: false,
+            isImportant: false,
         });
     };
 
     const handleSaveEditingQuery = () => {
         if (!editingQuery) return;
     
-        const { id, name, query, isQuickRun } = editingQuery;
+        const { id, name, query, isQuickRun, isImportant } = editingQuery;
         if (!name.trim() || !query.trim()) {
             showAlert('쿼리 이름과 내용을 모두 입력해주세요.');
             return;
@@ -539,30 +542,65 @@ export const SqlRunnerView: React.FC<{
             query: query.trim(),
             type: detectedType,
             isQuickRun: !!isQuickRun,
+            isImportant: !!isImportant,
         };
 
-        if (id === 'new') {
-            addSavedQuery({ ...dataToSave, order: savedQueries.length })
-                .then(() => {
-                    showToast('쿼리가 추가되었습니다.', 'success');
-                    setEditingQuery(null);
-                    setSavedQueriesModalOpen(true);
-                })
-                .catch(err => {
-                    console.error(err);
-                    showAlert('쿼리 추가에 실패했습니다.');
-                });
+        const performSave = () => {
+            if (id === 'new') {
+                addSavedQuery({ ...dataToSave, order: savedQueries.length })
+                    .then(() => {
+                        showToast('쿼리가 추가되었습니다.', 'success');
+                        setEditingQuery(null);
+                        setSavedQueriesModalOpen(true);
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        showAlert('쿼리 추가에 실패했습니다.');
+                    });
+            } else {
+                updateSavedQuery(id, dataToSave)
+                    .then(() => {
+                        showToast('쿼리가 수정되었습니다.', 'success');
+                        setEditingQuery(null);
+                        setSavedQueriesModalOpen(true);
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        showAlert('쿼리 수정에 실패했습니다.');
+                    });
+            }
+        };
+
+        // Important query protection check for modification
+        if (id !== 'new' && isImportant) {
+            showAlert(
+                "이 쿼리는 '중요'로 설정되어 있습니다.\n쿼리 수정 시 연동된 기능(매출 속보, 상세 조회 등)이 작동하지 않을 수 있습니다.\n\n그래도 수정하시겠습니까?",
+                performSave,
+                "수정 저장",
+                "bg-amber-500 hover:bg-amber-600"
+            );
         } else {
-            updateSavedQuery(id, dataToSave)
-                .then(() => {
-                    showToast('쿼리가 수정되었습니다.', 'success');
-                    setEditingQuery(null);
-                    setSavedQueriesModalOpen(true);
-                })
-                .catch(err => {
-                    console.error(err);
-                    showAlert('쿼리 수정에 실패했습니다.');
-                });
+            performSave();
+        }
+    };
+
+    const handleDeleteQuery = (q: SavedQuery) => {
+        const deleteAction = () => deleteSavedQuery(q.id);
+
+        if (q.isImportant) {
+            showAlert(
+                `경고: '${q.name}' 쿼리는 중요 쿼리로 설정되어 있습니다.\n\n이 쿼리를 삭제하면 앱의 주요 기능(매출 속보 등)이 작동하지 않을 수 있습니다.\n정말 삭제하시겠습니까?`,
+                deleteAction,
+                '삭제 (위험)',
+                'bg-red-600 hover:bg-red-700 font-bold'
+            );
+        } else {
+            showAlert(
+                `'${q.name}' 쿼리를 삭제하시겠습니까?`, 
+                deleteAction, 
+                '삭제', 
+                'bg-rose-500'
+            );
         }
     };
 
@@ -972,7 +1010,7 @@ export const SqlRunnerView: React.FC<{
                                 <thead className="bg-gray-50 text-gray-700 font-semibold sticky top-0 shadow-sm z-10">
                                     <tr>
                                         {columns.map((col) => (
-                                            <th key={col} className="p-3 border-b whitespace-nowrap min-w-[100px]">{col}</th>
+                                            <th key={col} className="p-3 border-b whitespace-nowrap min-w-[100px] bg-gray-50">{col}</th>
                                         ))}
                                     </tr>
                                 </thead>
@@ -1196,10 +1234,10 @@ export const SqlRunnerView: React.FC<{
                             <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-xs text-left">
-                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b">
+                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(reportResult.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="p-3 whitespace-nowrap">{key}</th>
+                                                    <th key={key} className="p-3 whitespace-nowrap bg-gray-50">{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -1251,10 +1289,10 @@ export const SqlRunnerView: React.FC<{
                             <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-xs text-left">
-                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b">
+                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(detailResult.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="p-3 whitespace-nowrap">{key}</th>
+                                                    <th key={key} className="p-3 whitespace-nowrap bg-gray-50">{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -1314,6 +1352,9 @@ export const SqlRunnerView: React.FC<{
                                         <div className="flex-grow min-w-0 cursor-pointer" onClick={() => runQueryWithVariableCheck(q)}>
                                             <div className="flex items-center gap-2">
                                                 <p className="font-bold text-gray-800 truncate">{q.name}</p>
+                                                {q.isImportant && (
+                                                    <ShieldCheckIcon className="w-4 h-4 text-blue-500" title="중요 쿼리 (보호됨)" />
+                                                )}
                                             </div>
                                         </div>
                                         <button 
@@ -1324,7 +1365,7 @@ export const SqlRunnerView: React.FC<{
                                             <StarIcon className="w-5 h-5" fill={q.isQuickRun ? "currentColor" : "none"} />
                                         </button>
                                         <button onClick={() => { setEditingQuery(q); setSavedQueriesModalOpen(false); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0"><PencilSquareIcon className="w-5 h-5" /></button>
-                                        <button onClick={() => showAlert(`'${q.name}' 쿼리를 삭제하시겠습니까?`, () => deleteSavedQuery(q.id), '삭제', 'bg-rose-500')} className="p-2 text-gray-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition-colors flex-shrink-0"><TrashIcon className="w-5 h-5" /></button>
+                                        <button onClick={() => handleDeleteQuery(q)} className="p-2 text-gray-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition-colors flex-shrink-0"><TrashIcon className="w-5 h-5" /></button>
                                     </div>
                                 </React.Fragment>
                             ))}
@@ -1340,7 +1381,22 @@ export const SqlRunnerView: React.FC<{
                 title={editingQuery?.id === 'new' ? "새 쿼리 만들기" : "쿼리 수정"}
                 heightClass="h-[70vh]"
                 zIndexClass="z-[90]"
-                footer={<button onClick={handleSaveEditingQuery} className="w-full h-11 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">저장</button>}
+                footer={
+                    <div className="w-full flex flex-col gap-3">
+                        {editingQuery && (
+                            <div className="flex items-center justify-between px-1">
+                                <ToggleSwitch 
+                                    id="is-important-query" 
+                                    label="중요 쿼리 (보호 설정)" 
+                                    checked={!!editingQuery.isImportant} 
+                                    onChange={(checked) => setEditingQuery({ ...editingQuery, isImportant: checked })} 
+                                    color="blue"
+                                />
+                            </div>
+                        )}
+                        <button onClick={handleSaveEditingQuery} className="w-full h-11 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30">저장</button>
+                    </div>
+                }
             >
                 {editingQuery && (
                     <div className="flex flex-col h-full">

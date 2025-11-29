@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ActionModal from './ActionModal';
-import { SearchIcon, UserCircleIcon, SpinnerIcon, RemoveIcon } from './Icons';
+import { SearchIcon, UserCircleIcon, SpinnerIcon, ChevronDownIcon, CalendarIcon } from './Icons';
 import { querySql } from '../services/sqlService';
 import { useAlert } from '../context/AppContext';
 import { subscribeToSavedQueries } from '../services/dbService';
@@ -27,17 +27,24 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
     const { showAlert, showToast } = useAlert();
     const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
     
+    // --- Main Search State ---
     const [searchInput, setSearchInput] = useState('');
     const [results, setResults] = useState<QuerySqlResponse | null>(null);
     const [status, setStatus] = useState<QueryStatus>('idle');
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
 
     // --- Detail Modal State ---
     const [isDetailOpen, setIsDetailOpen] = useState(false);
     const [detailResults, setDetailResults] = useState<QuerySqlResponse | null>(null);
     const [detailStatus, setDetailStatus] = useState<QueryStatus>('idle');
-    const [selectedCustomerName, setSelectedCustomerName] = useState('');
+    const [selectedCustomer, setSelectedCustomer] = useState<{name: string, id: string} | null>(null);
+    
+    // Dates for the filter (inside detail modal)
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
+    // --- Accordion / Drill-down State ---
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+    const [rowDetails, setRowDetails] = useState<Record<string, { status: QueryStatus, data: any[] }>>({});
 
     // Fetch saved queries
     useEffect(() => {
@@ -45,22 +52,26 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         return () => unsubscribe();
     }, []);
 
-    // Initialize dates when opened
+    // Initialize/Reset
     useEffect(() => {
         if (isOpen) {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
-            
-            setStartDate(`${year}-${month}-01`);
-            setEndDate(`${year}-${month}-${String(lastDay).padStart(2, '0')}`);
             setSearchInput('');
             setResults(null);
             setStatus('idle');
             setIsDetailOpen(false);
         }
     }, [isOpen]);
+
+    // Set default dates to current month (1st to last day)
+    const setDefaultDates = () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+        
+        setStartDate(`${year}-${month}-01`);
+        setEndDate(`${year}-${month}-${String(lastDay).padStart(2, '0')}`);
+    };
 
     const handleSearch = async () => {
         if (!searchInput.trim()) return;
@@ -77,13 +88,15 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         setResults(null);
         
         try {
+            // The customer search query might expect dates, but for pure customer lookup, 
+            // we usually just need the keyword. Providing dummy dates if the query demands it.
             const kw = searchInput.trim().replace(/'/g, "''");
-            
-            // Use word boundary \b to avoid replacing substrings in other variable names
+            const dummyDate = new Date().toISOString().slice(0,10);
+
             let sql = savedQuery.query
                 .replace(/@kw\b/g, kw)
-                .replace(/@startDate\b/g, startDate)
-                .replace(/@endDate\b/g, endDate);
+                .replace(/@startDate\b/g, dummyDate)
+                .replace(/@endDate\b/g, dummyDate);
 
             sql = sql.replace(/`/g, '');
 
@@ -96,18 +109,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         }
     };
 
-    const handleCustomerClick = async (row: any) => {
-        // Assume first column is Customer ID/Code, second is Name
-        const values = Object.values(row);
-        if (values.length < 1) return;
-
-        const customerId = String(values[0]);
-        const customerName = values.length > 1 ? String(values[1]) : customerId;
-
-        setSelectedCustomerName(customerName);
-        setIsDetailOpen(true);
+    const fetchSalesList = async (customerId: string, start: string, end: string) => {
         setDetailStatus('loading');
         setDetailResults(null);
+        setExpandedRows(new Set()); // Reset expanded rows on new search
+        setRowDetails({});
 
         const targetQueryName = '고객_기간별매출';
         const savedQuery = savedQueries.find(q => q.name === targetQueryName);
@@ -119,21 +125,16 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         }
 
         try {
-            // Escape single quotes for safety
             const safeTarget = String(customerId).replace(/'/g, "''");
-            const safeStart = String(startDate).replace(/'/g, "''");
-            const safeEnd = String(endDate).replace(/'/g, "''");
+            const safeStart = String(start).replace(/'/g, "''");
+            const safeEnd = String(end).replace(/'/g, "''");
 
             let sql = savedQuery.query;
-
-            // 1. Remove user-added quotes around variables in the source query if they exist
-            // This prevents double quoting like ''value'' if the user saved the query as '@target'
+            // Handle various quote styles in the stored query
             sql = sql.replace(/'@startDate'/gi, '@startDate');
             sql = sql.replace(/'@endDate'/gi, '@endDate');
             sql = sql.replace(/'@target'/gi, '@target');
 
-            // 2. Replace variables with values, using word boundary (\b) to avoid clobbering @target_yy_mm
-            // @target must match exactly @target, not be part of @target_something
             sql = sql
                 .replace(/@startDate\b/gi, `'${safeStart}'`)
                 .replace(/@endDate\b/gi, `'${safeEnd}'`)
@@ -145,8 +146,94 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             setDetailResults(data);
             setDetailStatus('success');
         } catch (err) {
-            console.error("Detail query failed:", err);
+            console.error("Sales list query failed:", err);
             setDetailStatus('error');
+        }
+    };
+
+    const handleCustomerClick = (row: any) => {
+        const values = Object.values(row);
+        if (values.length < 1) return;
+
+        const customerId = String(values[0]);
+        const customerName = values.length > 1 ? String(values[1]) : customerId;
+
+        setSelectedCustomer({ name: customerName, id: customerId });
+        
+        // 1. Set Default Dates
+        setDefaultDates();
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+        const start = `${year}-${month}-01`;
+        const end = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+
+        // 2. Open Modal Immediately
+        setIsDetailOpen(true);
+
+        // 3. Auto Fetch
+        fetchSalesList(customerId, start, end);
+    };
+
+    const handleDateSearch = () => {
+        if (selectedCustomer) {
+            fetchSalesList(selectedCustomer.id, startDate, endDate);
+        }
+    };
+
+    // --- Accordion Logic ---
+    const toggleRow = async (row: any, index: number) => {
+        // Unique key for the row: Date + POS + Receipt
+        // Assuming columns: [0]POS, [1]Date, [2]Junno(Receipt) based on previous query structure
+        const values = Object.values(row);
+        const pos = String(values[0] || '');
+        const date = String(values[1] || '');
+        const junno = String(values[2] || '');
+        
+        const rowKey = `${date}_${pos}_${junno}`;
+
+        const newExpanded = new Set(expandedRows);
+        if (newExpanded.has(rowKey)) {
+            newExpanded.delete(rowKey);
+            setExpandedRows(newExpanded);
+            return;
+        }
+
+        // Expand
+        newExpanded.add(rowKey);
+        setExpandedRows(newExpanded);
+
+        // If data not loaded yet, fetch it
+        if (!rowDetails[rowKey]) {
+            setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'loading', data: [] } }));
+
+            const targetQueryName = '고객_기간별매출_상세';
+            const savedQuery = savedQueries.find(q => q.name === targetQueryName);
+
+            if (!savedQuery) {
+                setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [] } }));
+                showToast(`'${targetQueryName}' 쿼리가 없습니다.`, 'error');
+                return;
+            }
+
+            try {
+                let sql = savedQuery.query
+                    .replace(/@date\b/gi, `'${date}'`)
+                    .replace(/@pos\b/gi, `'${pos}'`)
+                    .replace(/@junno\b/gi, `'${junno}'`);
+                
+                sql = sql.replace(/`/g, '');
+
+                const data = await querySql(sql, new AbortController().signal);
+                setRowDetails(prev => ({ 
+                    ...prev, 
+                    [rowKey]: { status: 'success', data: data.recordset || [] } 
+                }));
+            } catch (err) {
+                console.error("Detail item query failed:", err);
+                setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [] } }));
+            }
         }
     };
 
@@ -159,23 +246,6 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                 zIndexClass="z-[90]"
             >
                 <div className="flex flex-col h-full bg-gray-50">
-                    {/* Date Selection Area */}
-                    <div className="flex-shrink-0 bg-white p-2 border-b flex justify-center items-center gap-2 z-20">
-                        <input 
-                            type="date" 
-                            value={startDate} 
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="border border-gray-300 rounded-md px-2 py-1 text-sm font-semibold text-gray-700 bg-gray-50 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                        <span className="text-gray-400 font-bold">~</span>
-                        <input 
-                            type="date" 
-                            value={endDate} 
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="border border-gray-300 rounded-md px-2 py-1 text-sm font-semibold text-gray-700 bg-gray-50 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                    </div>
-
                     {/* Search Area */}
                     <div className="flex-shrink-0 bg-white p-3 border-b shadow-sm z-10">
                         <div className="flex items-center gap-2 max-w-md mx-auto">
@@ -188,7 +258,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                     value={searchInput}
                                     onChange={(e) => setSearchInput(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                    placeholder="고객명 또는 번호"
+                                    placeholder="고객명 또는 번호 (예: 1234)"
                                     className="w-full h-11 pl-10 pr-3 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors text-base placeholder:text-gray-400"
                                     autoFocus
                                 />
@@ -208,19 +278,12 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                             <div className="flex flex-col items-center justify-center h-full text-gray-400 pb-10">
                                 <UserCircleIcon className="w-16 h-16 text-gray-300 mb-3" />
                                 <p className="text-lg font-medium">고객을 검색해주세요.</p>
-                                <p className="text-xs text-gray-300 mt-2">'고객검색' 쿼리가 등록되어 있어야 합니다.</p>
                             </div>
                         )}
                         {status === 'loading' && (
                             <div className="flex flex-col items-center justify-center h-full pb-10">
                                 <SpinnerIcon className="w-10 h-10 text-blue-500" />
                                 <p className="text-gray-500 mt-3 font-medium">검색 중...</p>
-                            </div>
-                        )}
-                        {status === 'error' && (
-                            <div className="flex flex-col items-center justify-center h-full pb-10 text-center">
-                                <p className="text-red-500 font-bold mb-2">검색 실패</p>
-                                <p className="text-sm text-gray-500">오류가 발생했습니다.</p>
                             </div>
                         )}
                         {status === 'success' && results?.recordset && (
@@ -231,7 +294,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                             ) : (
                                 <div className="absolute inset-0 overflow-auto">
                                     <table className="w-full text-sm text-left border-collapse">
-                                        <thead className="bg-gray-100 text-gray-700 font-bold border-b sticky top-0 z-10 shadow-sm">
+                                        <thead className="bg-gray-50 text-gray-700 font-bold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(results.recordset[0] || {}).map((key) => (
                                                     <th key={key} className="p-3 whitespace-nowrap bg-gray-100">{key}</th>
@@ -261,59 +324,142 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                 </div>
             </ActionModal>
 
-            {/* Detail Drill-down Modal */}
+            {/* Consolidated Detail Modal */}
             <ActionModal
                 isOpen={isDetailOpen}
                 onClose={() => setIsDetailOpen(false)}
-                title={`${selectedCustomerName} 상세 내역`}
+                title={`${selectedCustomer?.name} 매출 내역`}
                 zIndexClass="z-[100]"
             >
                 <div className="flex flex-col h-full bg-gray-50">
-                    <div className="flex-shrink-0 p-2 bg-gray-100 text-center text-xs text-gray-600 border-b">
-                        기간: {startDate} ~ {endDate}
+                    {/* Header Controls (Date Picker) */}
+                    <div className="flex-shrink-0 bg-white p-3 border-b shadow-sm z-20">
+                        <div className="flex items-center justify-center gap-2 max-w-lg mx-auto">
+                            <div className="flex items-center gap-1 flex-grow bg-gray-50 rounded-lg border border-gray-200 p-1">
+                                <input 
+                                    type="date" 
+                                    value={startDate} 
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    className="w-full bg-transparent border-none text-sm font-semibold text-gray-700 focus:ring-0 text-center p-1"
+                                />
+                                <span className="text-gray-400 font-bold text-xs">~</span>
+                                <input 
+                                    type="date" 
+                                    value={endDate} 
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    className="w-full bg-transparent border-none text-sm font-semibold text-gray-700 focus:ring-0 text-center p-1"
+                                />
+                            </div>
+                            <button 
+                                onClick={handleDateSearch} 
+                                className="h-9 px-4 bg-blue-600 text-white text-sm font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-md shadow-blue-500/30 whitespace-nowrap"
+                            >
+                                조회
+                            </button>
+                        </div>
                     </div>
-                    <div className="flex-grow overflow-auto p-2">
+
+                    {/* Master List */}
+                    <div className="flex-grow overflow-hidden relative bg-gray-50">
                         {detailStatus === 'loading' && (
-                            <div className="flex flex-col items-center justify-center h-48 space-y-3">
+                            <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3 z-20">
                                 <SpinnerIcon className="w-8 h-8 text-blue-500" />
-                                <p className="text-gray-500 font-medium">상세 내역 조회 중...</p>
+                                <p className="text-gray-500 font-medium">매출 내역 조회 중...</p>
                             </div>
                         )}
                         {detailStatus === 'error' && (
-                            <div className="flex flex-col items-center justify-center h-48 text-center p-4">
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 z-20">
                                 <p className="text-red-500 font-bold mb-2">조회 실패</p>
                                 <p className="text-sm text-gray-500">
-                                    '고객_기간별매출' 쿼리를 찾을 수 없거나<br/>실행 중 오류가 발생했습니다.
+                                    오류가 발생했습니다.
                                 </p>
                             </div>
                         )}
                         {detailStatus === 'success' && detailResults?.recordset && (
-                            <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-xs text-left">
-                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b">
-                                            <tr>
-                                                {Object.keys(detailResults.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className={`p-3 whitespace-nowrap ${key === '순매출' || key === '금액' ? 'text-right' : ''}`}>{key}</th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-100">
-                                            {detailResults.recordset.map((row, idx) => (
-                                                <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                                                    {Object.entries(row).map(([key, val], vIdx) => (
-                                                        <td key={vIdx} className={`p-3 whitespace-nowrap font-mono text-gray-600 ${key === '순매출' || key === '금액' ? 'text-right' : ''}`}>
-                                                            {String(val)}
-                                                        </td>
-                                                    ))}
-                                                </tr>
+                            <div className="absolute inset-0 overflow-auto">
+                                <table className="w-full text-xs text-left border-collapse">
+                                    <thead className="bg-gray-200 text-gray-800 font-bold sticky top-0 z-10 shadow-sm border-b border-gray-300">
+                                        <tr>
+                                            <th className="p-3 w-8 bg-gray-200"></th> {/* Expand Icon Column */}
+                                            {Object.keys(detailResults.recordset[0] || {}).map((key) => (
+                                                <th key={key} className={`p-3 whitespace-nowrap bg-gray-200 ${key.includes('매출') || key.includes('금액') || key === '카드' || key === '포인트' ? 'text-right' : ''}`}>{key}</th>
                                             ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {detailResults.recordset.length === 0 && (
-                                    <p className="p-8 text-center text-gray-500 font-medium">조회된 내역이 없습니다.</p>
-                                )}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white">
+                                        {detailResults.recordset.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={10} className="p-8 text-center text-gray-500 font-medium">조회된 기간에 매출 내역이 없습니다.</td>
+                                            </tr>
+                                        ) : (
+                                            detailResults.recordset.map((row, idx) => {
+                                                const rowValues = Object.values(row);
+                                                const rowKey = `${rowValues[1]}_${rowValues[0]}_${rowValues[2]}`; // Date_POS_Junno
+                                                const isExpanded = expandedRows.has(rowKey);
+                                                const detail = rowDetails[rowKey];
+
+                                                return (
+                                                    <React.Fragment key={idx}>
+                                                        <tr 
+                                                            className={`cursor-pointer transition-colors border-b border-gray-100 ${isExpanded ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                                                            onClick={() => toggleRow(row, idx)}
+                                                        >
+                                                            <td className="p-3 text-center text-gray-400">
+                                                                <ChevronDownIcon className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180 text-blue-600' : ''}`} />
+                                                            </td>
+                                                            {Object.entries(row).map(([key, val], vIdx) => (
+                                                                <td key={vIdx} className={`p-3 whitespace-nowrap font-mono text-gray-600 ${key.includes('매출') || key.includes('금액') || key === '카드' || key === '포인트' ? 'text-right' : ''}`}>
+                                                                    {String(val)}
+                                                                </td>
+                                                            ))}
+                                                        </tr>
+                                                        {isExpanded && (
+                                                            <tr className="bg-blue-50/30 shadow-inner">
+                                                                <td colSpan={Object.keys(row).length + 1} className="p-2 sm:p-4">
+                                                                    <div className="bg-white rounded-lg border border-blue-200 overflow-hidden shadow-sm">
+                                                                        {(!detail || detail.status === 'loading') && (
+                                                                            <div className="p-4 flex justify-center text-blue-500 gap-2 items-center">
+                                                                                <SpinnerIcon className="w-4 h-4" />
+                                                                                <span className="text-xs">상세 품목 불러오는 중...</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {detail?.status === 'error' && (
+                                                                            <div className="p-4 text-center text-red-500 text-xs">상세 내역 로드 실패</div>
+                                                                        )}
+                                                                        {detail?.status === 'success' && (
+                                                                            <table className="w-full text-xs">
+                                                                                <thead className="bg-blue-100/50 text-blue-800 border-b border-blue-100">
+                                                                                    <tr>
+                                                                                        {Object.keys(detail.data[0] || {}).map(k => (
+                                                                                            <th key={k} className="p-2 text-left font-semibold">{k}</th>
+                                                                                        ))}
+                                                                                    </tr>
+                                                                                </thead>
+                                                                                <tbody className="divide-y divide-gray-100">
+                                                                                    {detail.data.length === 0 ? (
+                                                                                        <tr><td colSpan={5} className="p-3 text-center text-gray-400">품목 정보 없음</td></tr>
+                                                                                    ) : (
+                                                                                        detail.data.map((dRow: any, dIdx: number) => (
+                                                                                            <tr key={dIdx} className="hover:bg-gray-50">
+                                                                                                {Object.values(dRow).map((v: any, i) => (
+                                                                                                    <td key={i} className="p-2 font-mono text-gray-600 truncate max-w-[150px]">{String(v)}</td>
+                                                                                                ))}
+                                                                                            </tr>
+                                                                                        ))
+                                                                                    )}
+                                                                                </tbody>
+                                                                            </table>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>
