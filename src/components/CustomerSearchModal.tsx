@@ -44,7 +44,8 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
     // --- Accordion / Drill-down State ---
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-    const [rowDetails, setRowDetails] = useState<Record<string, { status: QueryStatus, data: any[] }>>({});
+    // Updated type to include error message
+    const [rowDetails, setRowDetails] = useState<Record<string, { status: QueryStatus, data: any[], error?: string }>>({});
 
     // Fetch saved queries
     useEffect(() => {
@@ -184,50 +185,40 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
     // --- Accordion Logic ---
     const toggleRow = async (row: any, index: number) => {
-        const values = Object.values(row).map(v => String(v).trim());
+        // 1. Explicit Key Lookup (Priority)
+        let date = row['판매일'] || row['일자'] || row['day1'] || row['date'] || '';
+        let pos = row['포스'] || row['기기'] || row['posno'] || row['pos'] || '';
+        let junno = row['전표'] || row['영수증'] || row['순번'] || row['junno'] || row['no'] || '';
+
+        // 2. Fuzzy Lookup (Fallback if explicit keys are missing)
         const keys = Object.keys(row);
-
-        // Regex Validators
-        // 날짜: YYYY-MM-DD 또는 YYYYMMDD
-        const isDateLike = (v: string) => /^(20\d{2})[-./]?(\d{2})[-./]?(\d{2})$/.test(v); 
-        // 포스: 1~3자리 숫자 (보통 1, 2, 3 등 한자리수)
-        const isPosLike = (v: string) => /^\d{1,3}$/.test(v); 
-        // 전표번호: 숫자, 보통 4자리 이상이거나 0으로 시작하는 문자열
-        const isJunnoLike = (v: string) => /^\d+$/.test(v) && v.length >= 1; 
-
-        // 1. Column Name Detection (Prioritized based on provided query aliases)
-        const dateKey = keys.find(k => {
-            const lower = k.toLowerCase();
-            return lower.includes('판매일') || lower.includes('일자') || lower.includes('date');
-        });
-        
-        const posKey = keys.find(k => {
-            const lower = k.toLowerCase();
-            return lower.includes('포스') || lower === 'pos' || lower === 'posno';
-        });
-
-        const junnoKey = keys.find(k => {
-            const lower = k.toLowerCase();
-            return lower.includes('전표') || lower.includes('jun') || (lower.includes('no') && !lower.includes('pos'));
-        });
-
-        let date = dateKey ? String(row[dateKey]).trim() : '';
-        let pos = posKey ? String(row[posKey]).trim() : '';
-        let junno = junnoKey ? String(row[junnoKey]).trim() : '';
-
-        // 2. Value Format Detection (Fallback if keys failed or values are weird)
-        if (!date || !isDateLike(date)) {
-            const found = values.find(v => isDateLike(v));
-            if (found) date = found;
+        if (!date) {
+            const dateKey = keys.find(k => k.includes('판매일') || k.includes('일자') || k.toLowerCase().includes('date'));
+            if (dateKey) date = row[dateKey];
         }
-        if (!pos) { const f = values.find(v => isPosLike(v) && v !== date); if (f) pos = f; else pos='01'; }
-        if (!junno) { const f = values.find(v => isJunnoLike(v) && v !== date && (posKey ? true : v !== pos)); if (f) junno = f; }
+        if (!pos) {
+            const posKey = keys.find(k => k.includes('포스') || k.toLowerCase().includes('pos'));
+            if (posKey) pos = row[posKey];
+        }
+        if (!junno) {
+            const junnoKey = keys.find(k => k.includes('전표') || k.toLowerCase().includes('jun'));
+            if (junnoKey) junno = row[junnoKey];
+        }
 
+        // 3. Normalize values to strings and handle defaults
+        date = String(date || '').trim();
+        pos = String(pos || '').trim();
+        junno = String(junno || '').trim();
+
+        // Default '01' for POS if strictly missing (legacy fallback)
+        if (!pos) pos = '01';
+
+        // 4. Generate Unique Key for Accordion
         const rowKey = `${date.replace(/[-./]/g, '')}_${pos}_${junno}`;
-        const isExpanded = expandedRows.has(rowKey);
         
-        // 3. Validation Check
-        if (!date || !junno) {
+        // 5. Validation Check
+        if (!junno || !date) {
+            console.warn("Detail Query Params Missing:", { date, pos, junno, row });
             showToast(`상세 정보를 조회할 수 없습니다.\n(날짜: ${date || '없음'}, 전표: ${junno || '없음'})`, 'error');
             return;
         }
@@ -250,22 +241,22 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             
             if (!savedQuery) {
                 showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정] > [SQL Runner]에서 해당 쿼리를 추가해주세요.`, 'error');
-                setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [] } }));
+                setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [], error: '쿼리를 찾을 수 없습니다.' } }));
                 return;
             }
             
             const queryToUse = savedQuery.query;
 
             try {
-                // IMPORTANT: User requested original date string here, query handles cleaning.
-                // date is typically 'YYYY-MM-DD' from the master list.
-                const cleanPos = pos;
-                const cleanJunno = junno;
-
+                // Pass values exactly as extracted
+                // Supports both standard variables (@date) and non-colliding alias variables (@searchDate)
                 let sql = queryToUse
+                    .replace(/@searchDate\b/gi, `'${date}'`)
+                    .replace(/@searchPos\b/gi, `'${pos}'`)
+                    .replace(/@searchJunno\b/gi, `'${junno}'`)
                     .replace(/@date\b/gi, `'${date}'`)
-                    .replace(/@pos\b/gi, `'${cleanPos}'`)
-                    .replace(/@junno\b/gi, `'${cleanJunno}'`);
+                    .replace(/@pos\b/gi, `'${pos}'`)
+                    .replace(/@junno\b/gi, `'${junno}'`);
                 
                 sql = sql.replace(/`/g, '');
 
@@ -274,9 +265,10 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                     ...prev, 
                     [rowKey]: { status: 'success', data: data.recordset || [] } 
                 }));
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Detail item query failed:", err);
-                setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [] } }));
+                const errorMessage = err.message || '알 수 없는 오류가 발생했습니다.';
+                setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [], error: errorMessage } }));
             }
         }
     };
@@ -435,34 +427,10 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                             </tr>
                                         ) : (
                                             detailResults.recordset.map((row, idx) => {
-                                                const values = Object.values(row).map(v => String(v).trim());
-                                                const keys = Object.keys(row);
+                                                const isExpanded = expandedRows.has(
+                                                    `${String(row['판매일'] || row['day1'] || '').trim().replace(/[-./]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`
+                                                );
                                                 
-                                                // Re-use logic for row key generation to ensure consistency
-                                                const isDateLike = (v: string) => /^(20\d{2})[-./]?(\d{2})[-./]?(\d{2})$/.test(v);
-                                                const isPosLike = (v: string) => /^\d{1,3}$/.test(v);
-                                                const isJunnoLike = (v: string) => /^\d+$/.test(v) && v.length >= 1;
-
-                                                const dateKey = keys.find(k => { const l = k.toLowerCase(); return l.includes('일자') || l.includes('날짜') || l.includes('date') || l.includes('day') || l.includes('판매일'); });
-                                                const posKey = keys.find(k => { const l = k.toLowerCase(); return l.includes('포스') || l.includes('기기') || l === 'pos' || l === 'posno'; });
-                                                const junnoKey = keys.find(k => { const l = k.toLowerCase(); return l.includes('전표') || l.includes('영수') || l.includes('순번') || l.includes('jun') || (l.includes('no') && !l.includes('pos')); });
-
-                                                let date = dateKey ? String(row[dateKey]).trim() : '';
-                                                let pos = posKey ? String(row[posKey]).trim() : '';
-                                                let junno = junnoKey ? String(row[junnoKey]).trim() : '';
-
-                                                if (!date || !isDateLike(date)) { const f = values.find(v => isDateLike(v)); if (f) date = f; }
-                                                
-                                                // Fallback for POS: short number, not date
-                                                if (!pos) { const f = values.find(v => isPosLike(v) && v !== date); if (f) pos = f; else pos='01'; }
-                                                
-                                                // Fallback for Junno: number, not date. 
-                                                if (!junno) { const f = values.find(v => isJunnoLike(v) && v !== date && (posKey ? true : v !== pos)); if (f) junno = f; }
-
-                                                const rowKey = `${date.replace(/[-./]/g, '')}_${pos}_${junno}`;
-                                                const isExpanded = expandedRows.has(rowKey);
-                                                const detail = rowDetails[rowKey];
-
                                                 return (
                                                     <React.Fragment key={idx}>
                                                         <tr 
@@ -482,39 +450,52 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                             <tr className="bg-blue-50/30 shadow-inner">
                                                                 <td colSpan={Object.keys(row).length + 1} className="p-2 sm:p-4">
                                                                     <div className="bg-white rounded-lg border border-blue-200 overflow-hidden shadow-sm">
-                                                                        {(!detail || detail.status === 'loading') && (
-                                                                            <div className="p-4 flex justify-center text-blue-500 gap-2 items-center">
-                                                                                <SpinnerIcon className="w-4 h-4" />
-                                                                                <span className="text-xs">상세 품목 불러오는 중...</span>
-                                                                            </div>
-                                                                        )}
-                                                                        {detail?.status === 'error' && (
-                                                                            <div className="p-4 text-center text-red-500 text-xs">상세 내역 로드 실패</div>
-                                                                        )}
-                                                                        {detail?.status === 'success' && (
-                                                                            <table className="w-full text-xs">
-                                                                                <thead className="bg-blue-100/50 text-blue-800 border-b border-blue-100">
-                                                                                    <tr>
-                                                                                        {Object.keys(detail.data[0] || {}).map(k => (
-                                                                                            <th key={k} className="p-2 text-left font-semibold">{k}</th>
-                                                                                        ))}
-                                                                                    </tr>
-                                                                                </thead>
-                                                                                <tbody className="divide-y divide-gray-100">
-                                                                                    {detail.data.length === 0 ? (
-                                                                                        <tr><td colSpan={5} className="p-3 text-center text-gray-400">품목 정보 없음</td></tr>
-                                                                                    ) : (
-                                                                                        detail.data.map((dRow: any, dIdx: number) => (
-                                                                                            <tr key={dIdx} className="hover:bg-gray-50">
-                                                                                                {Object.values(dRow).map((v: any, i) => (
-                                                                                                    <td key={i} className="p-2 font-mono text-gray-600 truncate max-w-[150px]">{String(v)}</td>
-                                                                                                ))}
-                                                                                            </tr>
-                                                                                        ))
-                                                                                    )}
-                                                                                </tbody>
-                                                                            </table>
-                                                                        )}
+                                                                        {(() => {
+                                                                            // Re-derive key to find details
+                                                                            const dKey = `${String(row['판매일'] || row['day1'] || '').trim().replace(/[-./]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`;
+                                                                            const detail = rowDetails[dKey];
+                                                                            
+                                                                            if (!detail || detail.status === 'loading') {
+                                                                                return (
+                                                                                    <div className="p-4 flex justify-center text-blue-500 gap-2 items-center">
+                                                                                        <SpinnerIcon className="w-4 h-4" />
+                                                                                        <span className="text-xs">상세 품목 불러오는 중...</span>
+                                                                                    </div>
+                                                                                );
+                                                                            }
+                                                                            if (detail.status === 'error') {
+                                                                                return (
+                                                                                    <div className="p-4 text-center text-red-500 text-xs">
+                                                                                        <p className="font-bold">상세 내역 로드 실패</p>
+                                                                                        {detail.error && <p className="mt-1 text-gray-500">{detail.error}</p>}
+                                                                                    </div>
+                                                                                );
+                                                                            }
+                                                                            return (
+                                                                                <table className="w-full text-xs">
+                                                                                    <thead className="bg-blue-100/50 text-blue-800 border-b border-blue-100">
+                                                                                        <tr>
+                                                                                            {Object.keys(detail.data[0] || {}).map(k => (
+                                                                                                <th key={k} className="p-2 text-left font-semibold">{k}</th>
+                                                                                            ))}
+                                                                                        </tr>
+                                                                                    </thead>
+                                                                                    <tbody className="divide-y divide-gray-100">
+                                                                                        {detail.data.length === 0 ? (
+                                                                                            <tr><td colSpan={5} className="p-3 text-center text-gray-400">품목 정보 없음</td></tr>
+                                                                                        ) : (
+                                                                                            detail.data.map((dRow: any, dIdx: number) => (
+                                                                                                <tr key={dIdx} className="hover:bg-gray-50">
+                                                                                                    {Object.values(dRow).map((v: any, i) => (
+                                                                                                        <td key={i} className="p-2 font-mono text-gray-600 truncate max-w-[150px]">{String(v)}</td>
+                                                                                                    ))}
+                                                                                                </tr>
+                                                                                            ))
+                                                                                        )}
+                                                                                    </tbody>
+                                                                                </table>
+                                                                            );
+                                                                        })()}
                                                                     </div>
                                                                 </td>
                                                             </tr>
