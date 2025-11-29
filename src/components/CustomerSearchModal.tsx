@@ -184,33 +184,49 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
     // --- Accordion Logic ---
     const toggleRow = async (row: any, index: number) => {
-        // 스마트 컬럼 감지: 컬럼명을 기반으로 날짜, 포스, 전표번호를 찾습니다.
+        const values = Object.values(row).map(v => String(v).trim());
         const keys = Object.keys(row);
-        const findKey = (keywords: string[]) => keys.find(k => keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase())));
 
-        const dateKey = findKey(['일자', '날짜', 'date', 'day']);
-        const posKey = findKey(['포스', '기기', 'pos']);
-        const junnoKey = findKey(['전표', '영수증', '순번', 'jun', 'No']);
+        // Helper validators: 정규식으로 값의 형태를 확인합니다.
+        const isDateLike = (v: string) => /^(20\d{2})[-./]?(\d{2})[-./]?(\d{2})$/.test(v); // YYYY-MM-DD or YYYYMMDD
+        const isPosLike = (v: string) => /^\d{1,4}$/.test(v); // 1~4자리 숫자
+        const isJunnoLike = (v: string) => /^\d{4,10}$/.test(v); // 4자리 이상 숫자 (전표번호)
 
-        const values = Object.values(row);
+        // 1. 키워드 기반으로 1차 추정 (Attempt detection by Column Header Keywords)
+        let date = values.find((v, i) => keys[i].includes('일자') || keys[i].includes('날짜') || keys[i].toLowerCase().includes('date') || keys[i].toLowerCase().includes('day')) || '';
+        let pos = values.find((v, i) => keys[i].includes('포스') || keys[i].includes('기기') || keys[i].toLowerCase() === 'pos' || keys[i].toLowerCase() === 'posno') || '';
+        let junno = values.find((v, i) => keys[i].includes('전표') || keys[i].includes('영수') || keys[i].includes('순번') || keys[i].toLowerCase().includes('jun') || keys[i].toLowerCase().includes('no')) || '';
+
+        // 2. 값의 형태 기반으로 교정 (Fallback: Detection by Value Format)
         
-        // 키를 찾았으면 값을 쓰고, 못 찾았으면 인덱스 기반으로 추정합니다.
-        // 보통 순서: [일자, 포스, 전표] 또는 [일자, 전표, ...]
-        let date = dateKey ? String(row[dateKey]) : String(values[0] || '');
-        let pos = posKey ? String(row[posKey]) : String(values[1] || '01'); 
-        let junno = junnoKey ? String(row[junnoKey]) : String(values[2] || '');
-
-        // 데이터 검증 및 교정 (Swap Logic)
-        // 날짜가 너무 짧고(예: '01'), 포스번호가 날짜처럼 생겼다면(예: '2023...') 서로 바뀐 것으로 간주
-        if (date.length < 6 && pos.length > 6 && !isNaN(Number(pos.replace(/-/g, '')))) {
-            const temp = date;
-            date = pos;
-            pos = temp;
+        // 날짜가 없거나 형식이 이상하면, 값들 중에서 날짜처럼 생긴 것을 찾습니다.
+        if (!date || !isDateLike(date)) {
+            const found = values.find(v => isDateLike(v));
+            if (found) date = found;
         }
 
-        // 날짜 포맷 정리 (YYYY-MM-DD -> YYYYMMDD) - 키 생성용
-        const cleanDate = date.replace(/-/g, '');
-        const rowKey = `${cleanDate}_${pos}_${junno}`;
+        // 포스가 없거나, 포스가 날짜/전표번호처럼 생겼다면 다시 찾습니다.
+        // 포스는 보통 1, 01, 11 처럼 짧습니다.
+        if (!pos || isDateLike(pos) || pos.length > 4) {
+            // 날짜가 아닌 값 중에서 짧은 숫자를 찾습니다.
+            const found = values.find(v => isPosLike(v) && v !== date);
+            if (found) pos = found;
+            else pos = '01'; // 정말 못 찾겠으면 기본값 '01'
+        }
+
+        // 전표번호가 없거나, 날짜/포스와 겹친다면 다시 찾습니다.
+        if (!junno || isDateLike(junno) || junno === pos) {
+            const found = values.find(v => isJunnoLike(v) && v !== date && v !== pos);
+            if (found) junno = found;
+        }
+
+        // 3. SQL 파라미터 주입을 위한 정제 (Final Sanitize)
+        // 날짜는 하이픈을 제거하여 YYYYMMDD (8자리)로 만듭니다. (VARCHAR(8) 대응)
+        const cleanDate = date.replace(/[-./]/g, '');
+        const cleanPos = pos;
+        const cleanJunno = junno;
+
+        const rowKey = `${cleanDate}_${cleanPos}_${cleanJunno}`;
 
         const newExpanded = new Set(expandedRows);
         if (newExpanded.has(rowKey)) {
@@ -238,9 +254,9 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
 
             try {
                 let sql = savedQuery.query
-                    .replace(/@date\b/gi, `'${date}'`)
-                    .replace(/@pos\b/gi, `'${pos}'`)
-                    .replace(/@junno\b/gi, `'${junno}'`);
+                    .replace(/@date\b/gi, `'${cleanDate}'`)
+                    .replace(/@pos\b/gi, `'${cleanPos}'`)
+                    .replace(/@junno\b/gi, `'${cleanJunno}'`);
                 
                 sql = sql.replace(/`/g, '');
 
@@ -412,23 +428,33 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                             </tr>
                                         ) : (
                                             detailResults.recordset.map((row, idx) => {
-                                                // Generate key based on sanitized column data to avoid index dependency
+                                                // Extract values for the key, but use the same logic as toggleRow for expanding
+                                                const values = Object.values(row).map(v => String(v).trim());
                                                 const keys = Object.keys(row);
-                                                const findKey = (keywords: string[]) => keys.find(k => keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase())));
-                                                const dKey = findKey(['일자', '날짜', 'date', 'day']);
-                                                const pKey = findKey(['포스', '기기', 'pos']);
-                                                const jKey = findKey(['전표', '영수증', '순번', 'jun', 'No']);
                                                 
-                                                const vals = Object.values(row);
-                                                let dVal = dKey ? String(row[dKey]) : String(vals[0] || '');
-                                                let pVal = pKey ? String(row[pKey]) : String(vals[1] || '01');
-                                                let jVal = jKey ? String(row[jKey]) : String(vals[2] || '');
+                                                const isDateLike = (v: string) => /^(20\d{2})[-./]?(\d{2})[-./]?(\d{2})$/.test(v);
+                                                const isPosLike = (v: string) => /^\d{1,4}$/.test(v);
+                                                const isJunnoLike = (v: string) => /^\d{4,10}$/.test(v);
 
-                                                if (dVal.length < 6 && pVal.length > 6 && !isNaN(Number(pVal.replace(/-/g, '')))) {
-                                                    const t = dVal; dVal = pVal; pVal = t;
+                                                let date = values.find((v, i) => keys[i].includes('일자') || keys[i].includes('날짜') || keys[i].toLowerCase().includes('date')) || '';
+                                                let pos = values.find((v, i) => keys[i].includes('포스') || keys[i].includes('기기') || keys[i].toLowerCase() === 'pos') || '';
+                                                let junno = values.find((v, i) => keys[i].includes('전표') || keys[i].includes('영수') || keys[i].includes('순번') || keys[i].toLowerCase().includes('jun') || keys[i].toLowerCase().includes('no')) || '';
+
+                                                if (!date || !isDateLike(date)) {
+                                                    const found = values.find(v => isDateLike(v));
+                                                    if (found) date = found;
+                                                }
+                                                if (!pos || isDateLike(pos) || pos.length > 4) {
+                                                    const found = values.find(v => isPosLike(v) && v !== date);
+                                                    if (found) pos = found;
+                                                    else pos = '01';
+                                                }
+                                                if (!junno || isDateLike(junno) || junno === pos) {
+                                                    const found = values.find(v => isJunnoLike(v) && v !== date && v !== pos);
+                                                    if (found) junno = found;
                                                 }
 
-                                                const rowKey = `${dVal.replace(/-/g, '')}_${pVal}_${jVal}`;
+                                                const rowKey = `${date.replace(/[-./]/g, '')}_${pos}_${junno}`;
                                                 const isExpanded = expandedRows.has(rowKey);
                                                 const detail = rowDetails[rowKey];
 
