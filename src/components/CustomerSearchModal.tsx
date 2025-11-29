@@ -23,6 +23,27 @@ interface QuerySqlResponse {
 
 type QueryStatus = 'idle' | 'loading' | 'success' | 'error';
 
+// Helper to ensure date is always YYYY-MM-DD
+const normalizeDate = (input: any): string => {
+    if (!input) return '';
+    let str = String(input).trim();
+    
+    // 1. Remove time part if exists (e.g. "2025-05-20 14:30:00")
+    if (str.includes(' ')) {
+        str = str.split(' ')[0];
+    }
+    
+    // 2. Replace dots/slashes with hyphens (e.g. "2025.05.20" -> "2025-05-20")
+    str = str.replace(/[./]/g, '-');
+    
+    // 3. Handle 8-digit string (e.g. "20250520" -> "2025-05-20")
+    if (/^\d{8}$/.test(str)) {
+        str = `${str.substring(0, 4)}-${str.substring(4, 6)}-${str.substring(6, 8)}`;
+    }
+    
+    return str;
+};
+
 const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClose }) => {
     const { showAlert, showToast } = useAlert();
     const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
@@ -205,17 +226,12 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             if (junnoKey) junno = row[junnoKey];
         }
 
-        // 3. Last Resort: Index based lookup (If keys are completely different)
-        // Assume order: [Date, Pos, Junno, ...] or similar common patterns
+        // 3. Last Resort: Index based lookup
         const values = Object.values(row);
         if (!date && values.length > 0) date = values[0];
-        // Skip pos/junno index fallback to avoid misinterpreting monetary values as IDs, 
-        // unless we are desperate. Safe to assume user query puts keys first? 
-        // Let's stick to name matching + value[0] for date which is most critical for table name.
 
-        // 4. Normalize values
-        // Important: Replace dots/slashes with hyphens to ensure SQL logic (substring) works for table names
-        date = String(date || '').trim().replace(/[./]/g, '-'); 
+        // 4. Normalize values using the helper function
+        date = normalizeDate(date);
         pos = String(pos || '').trim();
         junno = String(junno || '').trim();
 
@@ -226,7 +242,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         const rowKey = `${date.replace(/[-]/g, '')}_${pos}_${junno}`;
         
         // 6. Validation Check
-        if (!junno || !date || date.length < 8) {
+        if (!junno || !date || date.length < 10) { // Check for full YYYY-MM-DD length
             console.warn("Detail Query Params Missing or Invalid:", { date, pos, junno, row });
             showToast(`상세 정보를 조회할 수 없습니다.\n필수 정보 누락 (날짜: ${date}, 전표: ${junno})`, 'error');
             return;
@@ -279,8 +295,8 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                 let errorMessage = err.message || '알 수 없는 오류가 발생했습니다.';
                 
                 // User-friendly error message for common table missing issue
-                if (errorMessage.includes("Invalid object name 'outs'") || errorMessage.includes("Invalid object name")) {
-                    errorMessage = `매출 상세 테이블을 찾을 수 없습니다.\n(날짜: ${date})`;
+                if (errorMessage.includes("Invalid object name")) {
+                    errorMessage = `매출 상세 테이블(outd/outs)을 찾을 수 없습니다.\n(날짜: ${date})`;
                 }
 
                 setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [], error: errorMessage } }));
@@ -442,8 +458,12 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                             </tr>
                                         ) : (
                                             detailResults.recordset.map((row, idx) => {
+                                                // Create a normalized key for row expansion tracking
+                                                const rawDate = row['판매일'] || row['day1'] || '';
+                                                const normDate = normalizeDate(rawDate);
+                                                
                                                 const isExpanded = expandedRows.has(
-                                                    `${String(row['판매일'] || row['day1'] || '').trim().replace(/[-./]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`
+                                                    `${normDate.replace(/[-]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`
                                                 );
                                                 
                                                 return (
@@ -467,7 +487,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                                     <div className="bg-white rounded-lg border border-blue-200 overflow-hidden shadow-sm">
                                                                         {(() => {
                                                                             // Re-derive key to find details
-                                                                            const dKey = `${String(row['판매일'] || row['day1'] || '').trim().replace(/[-./]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`;
+                                                                            const dKey = `${normDate.replace(/[-]/g, '')}_${String(row['포스'] || row['posno'] || '01').trim()}_${String(row['전표'] || row['junno'] || '').trim()}`;
                                                                             const detail = rowDetails[dKey];
                                                                             
                                                                             if (!detail || detail.status === 'loading') {
