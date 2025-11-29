@@ -1238,7 +1238,7 @@ export const SqlRunnerView: React.FC<{
                                 <button
                                     key={tab}
                                     onClick={() => setActiveReportTab(tab as any)}
-                                    className={`flex-1 py-2 px-1 text-xs sm:text-sm font-bold rounded-md transition-all duration-200 ${
+                                    className={`flex-1 py-2 px-1 text-base sm:text-lg font-bold rounded-md transition-all duration-200 ${
                                         activeReportTab === tab 
                                             ? 'bg-white text-blue-600 shadow-sm' 
                                             : 'text-gray-500 hover:text-gray-700'
@@ -1269,11 +1269,11 @@ export const SqlRunnerView: React.FC<{
                         {reportStatus === 'success' && reportResult?.recordset && (
                             <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
                                 <div className="overflow-x-auto">
-                                    <table className="min-w-full text-sm text-left">
+                                    <table className="min-w-full text-lg text-left">
                                         <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(reportResult.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="px-2 py-2 whitespace-nowrap bg-gray-50">{key}</th>
+                                                    <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-50 text-center">{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -1281,7 +1281,7 @@ export const SqlRunnerView: React.FC<{
                                             {reportResult.recordset.map((row, idx) => (
                                                 <tr key={idx} onClick={() => handleReportRowClick(row)} className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100">
                                                     {Object.values(row).map((val, vIdx) => (
-                                                        <td key={vIdx} className="px-2 py-2 whitespace-nowrap font-mono text-gray-600">
+                                                        <td key={vIdx} className="px-1 py-2 whitespace-nowrap font-mono text-gray-600">
                                                             {String(val)}
                                                         </td>
                                                     ))}
@@ -1324,11 +1324,11 @@ export const SqlRunnerView: React.FC<{
                         {detailStatus === 'success' && detailResult?.recordset && (
                             <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
                                 <div className="overflow-x-auto">
-                                    <table className="min-w-full text-sm text-left">
+                                    <table className="min-w-full text-lg text-left">
                                         <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(detailResult.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="px-2 py-2 whitespace-nowrap bg-gray-50">{key}</th>
+                                                    <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-50 text-center">{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -1336,7 +1336,7 @@ export const SqlRunnerView: React.FC<{
                                             {detailResult.recordset.map((row, idx) => (
                                                 <tr key={idx} className="hover:bg-gray-50 transition-colors">
                                                     {Object.values(row).map((val, vIdx) => (
-                                                        <td key={vIdx} className="px-2 py-2 whitespace-nowrap font-mono text-gray-600">
+                                                        <td key={vIdx} className="px-1 py-2 whitespace-nowrap font-mono text-gray-600">
                                                             {String(val)}
                                                         </td>
                                                     ))}

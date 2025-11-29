@@ -359,11 +359,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                 </div>
                             ) : (
                                 <div className="absolute inset-0 overflow-auto">
-                                    <table className="min-w-full text-sm text-left border-collapse">
+                                    <table className="min-w-full text-base text-left border-collapse">
                                         <thead className="bg-gray-50 text-gray-700 font-bold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(results.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="px-2 py-2 whitespace-nowrap bg-gray-100">{key}</th>
+                                                    <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-100 text-center">{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -375,7 +375,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                     className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100"
                                                 >
                                                     {Object.values(row).map((val, vIdx) => (
-                                                        <td key={vIdx} className="px-2 py-2 whitespace-nowrap text-gray-700">
+                                                        <td key={vIdx} className="px-1 py-2 whitespace-nowrap text-gray-700">
                                                             {String(val)}
                                                         </td>
                                                     ))}
@@ -446,12 +446,12 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                 </div>
                             ) : (
                                 <div className="absolute inset-0 overflow-auto">
-                                    <table className="min-w-full text-sm text-left border-collapse">
+                                    <table className="min-w-full text-base text-left border-collapse">
                                         <thead className="bg-gray-50 text-gray-700 font-bold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
-                                                <th className="px-2 py-2 w-8"></th>
+                                                <th className="px-1 py-2 w-8"></th>
                                                 {Object.keys(detailResults.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="px-2 py-2 whitespace-nowrap bg-gray-100">{key}</th>
+                                                    <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-100 text-center">{key}</th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -473,11 +473,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                 return (
                                                     <React.Fragment key={idx}>
                                                         <tr onClick={() => toggleRow(row, idx)} className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100">
-                                                            <td className="px-2 py-2 w-8 text-center">
+                                                            <td className="px-1 py-2 w-8 text-center">
                                                                 <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform inline-block ${isExpanded ? 'rotate-180' : ''}`} />
                                                             </td>
                                                             {Object.values(row).map((val, vIdx) => (
-                                                                <td key={vIdx} className="px-2 py-2 whitespace-nowrap text-gray-700">
+                                                                <td key={vIdx} className="px-1 py-2 whitespace-nowrap text-gray-700">
                                                                     {String(val)}
                                                                 </td>
                                                             ))}
@@ -489,11 +489,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                                         {details?.status === 'loading' && <SpinnerIcon className="w-6 h-6 mx-auto text-blue-500" />}
                                                                         {details?.status === 'error' && <p className="text-center text-red-500 text-xs py-2">{details.error}</p>}
                                                                         {details?.status === 'success' && details.data.length > 0 && (
-                                                                            <table className="min-w-full text-sm text-left bg-white rounded-md shadow-inner overflow-hidden">
+                                                                            <table className="min-w-full text-base text-left bg-white rounded-md shadow-inner overflow-hidden">
                                                                                 <thead className="bg-blue-100">
                                                                                     <tr>
                                                                                         {Object.keys(details.data[0] || {}).map(key => (
-                                                                                            <th key={key} className="px-2 py-2 font-semibold text-blue-800">{key}</th>
+                                                                                            <th key={key} className="px-1 py-2 font-semibold text-blue-800 text-center">{key}</th>
                                                                                         ))}
                                                                                     </tr>
                                                                                 </thead>
@@ -501,7 +501,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                                                     {details.data.map((detailRow, dIdx) => (
                                                                                         <tr key={dIdx} className="border-t border-blue-100">
                                                                                             {Object.values(detailRow).map((val, dvIdx) => (
-                                                                                                <td key={dvIdx} className="px-2 py-2 text-gray-600 font-mono">
+                                                                                                <td key={dvIdx} className="px-1 py-2 text-gray-600 font-mono">
                                                                                                     {String(val)}
                                                                                                 </td>
                                                                                             ))}
