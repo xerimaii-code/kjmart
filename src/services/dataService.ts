@@ -238,171 +238,143 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
 
 // --- PDF 한글 폰트 처리 ---
 
-export const exportReturnToPDF = async (order: any): Promise<{ file: File, blobUrl: string }> => {
+export const exportReturnToPDF = async (order: Order): Promise<{ file: File, blobUrl: string }> => {
     try {
-        // 라이브러리 로드 (loadScript 함수가 파일 내에 있어야 합니다)
+        // 필수 라이브러리 및 폰트 로드
         await Promise.all([loadScript(JSPDF_CDN), loadScript(JSBARCODE_CDN)]);
-        
-        // 폰트 로딩
         const fontBase64 = await loadKoreanFontForPdf();
 
         if (!order.items || order.items.length === 0) {
             throw new Error("내보낼 품목이 없습니다.");
         }
     
+        // jsPDF 인스턴스 생성 및 폰트 설정
         const { jsPDF } = (window as any).jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
-
-        // 한글 폰트 등록
         const FONT_VFS_NAME = 'NanumGothic-Regular.ttf';
         const FONT_NAME_JS_PDF = 'NanumGothic';
-
         doc.addFileToVFS(FONT_VFS_NAME, fontBase64);
         doc.addFont(FONT_VFS_NAME, FONT_NAME_JS_PDF, 'normal');
         doc.setFont(FONT_NAME_JS_PDF);
 
-        // 페이지 규격 및 레이아웃 설정
+        // 페이지 레이아웃 계산
         const PAGE_WIDTH = doc.internal.pageSize.getWidth();
         const PAGE_HEIGHT = doc.internal.pageSize.getHeight();
         const MARGIN = 10;
         const HEADER_HEIGHT = 22;
         const FOOTER_HEIGHT = 10;
-        const MAX_WIDTH = PAGE_WIDTH - MARGIN * 2;
-        
-        // 3단 그리드 설정 (이 부분이 레이아웃의 핵심입니다)
+        const DRAW_AREA_TOP = MARGIN + HEADER_HEIGHT;
+        const DRAW_AREA_BOTTOM = PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT;
+        const DRAW_AREA_HEIGHT = DRAW_AREA_BOTTOM - DRAW_AREA_TOP;
         const COL_COUNT = 3;
         const COL_GAP = 7;
-        const COL_WIDTH = (MAX_WIDTH - (COL_GAP * (COL_COUNT - 1))) / COL_COUNT;
+        const COL_WIDTH = (PAGE_WIDTH - MARGIN * 2 - (COL_GAP * (COL_COUNT - 1))) / COL_COUNT;
         const ITEM_BLOCK_HEIGHT = 27;
-
-        // [1단계] 페이지 계산: 아이템을 페이지별로 미리 나눕니다.
-        const pages = [];
-        let currentPageItems = [];
-        let currentPageTotal = 0;
-        let yPos = MARGIN + HEADER_HEIGHT + 2;
-        let colIndex = 0;
+        const itemsPerColumn = Math.floor(DRAW_AREA_HEIGHT / ITEM_BLOCK_HEIGHT);
+        const itemsPerPage = itemsPerColumn * COL_COUNT;
         
-        for (const item of order.items) {
-            // 세로 공간이 부족하면 다음 열(Column)로 이동
-            if (yPos + ITEM_BLOCK_HEIGHT > PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT) {
-                colIndex++;
-                yPos = MARGIN + HEADER_HEIGHT + 2;
-
-                // 3번째 열까지 꽉 차면 다음 페이지로
-                if (colIndex >= COL_COUNT) {
-                    pages.push({ items: currentPageItems, total: currentPageTotal });
-                    currentPageItems = [];
-                    currentPageTotal = 0;
-                    colIndex = 0;
-                }
-            }
-            currentPageItems.push(item);
-            currentPageTotal += (item.price * item.quantity);
-            yPos += ITEM_BLOCK_HEIGHT;
+        // 전체 품목을 페이지별로 나누기
+        const pagesData = [];
+        for (let i = 0; i < order.items.length; i += itemsPerPage) {
+            const pageItems = order.items.slice(i, i + itemsPerPage);
+            const pageTotal = pageItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            pagesData.push({ items: pageItems, total: pageTotal });
         }
+        const totalPages = pagesData.length;
 
-        if (currentPageItems.length > 0) {
-            pages.push({ items: currentPageItems, total: currentPageTotal });
-        }
-        const totalPages = pages.length;
-
-        // [2단계] 그리기 (Drawing)
-        pages.forEach((page: { items: any[], total: number }, pageIndex: number) => {
+        // 각 페이지 그리기
+        pagesData.forEach((page, pageIndex) => {
             if (pageIndex > 0) doc.addPage();
 
-            // 헤더 출력
+            // 헤더
             doc.setFontSize(22);
             doc.text('경진마트반품', PAGE_WIDTH / 2, MARGIN + 8, { align: 'center' });
             doc.setFontSize(10);
             const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
-            doc.text(`날짜: ${today}`, MARGIN, MARGIN + HEADER_HEIGHT - 5);
-            doc.text(`거래처: ${order.customer.name}`, PAGE_WIDTH - MARGIN, MARGIN + HEADER_HEIGHT - 5, { align: 'right' });
+            doc.text(`날짜: ${today}`, MARGIN, MARGIN + 12);
+            doc.text(`거래처: ${order.customer.name}`, MARGIN, MARGIN + 18);
+            let totalText = `합계: ${order.total.toLocaleString('ko-KR')} 원`;
+            if (totalPages > 1) {
+                totalText = `페이지 합계: ${page.total.toLocaleString('ko-KR')} 원 / 총 합계: ${order.total.toLocaleString('ko-KR')} 원`;
+            }
+            doc.text(totalText, PAGE_WIDTH - MARGIN, MARGIN + 18, { align: 'right' });
+            doc.setDrawColor(100, 100, 100);
+            doc.setLineWidth(0.2);
+            doc.line(MARGIN, DRAW_AREA_TOP - 4, PAGE_WIDTH - MARGIN, DRAW_AREA_TOP - 4);
 
-            // 구분선 (Divider)
-            doc.setLineWidth(0.5);
-            doc.line(MARGIN, MARGIN + HEADER_HEIGHT, PAGE_WIDTH - MARGIN, MARGIN + HEADER_HEIGHT);
-
-            // 아이템 출력 (Items output)
-            let currentY = MARGIN + HEADER_HEIGHT + 2;
+            // 품목 렌더링
             let currentColumn = 0;
-
-            page.items.forEach((item: any) => {
-                const xPos = MARGIN + (currentColumn * (COL_WIDTH + COL_GAP));
-                
-                // 아이템 박스 (Item Box)
-                doc.setDrawColor(200);
-                doc.rect(xPos, currentY, COL_WIDTH, ITEM_BLOCK_HEIGHT);
-                doc.setDrawColor(0); // Reset to black
-
-                // 바코드 (Barcode)
-                try {
-                     const canvas = document.createElement('canvas');
-                     JsBarcode(canvas, item.barcode, {
-                         format: "EAN13",
-                         displayValue: false,
-                         margin: 0,
-                         height: 20,
-                         width: 1.5,
-                         fontSize: 0
-                     });
-                     const barcodeDataUrl = canvas.toDataURL("image/png");
-                     doc.addImage(barcodeDataUrl, 'PNG', xPos + 2, currentY + 2, 25, 8);
-                     doc.setFontSize(7);
-                     doc.text(item.barcode, xPos + 2, currentY + 13);
-                } catch (e) {
-                    doc.setFontSize(8);
-                    doc.text(item.barcode, xPos + 2, currentY + 8);
-                }
-
-                // 품명 (Product Name)
-                doc.setFontSize(8);
-                doc.setFont(FONT_NAME_JS_PDF, 'normal');
-                const name = item.name.length > 18 ? item.name.substring(0, 17) + '...' : item.name;
-                doc.text(name, xPos + 2, currentY + 17);
-
-                // 수량 (Quantity)
-                doc.setFontSize(11);
-                doc.setFont(FONT_NAME_JS_PDF, 'bold');
-                doc.text(`${item.quantity}${item.unit}`, xPos + COL_WIDTH - 2, currentY + 10, { align: 'right' });
-                
-                // 가격 (Price)
-                doc.setFontSize(9);
-                doc.setFont(FONT_NAME_JS_PDF, 'normal');
-                doc.text(`${item.price.toLocaleString()}원`, xPos + COL_WIDTH - 2, currentY + 24, { align: 'right' });
-                
-                // 메모 (Memo)
-                if (item.memo) {
-                    doc.setFontSize(7);
-                    doc.setTextColor(100);
-                    doc.text(`(${item.memo})`, xPos + 2, currentY + 24);
-                    doc.setTextColor(0);
-                }
-
-                // 위치 업데이트 (Update position for next item within the page)
-                currentY += ITEM_BLOCK_HEIGHT;
-                if (currentY + ITEM_BLOCK_HEIGHT > PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT) {
-                    currentY = MARGIN + HEADER_HEIGHT + 2;
+            let currentItemInColumn = 0;
+            for (const item of page.items) {
+                if (currentItemInColumn >= itemsPerColumn) {
                     currentColumn++;
+                    currentItemInColumn = 0;
                 }
-            });
+                
+                const x = MARGIN + currentColumn * (COL_WIDTH + COL_GAP);
+                const y = DRAW_AREA_TOP + currentItemInColumn * ITEM_BLOCK_HEIGHT;
 
-            // 페이지 하단 합계 (Page Footer Total)
-            const footerY = PAGE_HEIGHT - MARGIN + 5;
-            doc.setFontSize(10);
-            doc.text(`페이지 소계: ${page.total.toLocaleString()}원`, PAGE_WIDTH - MARGIN, footerY, { align: 'right' });
-            doc.text(`${pageIndex + 1} / ${totalPages}`, PAGE_WIDTH / 2, footerY, { align: 'center' });
+                // 품명
+                doc.setFontSize(11);
+                doc.setFont(FONT_NAME_JS_PDF, 'normal');
+                const productName = doc.splitTextToSize(item.name, COL_WIDTH)[0];
+                doc.text(productName, x, y + 4);
+                
+                // 수량, 단가, 합계
+                doc.setFontSize(9);
+                doc.text(`${item.quantity.toLocaleString()} x ${item.price.toLocaleString()}원`, x, y + 8.5);
+                doc.text(`${(item.price * item.quantity).toLocaleString()}원`, x + COL_WIDTH, y + 8.5, { align: 'right' });
+                
+                // 바코드 이미지
+                const canvas = document.createElement('canvas');
+                const barcodeHeight = 8;
+                try {
+                    JsBarcode(canvas, item.barcode, { format: "CODE128", width: 1.5, height: 40, displayValue: false, margin: 0 });
+                    const barcodeDataUrl = canvas.toDataURL('image/png');
+                    const barcodeWidth = (barcodeHeight / canvas.height) * canvas.width;
+                    const finalBarcodeWidth = Math.min(barcodeWidth, COL_WIDTH);
+                    const centeredBarcodeX = x + (COL_WIDTH - finalBarcodeWidth) / 2;
+                    doc.addImage(barcodeDataUrl, 'PNG', centeredBarcodeX, y + 12, finalBarcodeWidth, barcodeHeight);
+                } catch (e) {
+                    console.error(`JsBarcode 오류 for ${item.barcode}:`, e);
+                    doc.setFontSize(8);
+                    doc.text('[바코드 생성 오류]', x + COL_WIDTH / 2, y + 12 + 4, { align: 'center' });
+                }
+                
+                // 바코드 번호 텍스트
+                doc.setFontSize(9);
+                doc.text(item.barcode, x + COL_WIDTH / 2, y + 12 + barcodeHeight + 4, { align: 'center' });
+                
+                // 구분선
+                doc.setDrawColor(200, 200, 200);
+                doc.setLineDashPattern([1, 1], 0);
+                doc.line(x, y + ITEM_BLOCK_HEIGHT - 2, x + COL_WIDTH, y + ITEM_BLOCK_HEIGHT - 2);
+                doc.setLineDashPattern([], 0);
+
+                currentItemInColumn++;
+            }
         });
 
-        // PDF 생성
-        const pdfBlob = doc.output('blob');
-        const fileName = `반품서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.pdf`;
-        const file = new File([pdfBlob], fileName, { type: "application/pdf" });
-        const blobUrl = URL.createObjectURL(pdfBlob);
+        // 모든 페이지에 페이지 번호 추가
+        for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            doc.setFont(FONT_NAME_JS_PDF, 'normal');
+            doc.setFontSize(9);
+            doc.text(`- ${i} / ${totalPages} -`, PAGE_WIDTH / 2, PAGE_HEIGHT - 7, { align: 'center' });
+        }
 
+        // 결과물 생성
+        const fileName = `반품서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.pdf`;
+        const pdfBlob = doc.output('blob');
+        const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(file);
+        
         return { file, blobUrl };
 
     } catch (error) {
-        console.error("PDF Export Error:", error);
-        throw error; // 에러를 다시 던져서 호출자가 처리하도록 함
+        console.error("PDF 생성 중 오류 발생:", error);
+        // 사용자에게 보여줄 수 있도록 에러 메시지를 가공하여 throw합니다.
+        const message = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+        throw new Error(`PDF 내보내기에 실패했습니다: ${message}`);
     }
 };
