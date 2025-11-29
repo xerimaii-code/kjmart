@@ -257,17 +257,15 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             const queryToUse = savedQuery.query;
 
             try {
-                const cleanDate = date.replace(/[-./]/g, '');
+                // IMPORTANT: User requested original date string here, query handles cleaning.
+                // date is typically 'YYYY-MM-DD' from the master list.
                 const cleanPos = pos;
                 const cleanJunno = junno;
 
                 let sql = queryToUse
-                    .replace(/@date\b/gi, `'${cleanDate}'`)
+                    .replace(/@date\b/gi, `'${date}'`)
                     .replace(/@pos\b/gi, `'${cleanPos}'`)
                     .replace(/@junno\b/gi, `'${cleanJunno}'`);
-                
-                // Fallback for original date format if the query uses it (e.g., if user modified query)
-                sql = sql.replace(/@date\b/gi, `'${date}'`); 
                 
                 sql = sql.replace(/`/g, '');
 
