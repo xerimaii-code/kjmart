@@ -1269,7 +1269,7 @@ export const SqlRunnerView: React.FC<{
                         {reportStatus === 'success' && reportResult?.recordset && (
                             <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
                                 <div className="overflow-x-auto">
-                                    <table className="min-w-full text-xs text-left">
+                                    <table className="min-w-full text-sm text-left">
                                         <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(reportResult.recordset[0] || {}).map((key) => (
@@ -1324,7 +1324,7 @@ export const SqlRunnerView: React.FC<{
                         {detailStatus === 'success' && detailResult?.recordset && (
                             <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
                                 <div className="overflow-x-auto">
-                                    <table className="min-w-full text-xs text-left">
+                                    <table className="min-w-full text-sm text-left">
                                         <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 {Object.keys(detailResult.recordset[0] || {}).map((key) => (
