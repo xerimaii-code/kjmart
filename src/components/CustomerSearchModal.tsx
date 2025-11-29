@@ -205,21 +205,30 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             if (junnoKey) junno = row[junnoKey];
         }
 
-        // 3. Normalize values to strings and handle defaults
-        date = String(date || '').trim();
+        // 3. Last Resort: Index based lookup (If keys are completely different)
+        // Assume order: [Date, Pos, Junno, ...] or similar common patterns
+        const values = Object.values(row);
+        if (!date && values.length > 0) date = values[0];
+        // Skip pos/junno index fallback to avoid misinterpreting monetary values as IDs, 
+        // unless we are desperate. Safe to assume user query puts keys first? 
+        // Let's stick to name matching + value[0] for date which is most critical for table name.
+
+        // 4. Normalize values
+        // Important: Replace dots/slashes with hyphens to ensure SQL logic (substring) works for table names
+        date = String(date || '').trim().replace(/[./]/g, '-'); 
         pos = String(pos || '').trim();
         junno = String(junno || '').trim();
 
         // Default '01' for POS if strictly missing (legacy fallback)
-        if (!pos) pos = '01';
+        if (!pos || pos === 'undefined') pos = '01';
 
-        // 4. Generate Unique Key for Accordion
-        const rowKey = `${date.replace(/[-./]/g, '')}_${pos}_${junno}`;
+        // 5. Generate Unique Key for Accordion
+        const rowKey = `${date.replace(/[-]/g, '')}_${pos}_${junno}`;
         
-        // 5. Validation Check
-        if (!junno || !date) {
-            console.warn("Detail Query Params Missing:", { date, pos, junno, row });
-            showToast(`상세 정보를 조회할 수 없습니다.\n(날짜: ${date || '없음'}, 전표: ${junno || '없음'})`, 'error');
+        // 6. Validation Check
+        if (!junno || !date || date.length < 8) {
+            console.warn("Detail Query Params Missing or Invalid:", { date, pos, junno, row });
+            showToast(`상세 정보를 조회할 수 없습니다.\n필수 정보 누락 (날짜: ${date}, 전표: ${junno})`, 'error');
             return;
         }
 
@@ -267,7 +276,13 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                 }));
             } catch (err: any) {
                 console.error("Detail item query failed:", err);
-                const errorMessage = err.message || '알 수 없는 오류가 발생했습니다.';
+                let errorMessage = err.message || '알 수 없는 오류가 발생했습니다.';
+                
+                // User-friendly error message for common table missing issue
+                if (errorMessage.includes("Invalid object name 'outs'") || errorMessage.includes("Invalid object name")) {
+                    errorMessage = `매출 상세 테이블을 찾을 수 없습니다.\n(날짜: ${date})`;
+                }
+
                 setRowDetails(prev => ({ ...prev, [rowKey]: { status: 'error', data: [], error: errorMessage } }));
             }
         }
