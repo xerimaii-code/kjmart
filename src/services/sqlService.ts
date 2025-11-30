@@ -91,8 +91,8 @@ export interface QuerySqlResponse {
     answer?: string;
 }
 
-export async function querySql(query: string, signal: AbortSignal, confirmed?: boolean): Promise<QuerySqlResponse> {
-    return await fetchApi({ type: 'query', query, confirmed }, signal);
+export async function querySql(query: string, signal: AbortSignal, confirmed?: boolean, allowDestructive?: boolean): Promise<QuerySqlResponse> {
+    return await fetchApi({ type: 'query', query, confirmed, allowDestructive }, signal);
 }
 
 export async function naturalLanguageToSql(naturalLanguagePrompt: string, schema: DbSchema, context: string): Promise<{ sql: string }> {

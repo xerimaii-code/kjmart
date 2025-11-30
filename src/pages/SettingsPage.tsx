@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, LogoutIcon, TrashIcon, DatabaseIcon, UserCircleIcon, WarningIcon, SettingsIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, LogoutIcon, TrashIcon, DatabaseIcon, UserCircleIcon, WarningIcon, SettingsIcon, ShieldCheckIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import CollapsibleCard from '../components/CollapsibleCard';
 
@@ -44,9 +44,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         selectedCameraId, 
         scanSettings, 
         dataSourceSettings,
+        allowDestructiveQueries,
         setSelectedCameraId, 
         setScanSettings,
         setDataSourceSettings,
+        setAllowDestructiveQueries
     } = useDeviceSettings();
 
     const { resetData, syncWithDb } = useDataActions();
@@ -126,6 +128,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         );
     };
 
+    const handleAllowDestructiveChange = (checked: boolean) => {
+        if (checked) {
+            showAlert(
+                "주의: 데이터 변경/삭제 제한을 해제하시겠습니까?\n\n이 기능을 켜면 INSERT, DELETE, UPDATE 쿼리가 안전 장치 없이 즉시 실행될 수 있습니다. 실수로 중요한 데이터가 손실될 수 있으니 주의하세요.",
+                () => setAllowDestructiveQueries(true),
+                "제한 해제",
+                "bg-red-600 hover:bg-red-700"
+            );
+        } else {
+            setAllowDestructiveQueries(false);
+        }
+    };
+
     return (
         <div className="h-full flex flex-col bg-gray-50">
             <div className="scrollable-content">
@@ -201,6 +216,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                         color="blue"
                                     />
                                 </div>
+                            </div>
+                        </div>
+
+                        <div className="border-t border-gray-200/80 pt-4 mt-4">
+                            <h4 className="text-base font-bold text-gray-700 mb-3">SQL 실행 설정</h4>
+                            <div className="flex justify-between items-center p-3 bg-gray-50/80 rounded-lg">
+                                <div>
+                                    <p className="text-sm font-medium text-gray-800">데이터 변경 쿼리 허용</p>
+                                    <p className="text-xs text-gray-500 mt-1">INSERT, DELETE, UPDATE 쿼리 제한 해제</p>
+                                </div>
+                                <ToggleSwitch 
+                                    id="allow-destructive"
+                                    label=""
+                                    checked={allowDestructiveQueries}
+                                    onChange={handleAllowDestructiveChange}
+                                    color="red"
+                                />
                             </div>
                         </div>
 

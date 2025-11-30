@@ -53,6 +53,7 @@ interface DeviceSettingsActions {
     setLogRetentionDays: (days: number) => Promise<void>;
     setGoogleDriveSyncSettings: (type: 'customers' | 'products', settings: SyncSettings | null) => Promise<void>;
     setDataSourceSettings: (settings: Partial<DeviceSettings['dataSourceSettings']>) => Promise<void>;
+    setAllowDestructiveQueries: (allow: boolean) => Promise<void>;
 }
 const DeviceSettingsContext = createContext<(DeviceSettings & DeviceSettingsActions) | undefined>(undefined);
 interface SyncState {
@@ -87,6 +88,7 @@ const defaultSettings: DeviceSettings = {
     logRetentionDays: 30,
     googleDriveSyncSettings: { customers: null, products: null, },
     dataSourceSettings: { newOrder: 'online', productInquiry: 'online', autoSwitch: true, },
+    allowDestructiveQueries: false,
 };
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -262,6 +264,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await updateSettings({ ...settings, dataSourceSettings: { ...settings.dataSourceSettings, ...newDataSourceSettings } });
     }, [settings, updateSettings]);
 
+    const setAllowDestructiveQueries = useCallback(async (allow: boolean) => {
+        await updateSettings({ ...settings, allowDestructiveQueries: allow });
+    }, [settings, updateSettings]);
+
     const openDetailModal = useCallback((order: Order) => setModalsState(s => ({ ...s, isDetailModalOpen: true, editingOrder: order })), []);
     const closeDetailModal = useCallback(() => setModalsState(s => ({ ...s, isDetailModalOpen: false, editingOrder: null })), []);
     const openDeliveryModal = useCallback((order: Order) => setModalsState(s => ({ ...s, isDeliveryModalOpen: true, orderToExport: order })), []);
@@ -408,7 +414,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const dataStateValue = useMemo(() => ({ customers, products }), [customers, products]);
     const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithDb, resetData, }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithDb, resetData]);
-    const deviceSettingsValue = useMemo(() => ({ ...settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, }), [settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings]);
+    const deviceSettingsValue = useMemo(() => ({ ...settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries }), [settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries]);
     const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted, }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);
     const modalsValue = useMemo(() => ({ ...modalsState, openDetailModal, closeDetailModal, openDeliveryModal, closeDeliveryModal, openAddItemModal, closeAddItemModal, openEditItemModal, closeEditItemModal, openClearHistoryModal, closeClearHistoryModal, }), [modalsState, openDetailModal, closeDetailModal, openDeliveryModal, closeDeliveryModal, openAddItemModal, closeAddItemModal, openEditItemModal, closeEditItemModal, openClearHistoryModal, closeClearHistoryModal]);
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId, sqlStatus, checkSql }), [lastModifiedOrderId, activeMenuOrderId, sqlStatus, checkSql]);

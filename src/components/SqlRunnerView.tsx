@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useAlert, useMiscUI } from '../context/AppContext';
+import { useAlert, useMiscUI, useDeviceSettings } from '../context/AppContext';
 import { SpinnerIcon, TrashIcon, PencilSquareIcon, PlayCircleIcon, BookmarkSquareIcon, StopCircleIcon, SparklesIcon, StarIcon, ClipboardIcon, DragHandleIcon, WarningIcon, CheckCircleIcon, CalendarIcon, RemoveIcon, ShieldCheckIcon } from './Icons';
 import { querySql, naturalLanguageToSql, aiChat, generateQueryName, UpdatePreview, QuerySqlResponse } from '../services/sqlService';
 import { subscribeToSavedQueries, addSavedQuery, deleteSavedQuery, updateSavedQuery, getValue, setValue, db, ref, update } from '../services/dbService';
@@ -117,6 +117,7 @@ export const SqlRunnerView: React.FC<{
     isModal?: boolean;
 }> = ({ onBack, isActive, initialMode, isModal }) => {
     const { showAlert, showToast } = useAlert();
+    const { allowDestructiveQueries } = useDeviceSettings();
     // Removed usage of sqlQueryInput from global context
     const [sqlQueryInput, setSqlQueryInput] = useState('');
     
@@ -344,8 +345,9 @@ export const SqlRunnerView: React.FC<{
         setError(null);
         abortControllerRef.current = new AbortController();
     
-        if (/^\s*(delete|insert)\s/i.test(sql.trim()) && !confirmed) {
-            showAlert('데이터 보안을 위해 INSERT 및 DELETE 쿼리는 실행할 수 없습니다.');
+        // If not destructive allowed and query is DELETE/INSERT, block it on frontend for better UX (backend also checks)
+        if (!allowDestructiveQueries && /^\s*(delete|insert)\s/i.test(sql.trim()) && !confirmed) {
+            showAlert('데이터 보안을 위해 INSERT 및 DELETE 쿼리는 실행할 수 없습니다.\n설정 > SQL 실행 설정에서 제한을 해제할 수 있습니다.');
             setStatus('idle');
             return;
         }
@@ -353,7 +355,7 @@ export const SqlRunnerView: React.FC<{
         try {
             // Remove backticks to prevent SQL syntax errors in MSSQL
             const sanitizedSql = sql.replace(/`/g, '');
-            const data = await querySql(sanitizedSql, abortControllerRef.current.signal, confirmed);
+            const data = await querySql(sanitizedSql, abortControllerRef.current.signal, confirmed, allowDestructiveQueries);
     
             if (data.preview) {
                 setUpdatePreview(data.preview || null);
@@ -374,7 +376,7 @@ export const SqlRunnerView: React.FC<{
                 setStatus('error');
             }
         }
-    }, [showAlert]);
+    }, [showAlert, allowDestructiveQueries]);
 
     const processNaturalLanguageQuery = useCallback(async (prompt: string) => {
         setStatus('loading');
@@ -923,6 +925,13 @@ export const SqlRunnerView: React.FC<{
         if (!result && status !== 'error') return null;
 
         if (status === 'error') {
+            const handleCopyError = () => {
+                if (error) {
+                    navigator.clipboard.writeText(error)
+                        .then(() => showToast('오류 메시지가 복사되었습니다.', 'success'))
+                        .catch(() => showToast('복사 실패.', 'error'));
+                }
+            };
             return (
                 <div className="flex flex-col items-center justify-center h-full text-center p-4">
                     <WarningIcon className="w-16 h-16 text-red-400 mb-4" />
@@ -931,17 +940,39 @@ export const SqlRunnerView: React.FC<{
                         <pre className="text-sm text-red-800 break-words whitespace-pre-wrap font-mono select-text">
                             <code>{error}</code>
                         </pre>
+                        <button 
+                            onClick={handleCopyError}
+                            className="absolute top-2 right-2 p-1.5 text-gray-500 hover:bg-red-100 rounded-full transition-colors"
+                            title="오류 복사"
+                        >
+                            <ClipboardIcon className="w-4 h-4" />
+                        </button>
                     </div>
                 </div>
             );
         }
 
         if (result?.answer) {
+            const handleCopyAnswer = () => {
+                if (result.answer) {
+                    navigator.clipboard.writeText(result.answer)
+                        .then(() => showToast('AI 답변이 복사되었습니다.', 'success'))
+                        .catch(() => showToast('복사 실패.', 'error'));
+                }
+            };
             return (
-                <div className="p-4 h-full flex flex-col items-center justify-center text-center">
-                    <SparklesIcon className="w-12 h-12 text-blue-500 mb-4" />
+                // Changed h-full to min-h-full for scrolling
+                <div className="p-4 min-h-full flex flex-col items-center justify-center text-center">
+                    <SparklesIcon className="w-12 h-12 text-blue-500 mb-4 flex-shrink-0" />
                     <div className="relative bg-white p-6 rounded-2xl shadow-sm border border-blue-100 max-w-lg w-full text-left">
                         <p className="text-lg text-gray-800 leading-relaxed font-medium whitespace-pre-wrap select-text">{result.answer}</p>
+                        <button 
+                            onClick={handleCopyAnswer}
+                            className="absolute top-2 right-2 p-1.5 text-gray-400 hover:bg-gray-100 rounded-full transition-colors"
+                            title="답변 복사"
+                        >
+                            <ClipboardIcon className="w-5 h-5" />
+                        </button>
                     </div>
                 </div>
             );
@@ -1127,7 +1158,16 @@ export const SqlRunnerView: React.FC<{
                                  <span>메뉴</span>
                             </button>
                         )}
-                        <h2 className="font-bold text-lg text-gray-800">SQL Runner (AI)</h2>
+                        <div>
+                            <h2 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                SQL Runner (AI)
+                                {allowDestructiveQueries && (
+                                    <span className="text-xs px-2 py-0.5 bg-red-100 text-red-600 rounded-full font-bold border border-red-200">
+                                        ⚠ 제한 해제됨
+                                    </span>
+                                )}
+                            </h2>
+                        </div>
                     </div>
                 </header>
             )}
@@ -1156,6 +1196,20 @@ export const SqlRunnerView: React.FC<{
                             <SparklesIcon className="w-16 h-16 mx-auto text-gray-300" />
                             <p className="mt-4 font-semibold text-lg">무엇을 도와드릴까요?</p>
                             <p className="text-sm mt-1">하단 입력창에 SQL을 입력하거나 자연어로 질문해보세요.</p>
+                        </div>
+                    </div>
+                ) : status === 'loading' ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center p-8 space-y-4 animate-fade-in-up">
+                        <div className="relative">
+                            <div className="w-16 h-16 border-4 border-blue-100 rounded-full"></div>
+                            <div className="absolute top-0 left-0 w-16 h-16 border-4 border-blue-500 rounded-full animate-spin border-t-transparent"></div>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <SparklesIcon className="w-6 h-6 text-blue-500 animate-pulse" />
+                            </div>
+                        </div>
+                        <div>
+                            <p className="text-lg font-bold text-gray-800">{isAiMode ? "AI가 생각 중입니다..." : "쿼리 실행 중..."}</p>
+                            <p className="text-sm text-gray-500 mt-1">잠시만 기다려주세요.</p>
                         </div>
                     </div>
                 ) : (

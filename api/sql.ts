@@ -137,14 +137,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
 
       case 'query': {
-        const { query, confirmed } = req.body;
+        const { query, confirmed, allowDestructive } = req.body;
         const lowerCaseQuery = query.toLowerCase().trim();
 
-        if (/^\s*(delete|insert)\s/i.test(lowerCaseQuery)) {
+        // 1. INSERT/DELETE Restriction
+        // allowDestructive가 false(기본값)이면 INSERT, DELETE를 차단
+        if (!allowDestructive && /^\s*(delete|insert)\s/i.test(lowerCaseQuery)) {
           return res.status(403).json({ error: '데이터 보안을 위해 INSERT 및 DELETE 쿼리는 실행할 수 없습니다.' });
         }
         
-        if (/^\s*update\s/i.test(lowerCaseQuery) && !confirmed) {
+        // 2. UPDATE Restriction and Preview Logic
+        // allowDestructive가 true이면 UPDATE 미리보기 강제 로직을 건너뛰고 바로 실행
+        // allowDestructive가 false이면(기본값) 안전 장치(미리보기) 작동
+        if (!allowDestructive && /^\s*update\s/i.test(lowerCaseQuery) && !confirmed) {
             const transaction = new sql.Transaction(pool);
             try {
                 await transaction.begin();
@@ -194,6 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 throw err;
             }
         } else {
+            // Normal Execution (SELECT, or confirmed/allowed UPDATE/INSERT/DELETE)
             const request = pool.request();
             const signal = (req as any).signal;
             if (signal) {

@@ -79,6 +79,7 @@ export interface DeviceSettings {
         productInquiry: 'offline' | 'online';
         autoSwitch: boolean;
     };
+    allowDestructiveQueries: boolean; // SQL Runner Safety Setting
 }
 
 export interface SyncLog {
