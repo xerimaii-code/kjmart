@@ -2,9 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, LogoutIcon, TrashIcon, DatabaseIcon, UserCircleIcon, WarningIcon, SettingsIcon, ShieldCheckIcon } from '../components/Icons';
+import { CameraIcon, SpinnerIcon, DevicePhoneMobileIcon, LogoutIcon, TrashIcon, DatabaseIcon, UserCircleIcon, WarningIcon, SettingsIcon, ShieldCheckIcon, LockClosedIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import CollapsibleCard from '../components/CollapsibleCard';
+import ActionModal from '../components/ActionModal';
 
 interface SettingsPageProps {
     isActive: boolean;
@@ -48,7 +49,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         setSelectedCameraId, 
         setScanSettings,
         setDataSourceSettings,
-        setAllowDestructiveQueries
+        setAllowDestructiveQueries,
+        verifySqlPassword,
+        changeSqlPassword
     } = useDeviceSettings();
 
     const { resetData, syncWithDb } = useDataActions();
@@ -60,6 +63,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [syncType, setSyncType] = useState<'incremental' | 'full'>('incremental');
     
+    // Security Modal State
+    const [securityModal, setSecurityModal] = useState<{ mode: 'toggle-destructive' | 'change-password'; targetValue?: boolean; isOpen: boolean }>({ mode: 'toggle-destructive', isOpen: false });
+    const [passwordInput, setPasswordInput] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmNewPassword, setConfirmNewPassword] = useState('');
+    const [passwordError, setPasswordError] = useState('');
+    const [isProcessingPassword, setIsProcessingPassword] = useState(false);
+
     useEffect(() => {
         const getCameras = async () => {
             try {
@@ -129,17 +140,55 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
     };
 
     const handleAllowDestructiveChange = (checked: boolean) => {
-        if (checked) {
-            showAlert(
-                "주의: 데이터 변경/삭제 제한을 해제하시겠습니까?\n\n이 기능을 켜면 INSERT, DELETE, UPDATE 쿼리가 안전 장치 없이 즉시 실행될 수 있습니다. 실수로 중요한 데이터가 손실될 수 있으니 주의하세요.",
-                () => setAllowDestructiveQueries(true),
-                "제한 해제",
-                "bg-red-600 hover:bg-red-700"
-            );
-        } else {
-            setAllowDestructiveQueries(false);
+        setPasswordInput('');
+        setPasswordError('');
+        setSecurityModal({ mode: 'toggle-destructive', targetValue: checked, isOpen: true });
+    };
+
+    const handleOpenChangePasswordModal = () => {
+        setPasswordInput('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setPasswordError('');
+        setSecurityModal({ mode: 'change-password', isOpen: true });
+    };
+
+    const handleSecurityConfirm = async () => {
+        setPasswordError('');
+        setIsProcessingPassword(true);
+
+        try {
+            if (securityModal.mode === 'toggle-destructive') {
+                const isVerified = await verifySqlPassword(passwordInput);
+                if (isVerified) {
+                    await setAllowDestructiveQueries(securityModal.targetValue!);
+                    showToast(`데이터 변경 쿼리 제한이 ${securityModal.targetValue ? '해제' : '설정'}되었습니다.`, 'success');
+                    setSecurityModal({ ...securityModal, isOpen: false });
+                } else {
+                    setPasswordError('비밀번호가 일치하지 않습니다.');
+                }
+            } else if (securityModal.mode === 'change-password') {
+                if (newPassword.length < 4) {
+                    setPasswordError('새 비밀번호는 4자 이상이어야 합니다.');
+                    return;
+                }
+                if (newPassword !== confirmNewPassword) {
+                    setPasswordError('새 비밀번호가 일치하지 않습니다.');
+                    return;
+                }
+                const result = await changeSqlPassword(passwordInput, newPassword);
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    setSecurityModal({ ...securityModal, isOpen: false });
+                } else {
+                    setPasswordError(result.message);
+                }
+            }
+        } finally {
+            setIsProcessingPassword(false);
         }
     };
+
 
     return (
         <div className="h-full flex flex-col bg-gray-50">
@@ -219,23 +268,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             </div>
                         </div>
 
-                        <div className="border-t border-gray-200/80 pt-4 mt-4">
-                            <h4 className="text-base font-bold text-gray-700 mb-3">SQL 실행 설정</h4>
-                            <div className="flex justify-between items-center p-3 bg-gray-50/80 rounded-lg">
-                                <div>
-                                    <p className="text-sm font-medium text-gray-800">데이터 변경 쿼리 허용</p>
-                                    <p className="text-xs text-gray-500 mt-1">INSERT, DELETE, UPDATE 쿼리 제한 해제</p>
-                                </div>
-                                <ToggleSwitch 
-                                    id="allow-destructive"
-                                    label=""
-                                    checked={allowDestructiveQueries}
-                                    onChange={handleAllowDestructiveChange}
-                                    color="red"
-                                />
-                            </div>
-                        </div>
-
                         {isInstallPromptAvailable && (
                              <div className="mt-4">
                                 <ActionButton
@@ -306,9 +338,41 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             description="오래된 발주 내역을 삭제하여 앱을 최적화합니다."
                         />
                         
+                        <div className="border-t border-gray-200/80 pt-4 mt-4">
+                            <h4 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
+                                <ShieldCheckIcon className="w-5 h-5 text-gray-400" />
+                                <span>SQL 보안 설정 (전체 사용자 적용)</span>
+                            </h4>
+                            <div className="flex justify-between items-center p-3 bg-gray-50/80 rounded-lg">
+                                <div>
+                                    <p className="text-sm font-medium text-gray-800">데이터 변경 쿼리 허용</p>
+                                    <p className="text-xs text-gray-500 mt-1">INSERT, DELETE, UPDATE 쿼리 제한 해제</p>
+                                </div>
+                                <ToggleSwitch 
+                                    id="allow-destructive"
+                                    label=""
+                                    checked={allowDestructiveQueries}
+                                    onChange={handleAllowDestructiveChange}
+                                    color="red"
+                                />
+                            </div>
+                            <div className="p-3 mt-2 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-800">
+                                <strong>주의:</strong> 이 설정은 모든 사용자에게 적용됩니다. 활성화 시 데이터 손실의 위험이 있습니다.
+                            </div>
+                        </div>
+
+                        <ActionButton
+                            onClick={handleOpenChangePasswordModal}
+                            icon={<LockClosedIcon className="w-6 h-6" />}
+                            label="보안 비밀번호 변경"
+                            description="SQL 실행 제한 설정을 변경할 때 사용하는 비밀번호입니다."
+                        />
+
+                        <p className="text-xs text-gray-500 px-3 mt-1">비밀번호 분실 시 <a href="mailto:xerimii@naver.com" className="font-semibold text-blue-600">xerimii@naver.com</a>으로 문의하세요.</p>
+
                         <div className="border-t border-gray-200/80 my-2" />
 
-                        <p className="text-xs text-red-600 font-semibold px-3 py-1 mt-2">주의: 아래 작업은 되돌릴 수 없습니다.</p>
+                        <p className="text-xs text-red-600 font-semibold px-3 py-1">주의: 아래 작업은 되돌릴 수 없습니다.</p>
 
                         <ActionButton
                             onClick={() => handleReset('customers')}
@@ -337,6 +401,59 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                     </CollapsibleCard>
                 </div>
             </div>
+
+             <ActionModal
+                isOpen={securityModal.isOpen}
+                onClose={() => setSecurityModal({ ...securityModal, isOpen: false })}
+                title={securityModal.mode === 'change-password' ? "보안 비밀번호 변경" : "보안 확인"}
+                zIndexClass="z-[90]"
+                footer={
+                    <button 
+                        onClick={handleSecurityConfirm} 
+                        disabled={isProcessingPassword}
+                        className="relative w-full h-11 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400"
+                    >
+                        <span className={isProcessingPassword ? 'opacity-0' : 'opacity-100'}>확인</span>
+                        {isProcessingPassword && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <SpinnerIcon className="w-6 h-6"/>
+                            </div>
+                        )}
+                    </button>
+                }
+            >
+                <form className="p-4 space-y-4" onSubmit={(e) => { e.preventDefault(); handleSecurityConfirm(); }}>
+                    {securityModal.mode === 'change-password' ? (
+                        <>
+                            <p className="text-sm text-gray-600">SQL 실행 제한 설정을 변경할 때 사용하는 비밀번호를 변경합니다.</p>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="current-password">현재 비밀번호</label>
+                                <input id="current-password" type="password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className="w-full px-3 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500" required autoFocus />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="new-password">새 비밀번호 (4자 이상)</label>
+                                <input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-3 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500" required />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="confirm-new-password">새 비밀번호 확인</label>
+                                <input id="confirm-new-password" type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} className="w-full px-3 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500" required />
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <p className="text-sm text-gray-600">이 작업은 모든 사용자에게 영향을 미칩니다. 계속하려면 보안 비밀번호를 입력하세요.</p>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="security-password">비밀번호</label>
+                                <input id="security-password" type="password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className="w-full px-3 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500" required autoFocus />
+                            </div>
+                        </>
+                    )}
+                    {passwordError && (
+                        <p className="text-red-600 text-sm text-center font-semibold">{passwordError}</p>
+                    )}
+                </form>
+            </ActionModal>
+
         </div>
     );
 };

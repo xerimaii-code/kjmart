@@ -92,7 +92,7 @@ const defaultSettings: DeviceSettings = {
     logRetentionDays: 30,
     googleDriveSyncSettings: { customers: null, products: null, },
     dataSourceSettings: { newOrder: 'online', productInquiry: 'online', autoSwitch: true, },
-    allowDestructiveQueries: false,
+    allowDestructiveQueries: true,
 };
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
