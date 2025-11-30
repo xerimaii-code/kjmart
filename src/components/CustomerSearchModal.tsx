@@ -489,26 +489,28 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                                         {details?.status === 'loading' && <SpinnerIcon className="w-6 h-6 mx-auto text-blue-500" />}
                                                                         {details?.status === 'error' && <p className="text-center text-red-500 text-sm py-2">{details.error}</p>}
                                                                         {details?.status === 'success' && details.data.length > 0 && (
-                                                                            <table className="min-w-full text-sm text-left bg-white rounded-md shadow-inner overflow-hidden">
-                                                                                <thead className="bg-gray-200">
-                                                                                    <tr>
-                                                                                        {Object.keys(details.data[0] || {}).map(key => (
-                                                                                            <th key={key} className="px-2 py-1.5 font-semibold text-gray-700 text-center">{key}</th>
-                                                                                        ))}
-                                                                                    </tr>
-                                                                                </thead>
-                                                                                <tbody className="divide-y divide-gray-100">
-                                                                                    {details.data.map((detailRow, dIdx) => (
-                                                                                        <tr key={dIdx}>
-                                                                                            {Object.values(detailRow).map((val, dvIdx) => (
-                                                                                                <td key={dvIdx} className="px-2 py-1.5 text-gray-800 font-mono">
-                                                                                                    {String(val)}
-                                                                                                </td>
+                                                                            <div className="overflow-x-auto">
+                                                                                <table className="min-w-full text-sm text-left bg-white rounded-md shadow-inner overflow-hidden">
+                                                                                    <thead className="bg-gray-200">
+                                                                                        <tr>
+                                                                                            {Object.keys(details.data[0] || {}).map(key => (
+                                                                                                <th key={key} className="px-2 py-1.5 font-semibold text-gray-700 text-center whitespace-nowrap">{key}</th>
                                                                                             ))}
                                                                                         </tr>
-                                                                                    ))}
-                                                                                </tbody>
-                                                                            </table>
+                                                                                    </thead>
+                                                                                    <tbody className="divide-y divide-gray-100">
+                                                                                        {details.data.map((detailRow, dIdx) => (
+                                                                                            <tr key={dIdx}>
+                                                                                                {Object.values(detailRow).map((val, dvIdx) => (
+                                                                                                    <td key={dvIdx} className="px-2 py-1.5 text-gray-800 font-mono whitespace-nowrap">
+                                                                                                        {String(val)}
+                                                                                                    </td>
+                                                                                                ))}
+                                                                                            </tr>
+                                                                                        ))}
+                                                                                    </tbody>
+                                                                                </table>
+                                                                            </div>
                                                                         )}
                                                                         {details?.status === 'success' && details.data.length === 0 && (
                                                                             <p className="text-center text-gray-500 text-sm py-2">상세 내역이 없습니다.</p>
