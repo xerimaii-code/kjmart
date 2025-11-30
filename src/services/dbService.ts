@@ -1,3 +1,4 @@
+
 // src/services/dbService.ts
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, User } from 'firebase/auth';
@@ -58,7 +59,7 @@ export const isInitialized = () => isFirebaseInitialized;
 const DB_UNAVAILABLE_ERROR = new Error("Database service is not available.");
 
 // --- Settings ---
-export const getCommonSettings = async (): Promise<Partial<DeviceSettings>> => {
+export const getCommonSettings = async (): Promise<Partial<DeviceSettings & { sqlPassword?: string }>> => {
     if (!db) return {};
     const settingsRef = ref(db, `settings/common`);
     const snapshot = await get(settingsRef);

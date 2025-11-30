@@ -7,7 +7,9 @@ import {
     updateOrderStatus as dbUpdateOrderStatus, clearOrders as dbClearOrders, 
     clearOrdersBeforeDate as dbClearOrdersBeforeDate,
     setDeviceSettings as dbSetDeviceSettings,
-    getCommonSettings as dbGetCommonSettings
+    getCommonSettings as dbGetCommonSettings,
+    setValue as dbSetValue,
+    getValue as dbGetValue
 } from '../services/dbService';
 import * as cache from '../services/cacheDbService';
 import AlertModal from '../components/AlertModal';
@@ -54,6 +56,8 @@ interface DeviceSettingsActions {
     setGoogleDriveSyncSettings: (type: 'customers' | 'products', settings: SyncSettings | null) => Promise<void>;
     setDataSourceSettings: (settings: Partial<DeviceSettings['dataSourceSettings']>) => Promise<void>;
     setAllowDestructiveQueries: (allow: boolean) => Promise<void>;
+    verifySqlPassword: (password: string) => Promise<boolean>;
+    changeSqlPassword: (oldPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
 }
 const DeviceSettingsContext = createContext<(DeviceSettings & DeviceSettingsActions) | undefined>(undefined);
 interface SyncState {
@@ -230,17 +234,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const clearOrders = useCallback(async () => { await dbClearOrders(); }, []);
     const clearOrdersBeforeDate = useCallback(async (date: Date) => { return await dbClearOrdersBeforeDate(date.toISOString()); }, []);
 
+    // --- Device-Specific Settings ---
     const updateSettings = useCallback(async (newSettings: DeviceSettings) => {
         setSettings(newSettings);
         const deviceId = getDeviceId();
         try {
-            await Promise.all([
-                dbSetDeviceSettings(deviceId, newSettings),
-                cache.setSetting('deviceSettings', newSettings)
-            ]);
+            await dbSetDeviceSettings(deviceId, newSettings);
+            await cache.setSetting('deviceSettings', newSettings);
         } catch (error) {
-            console.error("Failed to sync settings:", error);
-            showToast('설정 저장에 실패했습니다.', 'error');
+            console.error("Failed to sync device settings:", error);
+            showToast('기기 설정 저장에 실패했습니다.', 'error');
         }
     }, [showToast]);
 
@@ -263,10 +266,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const setDataSourceSettings = useCallback(async (newDataSourceSettings: Partial<DeviceSettings['dataSourceSettings']>) => {
         await updateSettings({ ...settings, dataSourceSettings: { ...settings.dataSourceSettings, ...newDataSourceSettings } });
     }, [settings, updateSettings]);
-
+    
+    // --- Global Settings ---
     const setAllowDestructiveQueries = useCallback(async (allow: boolean) => {
-        await updateSettings({ ...settings, allowDestructiveQueries: allow });
-    }, [settings, updateSettings]);
+        await dbSetValue('settings/common/allowDestructiveQueries', allow);
+        // Also update local state to reflect change immediately
+        setSettings(s => ({ ...s, allowDestructiveQueries: allow }));
+    }, []);
+
+    const verifySqlPassword = useCallback(async (password: string): Promise<boolean> => {
+        const storedPassword = await dbGetValue<string>('settings/common/sqlPassword', '9005');
+        return storedPassword === password;
+    }, []);
+    
+    const changeSqlPassword = useCallback(async (oldPass: string, newPass: string): Promise<{ success: boolean; message: string }> => {
+        const isVerified = await verifySqlPassword(oldPass);
+        if (!isVerified) {
+            return { success: false, message: '현재 비밀번호가 일치하지 않습니다.' };
+        }
+        try {
+            await dbSetValue('settings/common/sqlPassword', newPass);
+            return { success: true, message: '비밀번호가 성공적으로 변경되었습니다.' };
+        } catch (error) {
+            return { success: false, message: '비밀번호 변경 중 오류가 발생했습니다.' };
+        }
+    }, [verifySqlPassword]);
+
 
     const openDetailModal = useCallback((order: Order) => setModalsState(s => ({ ...s, isDetailModalOpen: true, editingOrder: order })), []);
     const closeDetailModal = useCallback(() => setModalsState(s => ({ ...s, isDetailModalOpen: false, editingOrder: null })), []);
@@ -332,24 +357,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSyncStatusText("서버 연결 확인 중...");
                 const deviceId = getDeviceId();
                 
-                const [isOnline, serverDeviceSettings] = await Promise.all([
+                const [isOnline, serverDeviceSettings, commonSettings] = await Promise.all([
                     checkSql(),
-                    dbGetDeviceSettings(deviceId)
+                    dbGetDeviceSettings(deviceId),
+                    dbGetCommonSettings()
                 ]);
 
                 if (isOnline) {
-                    const isNewDevice = Object.keys(serverDeviceSettings).length === 0;
-                    let finalSettings: DeviceSettings;
-
-                    if (isNewDevice) {
-                        const commonSettings = await dbGetCommonSettings();
-                        finalSettings = { ...defaultSettings, ...commonSettings };
-                        await Promise.all([dbSetDeviceSettings(deviceId, finalSettings), cache.setSetting('deviceSettings', finalSettings)]);
-                    } else {
-                        finalSettings = { ...defaultSettings, ...serverDeviceSettings, scanSettings: { ...defaultSettings.scanSettings, ...(serverDeviceSettings.scanSettings || {}) }, googleDriveSyncSettings: { ...defaultSettings.googleDriveSyncSettings, ...(serverDeviceSettings.googleDriveSyncSettings || {}) }, dataSourceSettings: { ...defaultSettings.dataSourceSettings, ...(serverDeviceSettings.dataSourceSettings || {}) }};
+                    // Initialize default SQL password if not set
+                    if (commonSettings.sqlPassword === undefined) {
+                        await dbSetValue('settings/common/sqlPassword', '9005');
                     }
-                    if (JSON.stringify(settings) !== JSON.stringify(finalSettings)) {
-                        setSettings(finalSettings); await cache.setSetting('deviceSettings', finalSettings);
+                    
+                    const mergedSettings: DeviceSettings = {
+                        ...defaultSettings,
+                        ...(serverDeviceSettings as Partial<DeviceSettings>),
+                        // Global settings from 'common' override any other setting
+                        allowDestructiveQueries: commonSettings.allowDestructiveQueries ?? defaultSettings.allowDestructiveQueries
+                    };
+
+                    if (JSON.stringify(settings) !== JSON.stringify(mergedSettings)) {
+                        setSettings(mergedSettings); 
+                        await cache.setSetting('deviceSettings', mergedSettings);
                     }
 
                     if (!hasCache && !IS_DEVELOPER_MODE) {
@@ -364,13 +393,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                         });
                     }
                 } else {
-                    if (!hasCache && !IS_DEVELOPER_MODE) {
+                     if (!hasCache && !IS_DEVELOPER_MODE) {
                         setInitialSyncCompleted(false);
                         setSyncStatusText("연결 실패");
                         showAlert("서버에 연결할 수 없습니다. 인터넷 연결을 확인 후 다시 시도해주세요.\n오프라인 모드로 진입하시겠습니까?",
                             () => { setInitialSyncCompleted(true); }, "오프라인 진입", 'bg-gray-600',
                             () => { setRetryCount(c => c + 1); setSyncStatusText("재시도 중..."); }, "재시도"
                         );
+                    } else {
+                        // Load common settings into local state even if offline
+                        const finalSettings = { ...settings, allowDestructiveQueries: commonSettings.allowDestructiveQueries ?? settings.allowDestructiveQueries };
+                        setSettings(finalSettings);
                     }
                 }
             } catch (err: any) {
@@ -414,7 +447,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const dataStateValue = useMemo(() => ({ customers, products }), [customers, products]);
     const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithDb, resetData, }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithDb, resetData]);
-    const deviceSettingsValue = useMemo(() => ({ ...settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries }), [settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries]);
+    const deviceSettingsValue = useMemo(() => ({ ...settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries, verifySqlPassword, changeSqlPassword }), [settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries, verifySqlPassword, changeSqlPassword]);
     const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted, }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);
     const modalsValue = useMemo(() => ({ ...modalsState, openDetailModal, closeDetailModal, openDeliveryModal, closeDeliveryModal, openAddItemModal, closeAddItemModal, openEditItemModal, closeEditItemModal, openClearHistoryModal, closeClearHistoryModal, }), [modalsState, openDetailModal, closeDetailModal, openDeliveryModal, closeDeliveryModal, openAddItemModal, closeAddItemModal, openEditItemModal, closeEditItemModal, openClearHistoryModal, closeClearHistoryModal]);
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId, sqlStatus, checkSql }), [lastModifiedOrderId, activeMenuOrderId, sqlStatus, checkSql]);
