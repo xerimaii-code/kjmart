@@ -926,10 +926,12 @@ export const SqlRunnerView: React.FC<{
             return (
                 <div className="flex flex-col items-center justify-center h-full text-center p-4">
                     <WarningIcon className="w-16 h-16 text-red-400 mb-4" />
-                    <p className="text-lg font-bold text-gray-800 mb-2">오류 발생</p>
-                    <p className="text-sm text-gray-600 break-words w-full max-w-md bg-red-50 p-4 rounded-lg border border-red-100">
-                        {error}
-                    </p>
+                    <p className="text-lg font-bold text-gray-800 mb-2">오류가 발생했습니다</p>
+                    <div className="relative w-full max-w-md bg-red-50 p-4 rounded-lg border border-red-100 text-left">
+                        <pre className="text-sm text-red-800 break-words whitespace-pre-wrap font-mono select-text">
+                            <code>{error}</code>
+                        </pre>
+                    </div>
                 </div>
             );
         }
@@ -938,8 +940,8 @@ export const SqlRunnerView: React.FC<{
             return (
                 <div className="p-4 h-full flex flex-col items-center justify-center text-center">
                     <SparklesIcon className="w-12 h-12 text-blue-500 mb-4" />
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 max-w-lg w-full">
-                        <p className="text-lg text-gray-800 leading-relaxed font-medium whitespace-pre-wrap">{result.answer}</p>
+                    <div className="relative bg-white p-6 rounded-2xl shadow-sm border border-blue-100 max-w-lg w-full text-left">
+                        <p className="text-lg text-gray-800 leading-relaxed font-medium whitespace-pre-wrap select-text">{result.answer}</p>
                     </div>
                 </div>
             );
