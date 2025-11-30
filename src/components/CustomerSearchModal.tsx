@@ -485,23 +485,23 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                         {isExpanded && (
                                                             <tr>
                                                                 <td colSpan={Object.keys(row).length + 1} className="p-0">
-                                                                    <div className="px-1 py-2 bg-blue-50 border-t border-blue-200">
+                                                                    <div className="p-4 bg-gray-100 border-y border-gray-200">
                                                                         {details?.status === 'loading' && <SpinnerIcon className="w-6 h-6 mx-auto text-blue-500" />}
-                                                                        {details?.status === 'error' && <p className="text-center text-red-500 text-xs py-2">{details.error}</p>}
+                                                                        {details?.status === 'error' && <p className="text-center text-red-500 text-sm py-2">{details.error}</p>}
                                                                         {details?.status === 'success' && details.data.length > 0 && (
-                                                                            <table className="min-w-full text-base text-left bg-white rounded-md shadow-inner overflow-hidden">
-                                                                                <thead className="bg-blue-100">
+                                                                            <table className="min-w-full text-sm text-left bg-white rounded-md shadow-inner overflow-hidden">
+                                                                                <thead className="bg-gray-200">
                                                                                     <tr>
                                                                                         {Object.keys(details.data[0] || {}).map(key => (
-                                                                                            <th key={key} className="px-1 py-2 font-semibold text-blue-800 text-center">{key}</th>
+                                                                                            <th key={key} className="px-2 py-1.5 font-semibold text-gray-700 text-center">{key}</th>
                                                                                         ))}
                                                                                     </tr>
                                                                                 </thead>
-                                                                                <tbody>
+                                                                                <tbody className="divide-y divide-gray-100">
                                                                                     {details.data.map((detailRow, dIdx) => (
-                                                                                        <tr key={dIdx} className="border-t border-blue-100">
+                                                                                        <tr key={dIdx}>
                                                                                             {Object.values(detailRow).map((val, dvIdx) => (
-                                                                                                <td key={dvIdx} className="px-1 py-2 text-gray-600 font-mono">
+                                                                                                <td key={dvIdx} className="px-2 py-1.5 text-gray-800 font-mono">
                                                                                                     {String(val)}
                                                                                                 </td>
                                                                                             ))}
@@ -511,7 +511,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                                                                             </table>
                                                                         )}
                                                                         {details?.status === 'success' && details.data.length === 0 && (
-                                                                            <p className="text-center text-gray-500 text-xs py-2">상세 내역이 없습니다.</p>
+                                                                            <p className="text-center text-gray-500 text-sm py-2">상세 내역이 없습니다.</p>
                                                                         )}
                                                                     </div>
                                                                 </td>
