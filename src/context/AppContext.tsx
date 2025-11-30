@@ -56,8 +56,6 @@ interface DeviceSettingsActions {
     setGoogleDriveSyncSettings: (type: 'customers' | 'products', settings: SyncSettings | null) => Promise<void>;
     setDataSourceSettings: (settings: Partial<DeviceSettings['dataSourceSettings']>) => Promise<void>;
     setAllowDestructiveQueries: (allow: boolean) => Promise<void>;
-    verifySqlPassword: (password: string) => Promise<boolean>;
-    changeSqlPassword: (oldPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
 }
 const DeviceSettingsContext = createContext<(DeviceSettings & DeviceSettingsActions) | undefined>(undefined);
 interface SyncState {
@@ -274,25 +272,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSettings(s => ({ ...s, allowDestructiveQueries: allow }));
     }, []);
 
-    const verifySqlPassword = useCallback(async (password: string): Promise<boolean> => {
-        const storedPassword = await dbGetValue<string>('settings/common/sqlPassword', '9005');
-        return storedPassword === password;
-    }, []);
-    
-    const changeSqlPassword = useCallback(async (oldPass: string, newPass: string): Promise<{ success: boolean; message: string }> => {
-        const isVerified = await verifySqlPassword(oldPass);
-        if (!isVerified) {
-            return { success: false, message: '현재 비밀번호가 일치하지 않습니다.' };
-        }
-        try {
-            await dbSetValue('settings/common/sqlPassword', newPass);
-            return { success: true, message: '비밀번호가 성공적으로 변경되었습니다.' };
-        } catch (error) {
-            return { success: false, message: '비밀번호 변경 중 오류가 발생했습니다.' };
-        }
-    }, [verifySqlPassword]);
-
-
     const openDetailModal = useCallback((order: Order) => setModalsState(s => ({ ...s, isDetailModalOpen: true, editingOrder: order })), []);
     const closeDetailModal = useCallback(() => setModalsState(s => ({ ...s, isDetailModalOpen: false, editingOrder: null })), []);
     const openDeliveryModal = useCallback((order: Order) => setModalsState(s => ({ ...s, isDeliveryModalOpen: true, orderToExport: order })), []);
@@ -364,11 +343,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 ]);
 
                 if (isOnline) {
-                    // Initialize default SQL password if not set
-                    if (commonSettings.sqlPassword === undefined) {
-                        await dbSetValue('settings/common/sqlPassword', '9005');
-                    }
-                    
                     const mergedSettings: DeviceSettings = {
                         ...defaultSettings,
                         ...(serverDeviceSettings as Partial<DeviceSettings>),
@@ -447,7 +421,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const dataStateValue = useMemo(() => ({ customers, products }), [customers, products]);
     const dataActionsValue = useMemo(() => ({ addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithDb, resetData, }), [addOrder, updateOrder, deleteOrder, updateOrderStatus, clearOrders, clearOrdersBeforeDate, syncWithDb, resetData]);
-    const deviceSettingsValue = useMemo(() => ({ ...settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries, verifySqlPassword, changeSqlPassword }), [settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries, verifySqlPassword, changeSqlPassword]);
+    const deviceSettingsValue = useMemo(() => ({ ...settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries }), [settings, setSelectedCameraId, setScanSettings, setLogRetentionDays, setGoogleDriveSyncSettings, setDataSourceSettings, setAllowDestructiveQueries]);
     const syncStateValue = useMemo(() => ({ isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted, }), [isSyncing, syncProgress, syncStatusText, syncDataType, syncSource, initialSyncCompleted]);
     const modalsValue = useMemo(() => ({ ...modalsState, openDetailModal, closeDetailModal, openDeliveryModal, closeDeliveryModal, openAddItemModal, closeAddItemModal, openEditItemModal, closeEditItemModal, openClearHistoryModal, closeClearHistoryModal, }), [modalsState, openDetailModal, closeDetailModal, openDeliveryModal, closeDeliveryModal, openAddItemModal, closeAddItemModal, openEditItemModal, closeEditItemModal, openClearHistoryModal, closeClearHistoryModal]);
     const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId, sqlStatus, checkSql }), [lastModifiedOrderId, activeMenuOrderId, sqlStatus, checkSql]);
