@@ -38,6 +38,27 @@ interface VariableInputState {
 const INITIAL_VISIBLE_ROWS = 50;
 const ROWS_PER_LOAD = 100;
 
+// --- Helper Functions for Table Formatting ---
+const isNumericColumn = (colName: string): boolean => {
+    const numericKeywords = ['금액', '수량', '단가', '합계', '매출', '포인트', '가격', '금'];
+    return numericKeywords.some(keyword => colName.includes(keyword));
+};
+
+const formatNumericValue = (val: any): string => {
+    if (typeof val === 'number') {
+        return val.toLocaleString();
+    }
+    const strVal = String(val);
+    const num = Number(strVal.replace(/,/g, ''));
+    if (!isNaN(num) && isFinite(num)) {
+        // Only format if it looks like a plain number, not something like '12-34'
+        if (/^-?\d+(\.\d+)?$/.test(strVal.replace(/,/g, ''))) {
+            return num.toLocaleString();
+        }
+    }
+    return strVal;
+};
+
 // CompactModal kept locally as it is specific to small dialogs in this page
 const CompactModal: React.FC<{
     isOpen: boolean;
@@ -1238,7 +1259,7 @@ export const SqlRunnerView: React.FC<{
                                 <button
                                     key={tab}
                                     onClick={() => setActiveReportTab(tab as any)}
-                                    className={`flex-1 py-2 px-1 text-base sm:text-lg font-bold rounded-md transition-all duration-200 ${
+                                    className={`flex-1 py-2 px-1 text-lg sm:text-xl font-bold rounded-md transition-all duration-200 ${
                                         activeReportTab === tab 
                                             ? 'bg-white text-blue-600 shadow-sm' 
                                             : 'text-gray-500 hover:text-gray-700'
@@ -1250,15 +1271,15 @@ export const SqlRunnerView: React.FC<{
                         </div>
                     </div>
 
-                    <div className="flex-grow overflow-auto p-2">
+                    <div className="flex-grow overflow-hidden p-2 flex flex-col">
                         {reportStatus === 'loading' && (
-                            <div className="flex flex-col items-center justify-center h-48 space-y-3">
+                            <div className="flex flex-col items-center justify-center h-full space-y-3">
                                 <SpinnerIcon className="w-8 h-8 text-blue-500" />
                                 <p className="text-gray-500 font-medium">데이터 불러오는 중...</p>
                             </div>
                         )}
                         {reportStatus === 'error' && (
-                            <div className="flex flex-col items-center justify-center h-48 text-center p-4">
+                            <div className="flex flex-col items-center justify-center h-full text-center p-4">
                                 <p className="text-red-500 font-bold mb-2">데이터 조회 실패</p>
                                 <p className="text-sm text-gray-500">
                                     '{activeReportTab}' 쿼리를 찾을 수 없거나 실행 중 오류가 발생했습니다.
@@ -1267,32 +1288,36 @@ export const SqlRunnerView: React.FC<{
                             </div>
                         )}
                         {reportStatus === 'success' && reportResult?.recordset && (
-                            <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-                                <div className="overflow-x-auto">
-                                    <table className="min-w-full text-lg text-left">
-                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
-                                            <tr>
-                                                {Object.keys(reportResult.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-50 text-center">{key}</th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-100">
-                                            {reportResult.recordset.map((row, idx) => (
-                                                <tr key={idx} onClick={() => handleReportRowClick(row)} className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100">
-                                                    {Object.values(row).map((val, vIdx) => (
-                                                        <td key={vIdx} className="px-1 py-2 whitespace-nowrap font-mono text-gray-600">
-                                                            {String(val)}
-                                                        </td>
+                           <div className="bg-white rounded-lg border shadow-sm overflow-auto flex-grow">
+                                {reportResult.recordset.length === 0 ? (
+                                    <div className="flex items-center justify-center h-full">
+                                        <p className="p-8 text-center text-gray-500 font-medium">데이터가 없습니다.</p>
+                                    </div>
+                                ) : (() => {
+                                    const columns = Object.keys(reportResult.recordset[0] || {});
+                                    return (
+                                        <table className="min-w-full text-base text-left">
+                                            <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
+                                                <tr>
+                                                    {columns.map((key) => (
+                                                        <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-50 text-center">{key}</th>
                                                     ))}
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {reportResult.recordset.length === 0 && (
-                                    <p className="p-8 text-center text-gray-500 font-medium">데이터가 없습니다.</p>
-                                )}
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {reportResult.recordset.map((row, idx) => (
+                                                    <tr key={idx} onClick={() => handleReportRowClick(row)} className="hover:bg-blue-50 transition-colors cursor-pointer active:bg-blue-100">
+                                                        {columns.map((col, vIdx) => (
+                                                            <td key={vIdx} className={`px-1 py-2 whitespace-nowrap font-mono text-gray-600 ${isNumericColumn(col) ? 'text-right' : 'text-left'}`}>
+                                                                {isNumericColumn(col) ? formatNumericValue(row[col]) : String(row[col])}
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    );
+                                })()}
                             </div>
                         )}
                     </div>
@@ -1306,15 +1331,15 @@ export const SqlRunnerView: React.FC<{
                 zIndexClass="z-[100]"
             >
                 <div className="flex flex-col h-full bg-gray-50">
-                    <div className="flex-grow overflow-auto p-2">
+                    <div className="flex-grow overflow-hidden p-2 flex flex-col">
                         {detailStatus === 'loading' && (
-                            <div className="flex flex-col items-center justify-center h-48 space-y-3">
+                            <div className="flex flex-col items-center justify-center h-full space-y-3">
                                 <SpinnerIcon className="w-8 h-8 text-blue-500" />
                                 <p className="text-gray-500 font-medium">상세 내역 조회 중...</p>
                             </div>
                         )}
                         {detailStatus === 'error' && (
-                            <div className="flex flex-col items-center justify-center h-48 text-center p-4">
+                            <div className="flex flex-col items-center justify-center h-full text-center p-4">
                                 <p className="text-red-500 font-bold mb-2">조회 실패</p>
                                 <p className="text-sm text-gray-500">
                                     상세 데이터를 불러오는 중 오류가 발생했습니다.
@@ -1322,32 +1347,36 @@ export const SqlRunnerView: React.FC<{
                             </div>
                         )}
                         {detailStatus === 'success' && detailResult?.recordset && (
-                            <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-                                <div className="overflow-x-auto">
-                                    <table className="min-w-full text-lg text-left">
-                                        <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
-                                            <tr>
-                                                {Object.keys(detailResult.recordset[0] || {}).map((key) => (
-                                                    <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-50 text-center">{key}</th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-100">
-                                            {detailResult.recordset.map((row, idx) => (
-                                                <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                                                    {Object.values(row).map((val, vIdx) => (
-                                                        <td key={vIdx} className="px-1 py-2 whitespace-nowrap font-mono text-gray-600">
-                                                            {String(val)}
-                                                        </td>
+                            <div className="bg-white rounded-lg border shadow-sm overflow-auto flex-grow">
+                                {detailResult.recordset.length === 0 ? (
+                                     <div className="flex items-center justify-center h-full">
+                                        <p className="p-8 text-center text-gray-500 font-medium">상세 내역이 없습니다.</p>
+                                    </div>
+                                ) : (() => {
+                                    const columns = Object.keys(detailResult.recordset[0] || {});
+                                    return (
+                                        <table className="min-w-full text-base text-left">
+                                            <thead className="bg-gray-50 text-gray-700 font-semibold border-b sticky top-0 z-10 shadow-sm">
+                                                <tr>
+                                                    {columns.map((key) => (
+                                                        <th key={key} className="px-1 py-2 whitespace-nowrap bg-gray-50 text-center">{key}</th>
                                                     ))}
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {detailResult.recordset.length === 0 && (
-                                    <p className="p-8 text-center text-gray-500 font-medium">상세 내역이 없습니다.</p>
-                                )}
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {detailResult.recordset.map((row, idx) => (
+                                                    <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                        {columns.map((col, vIdx) => (
+                                                            <td key={vIdx} className={`px-1 py-2 whitespace-nowrap font-mono text-gray-600 ${isNumericColumn(col) ? 'text-right' : 'text-left'}`}>
+                                                                {isNumericColumn(col) ? formatNumericValue(row[col]) : String(row[col])}
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    );
+                                })()}
                             </div>
                         )}
                     </div>
