@@ -221,31 +221,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
 
         setSyncDataType(effectiveSyncType);
-        setSyncStatusText('동기화 준비 중...');
+        if (!silent) setSyncStatusText('동기화 준비 중...');
         setSyncProgress(5);
 
         try {
             if (effectiveSyncType === 'full') {
                 if (!silent) showToast('전체 동기화를 시작합니다.', 'success');
                 
-                setSyncStatusText('데이터 다운로드 중...');
+                if (!silent) setSyncStatusText('데이터 다운로드 중...');
                 setSyncProgress(10);
                 
                 const data = await syncCustomersAndProductsFromDb();
                 
-                setSyncStatusText('거래처 저장 중...');
+                if (!silent) setSyncStatusText('거래처 저장 중...');
                 setSyncProgress(30);
                 
                 const mappedCustomers = data.customers.map(mapSqlResultToCustomer);
                 await cache.setCachedData('customers', mappedCustomers);
                 
-                setSyncStatusText('상품 저장 중...');
+                if (!silent) setSyncStatusText('상품 저장 중...');
                 setSyncProgress(50);
                 await cache.setCachedData('products', data.products.map(mapSqlResultToProduct), (progress) => {
                     setSyncProgress(50 + Math.floor(progress * 0.4));
                 });
                 
-                setSyncStatusText('기타 데이터 저장 중...');
+                if (!silent) setSyncStatusText('기타 데이터 저장 중...');
                 
                 const bomData: BOM[] = data.bom.map((b: any) => ({
                     pcode: sanitizeString(b.pcode),
@@ -280,7 +280,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 if (!silent) showToast('전체 동기화 완료', 'success');
             } else {
                 if (!silent) showToast('증분 동기화를 시작합니다.', 'success');
-                setSyncStatusText('변경 사항 확인 중...');
+                if (!silent) setSyncStatusText('변경 사항 확인 중...');
                 
                 const customersData = await syncCustomersFromDb();
                 const mappedCustomers = customersData.map(mapSqlResultToCustomer);
@@ -296,12 +296,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 
                 const lastSyncDate = lastProduct ? lastProduct.toISOString().slice(0, 19).replace('T', ' ') : '1900-01-01 00:00:00';
                 
-                setSyncStatusText('상품 업데이트 확인 중...');
+                if (!silent) setSyncStatusText('상품 업데이트 확인 중...');
                 const newProductsRaw = await syncProductsIncrementally(lastSyncDate);
                 const newProducts = newProductsRaw.map(mapSqlResultToProduct);
                 
                 if (newProducts.length > 0) {
-                    setSyncStatusText(`${newProducts.length}건 업데이트 중...`);
+                    if (!silent) setSyncStatusText(`${newProducts.length}건 업데이트 중...`);
                     const productMap = new Map(productsRef.current.map(p => [p.barcode, p]));
                     newProducts.forEach(p => productMap.set(p.barcode, p));
                     const updatedProducts = Array.from(productMap.values());
@@ -316,7 +316,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }
         } catch (error: any) {
             console.error("Sync failed:", error);
-            showToast(`동기화 실패: ${error.message}`, 'error');
+            if (!silent) showToast(`동기화 실패: ${error.message}`, 'error');
         } finally {
             setIsSyncing(false);
             isSyncingRef.current = false;
@@ -465,6 +465,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             loadInitialData();
         }
     }, [user, checkSql, syncWithDb, showToast]);
+
+    // --- Automatic Background Synchronization (Refined) ---
+    // 앱이 포커스를 얻을 때(백그라운드 -> 포커스) 자동으로 증분 동기화를 수행합니다.
+    useEffect(() => {
+        if (!user || !initialSyncCompleted) return;
+
+        const handleVisibilityChange = async () => {
+            if (document.visibilityState === 'visible') {
+                console.log("App returned to foreground. Checking for updates...");
+                const isConnected = await checkSql();
+                if (isConnected) {
+                    await syncWithDb('incremental', true);
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [user, initialSyncCompleted, checkSql, syncWithDb]);
 
 
     // --- Context Values ---
