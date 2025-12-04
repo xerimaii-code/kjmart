@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="supported-refresh-rates" content="60, 90, 120, 144">
+    <title>경진마트</title>
+    <link rel="manifest" href="/metadata.json">
+    <meta name="theme-color" content="#f9fafb">
+    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiB2aWV3Qm94PSIwIDAgMTkyIDE5MiI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIGZpbGw9IiNmOWZhZmIiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9ImNlbnRyYWwiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI2MCIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiMxMTE4MjciPuq5gOyjvDwvdGV4dD48L3N2Zz4=">
+    <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiB2aWV3Qm94PSIwIDAgMTkyIDE5MiI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIGZpbGw9IiNmOWZhZmIiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9ImNlbnRyYWwiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI2MCIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiMxMTE4MjciPuq5gOyjvDwvdGV4dD48L3N2Zz4=">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="경진마트">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --background-start-rgb: 243 244 246; /* gray-100 */
+            --background-end-rgb: 229 231 235; /* gray-200 */
+            --surface-primary-rgb: 255 255 255; /* white */
+            --surface-secondary-rgb: 249 250 251; /* gray-50 */
+            --primary-rgb: 59 130 246; /* blue-500 */
+            --primary-dark-rgb: 37 99 235; /* blue-600 */
+            --primary-light-rgb: 219 234 254; /* blue-100 */
+            --text-primary-rgb: 17 24 39; /* gray-900 */
+            --text-secondary-rgb: 75 85 99; /* gray-500 */
+            --border-color-rgb: 229 231 235; /* gray-200 */
+            --shadow-color-rgb: 110 120 140;
+            --danger-rgb: 239 68 68; /* red-500 */
+            --success-rgb: 34 197 94; /* green-500 */
+            --header-height: calc(3.5rem + env(safe-area-inset-top));
+        }
+
+        html, body, #root {
+            height: 100%;
+            overflow: hidden;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+        
+        body {
+            background-color: rgb(var(--surface-secondary-rgb));
+        }
+
+        input, textarea, [contenteditable="true"] {
+            -webkit-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+        }
+
+        /* Modern Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(var(--text-secondary-rgb), 0.3); border-radius: 6px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(var(--text-secondary-rgb), 0.5); }
+
+        .fixed-filter { flex-shrink: 0; }
+        .scrollable-content { 
+            flex-grow: 1; 
+            overflow-y: auto; 
+            scrollbar-gutter: stable;
+        }
+
+        /* Style for Window Controls Overlay & iOS Safe Area */
+        #app-header {
+            -webkit-app-region: drag;
+            padding-top: env(safe-area-inset-top);
+            height: var(--header-height);
+        }
+        #app-header button, #app-header a, #app-header input, #app-header select {
+            -webkit-app-region: no-drag;
+        }
+        
+        /* Custom animations */
+        @keyframes fadeInDown {
+          from { opacity: 0; transform: translateY(-12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-down {
+          animation: fadeInDown 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+          will-change: transform, opacity;
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+            will-change: transform, opacity;
+        }
+        
+        /* Bouncy card entrance animation */
+        @keyframes card-enter {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .animate-card-enter {
+            animation: card-enter 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+            will-change: transform, opacity;
+        }
+
+        /* Sale Ribbon Style */
+        .sale-ribbon {
+            position: absolute;
+            top: 12px;
+            right: -34px;
+            transform: rotate(45deg);
+            background-color: rgb(239 68 68); /* red-500 */
+            color: white;
+            padding: 2px 32px;
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 1.5;
+            text-align: center;
+            text-transform: uppercase;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1;
+            letter-spacing: 0.05em;
+        }
+        
+        /* Drag and Drop styles */
+        .dragging {
+            opacity: 0.5;
+            background: rgb(var(--primary-light-rgb));
+            box-shadow: 0 10px 15px -3px rgba(var(--shadow-color-rgb), 0.1), 0 4px 6px -2px rgba(var(--shadow-color-rgb), 0.05);
+            transform: scale(1.02);
+        }
+        .drag-over-placeholder {
+            height: 60px;
+            background-color: rgba(var(--primary-rgb), 0.08);
+            border: 2px dashed rgba(var(--primary-rgb), 0.4);
+            border-radius: 0.5rem;
+            margin: 4px 0;
+            transition: all 0.2s ease-in-out;
+        }
+    </style>
+
+
+<script type="importmap">
+{
+  "imports": {
+    "vite": "https://aistudiocdn.com/vite@^7.1.11",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.0.4",
+    "react": "https://aistudiocdn.com/react@^18.2.0",
+    "react/": "https://aistudiocdn.com/react@^18.2.0/",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.4.0/",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^18.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "@vercel/node": "https://aistudiocdn.com/@vercel/node@^5.5.8",
+    "mssql": "https://aistudiocdn.com/mssql@^12.1.0",
+    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.0"
+  }
+}
+</script>
+</head>
+<body class="antialiased">
+    <div id="root" class="h-full w-full bg-transparent">
+        <div style="display:flex; align-items:center; justify-content:center; height:100%; font-weight: 600; color: #6b7280;">
+            애플리케이션 로딩 중...
+        </div>
+    </div>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>
