@@ -309,11 +309,8 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
             setIsEditMode(true);
             setSelectionModalOpen(false);
 
-            // 검색 완료 시 상품명 입력 필드로 포커스 이동
-            setTimeout(() => {
-                productNameRef.current?.focus();
-                productNameRef.current?.select();
-            }, 150);
+            // Note: Auto-focus removed as requested for better UX on mobile when viewing details
+            // The input will not be focused automatically after loading an existing product.
 
         } finally {
             setTimeout(() => { isPopulating.current = false; }, 100);
@@ -371,7 +368,7 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                     setIsEditMode(false); // Set to new product mode
                     showToast('신규 상품 등록 모드입니다.', 'success');
                     
-                    // 신규 등록 모드 진입 시 상품명 입력 필드로 포커스
+                    // 신규 등록 모드 진입 시 상품명 입력 필드로 포커스 (Keep focus for new items)
                     setTimeout(() => {
                         productNameRef.current?.focus();
                     }, 150);
