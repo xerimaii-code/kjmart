@@ -50,6 +50,25 @@ export interface Order {
     items?: OrderItem[];
 }
 
+export interface ReceivingItem {
+    barcode: string;
+    name: string;
+    costPrice: number; // 입고 시점의 매입가
+    quantity: number;
+}
+
+export interface ReceivingBatch {
+    id: number; // Timestamp-based ID
+    date: string; // YYYY-MM-DD
+    supplier: Customer;
+    items: ReceivingItem[];
+    itemCount: number;
+    totalAmount: number;
+    status: 'draft' | 'sent';
+    sentAt?: string;
+}
+
+
 export type ScannerContext = 'new-order' | 'modal' | 'product-inquiry' | null;
 
 export interface NewOrderDraft {
@@ -60,6 +79,12 @@ export interface NewOrderDraft {
 
 export interface EditedOrderDraft {
     items: OrderItem[];
+}
+
+export interface ReceivingDraft {
+    currentDate: string;
+    selectedSupplier: Customer | null;
+    items: ReceivingItem[];
 }
 
 export interface SyncSettings {

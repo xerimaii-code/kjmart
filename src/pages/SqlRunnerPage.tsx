@@ -11,6 +11,7 @@ const ProductInquiryPage = lazy(() => import('./ProductInquiryPage'));
 const NewOrderPage = lazy(() => import('./NewOrderPage'));
 const OrderHistoryPage = lazy(() => import('./OrderHistoryPage'));
 const SettingsPage = lazy(() => import('./SettingsPage'));
+const ReceiveManagerPage = lazy(() => import('./ReceiveManagerPage'));
 // Fix: Import named export correctly for lazy loading
 const SqlRunnerView = lazy(() => import('../components/SqlRunnerView').then(module => ({ default: module.SqlRunnerView })));
 
@@ -21,7 +22,7 @@ const LoadingFallback = () => (
     </div>
 );
 
-type ActiveModal = 'none' | 'customer' | 'productInquiry' | 'newOrder' | 'orderHistory' | 'sqlRunner' | 'report' | 'settings' | 'productEdit';
+type ActiveModal = 'none' | 'customer' | 'productInquiry' | 'newOrder' | 'orderHistory' | 'sqlRunner' | 'report' | 'settings' | 'productEdit' | 'receiveGoods';
 
 const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [activeModal, setActiveModal] = useState<ActiveModal>('none');
@@ -85,6 +86,19 @@ const SqlRunnerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={activeModal === 'productEdit'} 
                 onClose={handleClose} 
             />
+            
+            <ActionModal
+                isOpen={activeModal === 'receiveGoods'}
+                onClose={handleClose}
+                title="입고 등록"
+                disableBodyScroll={true}
+                zIndexClass="z-30"
+            >
+                <Suspense fallback={<LoadingFallback />}>
+                    <ReceiveManagerPage isActive={activeModal === 'receiveGoods'} />
+                </Suspense>
+            </ActionModal>
+
 
             <ActionModal
                 isOpen={activeModal === 'sqlRunner' || activeModal === 'report'}

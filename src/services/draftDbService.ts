@@ -1,10 +1,11 @@
-import { NewOrderDraft, EditedOrderDraft } from '../types';
+
+import { NewOrderDraft, EditedOrderDraft, ReceivingDraft } from '../types';
 
 const DB_NAME = 'KJMartDraftsDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'drafts';
 
-export type Draft = NewOrderDraft | EditedOrderDraft;
+export type Draft = NewOrderDraft | EditedOrderDraft | ReceivingDraft;
 
 let db: IDBDatabase;
 

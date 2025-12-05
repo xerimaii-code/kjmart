@@ -1,5 +1,6 @@
 
 
+
 import React, { memo, useState, useEffect } from 'react';
 import { 
     ChartBarIcon, SearchIcon, PencilSquareIcon, HistoryIcon, 
@@ -125,17 +126,27 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                         subText="매장 현황 대시보드"
                     />
                     
-                    {/* 2. Order Management */}
-                    <MenuButton 
-                        label="신규 발주" 
-                        icon={<PencilSquareIcon className={iconClass} />} 
-                        onClick={() => onNavigate('newOrder')}
-                    />
-                    <MenuButton 
-                        label="발주 내역" 
-                        icon={<HistoryIcon className={iconClass} />} 
-                        onClick={() => onNavigate('orderHistory')}
-                    />
+                    {/* 2. Order & Receiving Management */}
+                    <div className="flex flex-col gap-2 mt-1">
+                        <div className="px-1 pt-1 border-t border-gray-200/50 mt-1">
+                            <span className="text-xs font-bold text-gray-400">주요 업무</span>
+                        </div>
+                        <MenuButton 
+                            label="신규 발주" 
+                            icon={<PencilSquareIcon className={iconClass} />} 
+                            onClick={() => onNavigate('newOrder')}
+                        />
+                        <MenuButton 
+                            label="발주 내역" 
+                            icon={<HistoryIcon className={iconClass} />} 
+                            onClick={() => onNavigate('orderHistory')}
+                        />
+                         <MenuButton 
+                            label="입고 등록" 
+                            icon={<BriefcaseIcon className={iconClass} />} 
+                            onClick={() => onNavigate('receiveGoods')}
+                        />
+                    </div>
 
                     {/* 3. Product & Stock */}
                     <div className="flex flex-col gap-2 mt-1">
@@ -172,12 +183,6 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                             icon={<UserCircleIcon className={iconClass} />} 
                             onClick={() => onNavigate('customer')}
                             subText="회원 조회"
-                        />
-                        <MenuButton 
-                            label="매입 등록" 
-                            icon={<BriefcaseIcon className={iconClass} />} 
-                            onClick={() => handleNotImplemented('매입 등록')}
-                            subText="준비중"
                         />
                         <MenuButton 
                             label="행사 등록" 

@@ -335,19 +335,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         showToast('데이터가 초기화되었습니다.', 'success');
     }, [showToast]);
 
-    // Device Settings Actions
-    const updateDeviceSetting = useCallback(async (key: keyof DeviceSettings, value: any) => {
-        setSettings(prev => ({ ...prev, [key]: value }));
+    // Device Settings Actions (Offline-First)
+    const updateDeviceSetting = useCallback(async (updater: (prev: DeviceSettings) => DeviceSettings) => {
         const deviceId = getDeviceId();
-        await dbSetDeviceSettings(deviceId, { ...settings, [key]: value });
-    }, [settings]);
+        setSettings(prevSettings => {
+            const newSettings = updater(prevSettings);
+            // 1. Immediately save to local cache for offline persistence
+            cache.setSetting('deviceSettings', newSettings);
+            // 2. Asynchronously save to Firebase
+            dbSetDeviceSettings(deviceId, newSettings).catch(err => {
+                console.warn(`Failed to sync settings to Firebase:`, err);
+            });
+            return newSettings;
+        });
+    }, []);
 
-    const setSelectedCameraId = useCallback((id: string | null) => updateDeviceSetting('selectedCameraId', id), [updateDeviceSetting]);
-    const setScanSettings = useCallback((val: Partial<DeviceSettings['scanSettings']>) => updateDeviceSetting('scanSettings', { ...settings.scanSettings, ...val }), [updateDeviceSetting, settings]);
-    const setLogRetentionDays = useCallback((days: number) => updateDeviceSetting('logRetentionDays', days), [updateDeviceSetting]);
-    const setGoogleDriveSyncSettings = useCallback((type: 'customers' | 'products', val: SyncSettings | null) => updateDeviceSetting('googleDriveSyncSettings', { ...settings.googleDriveSyncSettings, [type]: val }), [updateDeviceSetting, settings]);
-    const setDataSourceSettings = useCallback((val: Partial<DeviceSettings['dataSourceSettings']>) => updateDeviceSetting('dataSourceSettings', { ...settings.dataSourceSettings, ...val }), [updateDeviceSetting, settings]);
-    const setAllowDestructiveQueries = useCallback((allow: boolean) => updateDeviceSetting('allowDestructiveQueries', allow), [updateDeviceSetting]);
+    const setSelectedCameraId = useCallback(async (id: string | null) => {
+        await updateDeviceSetting(prev => ({ ...prev, selectedCameraId: id }));
+    }, [updateDeviceSetting]);
+    const setScanSettings = useCallback(async (val: Partial<DeviceSettings['scanSettings']>) => {
+        await updateDeviceSetting(prev => ({ ...prev, scanSettings: { ...prev.scanSettings, ...val } }));
+    }, [updateDeviceSetting]);
+    const setLogRetentionDays = useCallback(async (days: number) => {
+        await updateDeviceSetting(prev => ({ ...prev, logRetentionDays: days }));
+    }, [updateDeviceSetting]);
+    const setGoogleDriveSyncSettings = useCallback(async (type: 'customers' | 'products', val: SyncSettings | null) => {
+        await updateDeviceSetting(prev => ({ ...prev, googleDriveSyncSettings: { ...prev.googleDriveSyncSettings, [type]: val } }));
+    }, [updateDeviceSetting]);
+    const setDataSourceSettings = useCallback(async (val: Partial<DeviceSettings['dataSourceSettings']>) => {
+        await updateDeviceSetting(prev => ({ ...prev, dataSourceSettings: { ...prev.dataSourceSettings, ...val } }));
+    }, [updateDeviceSetting]);
+    const setAllowDestructiveQueries = useCallback(async (allow: boolean) => {
+        await updateDeviceSetting(prev => ({ ...prev, allowDestructiveQueries: allow }));
+    }, [updateDeviceSetting]);
 
     // Modals Actions
     const openDetailModal = useCallback((order: Order) => setModalsState(prev => ({ ...prev, isDetailModalOpen: true, editingOrder: order })), []);
@@ -430,34 +450,57 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         const loadInitialData = async () => {
             const deviceId = getDeviceId();
-            
             try {
-                // 1. Settings
                 setSyncStatusText('설정 불러오는 중');
-                const savedSettings = await dbGetDeviceSettings(deviceId);
-                const commonSettings = await dbGetCommonSettings();
-                setSettings(prev => ({ ...prev, ...savedSettings, ...commonSettings }));
-
-                // 2. Local Cache (Customers & Products)
+                
+                // 1. Load settings from cache first. Fallback to default.
+                const cachedSettings = await cache.getSetting<DeviceSettings>('deviceSettings');
+                setSettings(cachedSettings || defaultSettings);
+                
                 setSyncStatusText('로컬 데이터 불러오는 중');
+                // 2. Load data from cache.
                 const [cachedCustomers, cachedProducts] = await Promise.all([
                     cache.getCachedData<Customer>('customers'),
                     cache.getCachedData<Product>('products')
                 ]);
-                
                 setCustomers(cachedCustomers || []);
                 setProducts(cachedProducts || []);
-
-                // 3. Immediately complete initial load to unblock UI
+                
+                // 3. Unblock UI.
                 setInitialSyncCompleted(true);
                 
-                // 4. Start background sync
+                // 4. Background sync for settings.
+                const syncSettingsInBackground = async () => {
+                    try {
+                        const [savedSettings, commonSettings] = await Promise.all([
+                            dbGetDeviceSettings(deviceId),
+                            dbGetCommonSettings()
+                        ]);
+                        
+                        setSettings(currentSettings => {
+                            // Start with current state (from cache), then layer server settings on top.
+                            const newSettings = { ...currentSettings, ...savedSettings, ...commonSettings };
+                            
+                            // Only update cache if something actually changed.
+                            if (JSON.stringify(newSettings) !== JSON.stringify(currentSettings)) {
+                                console.log("Settings synced from server. Updating cache.");
+                                cache.setSetting('deviceSettings', newSettings);
+                                return newSettings;
+                            }
+                            return currentSettings; // No change
+                        });
+                    } catch (settingsError) {
+                        console.warn("Could not sync settings from Firebase. Using cached/default settings.", settingsError);
+                    }
+                };
+        
+                syncSettingsInBackground();
                 performBackgroundSync();
-
+        
             } catch (globalError) {
                 console.error("Initialization error:", globalError);
                 showToast('앱 초기화 중 오류가 발생했습니다. 오프라인 모드로 진입합니다.', 'error');
-                setInitialSyncCompleted(true); // Still complete to show the app
+                setInitialSyncCompleted(true);
             }
         };
 
