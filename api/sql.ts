@@ -485,8 +485,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         const request = pool.request();
-        request.input('searchTerm', sql.NVarChar, `%${searchTerm}%`);
-        request.input('exactTerm', sql.NVarChar, searchTerm);
+        request.input('searchTerm', sql.NVarChar, searchTerm);
         request.input('limit', sql.Int, limit || 100);
         
         const searchProductsQuery = `
@@ -526,14 +525,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     AND (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END) NOT LIKE N'%*---*%'
                 )
                 AND (
-                    p.barcode = @exactTerm OR
-                    p.barcode LIKE @searchTerm OR
-                    p.descr LIKE @searchTerm OR
-                    p.spec LIKE @searchTerm
+                    p.barcode LIKE '%' + @searchTerm + '%' OR
+                    p.descr LIKE '%' + @searchTerm + '%' OR
+                    p.spec LIKE '%' + @searchTerm + '%'
                 )
             ORDER BY
                 CASE 
-                    WHEN p.barcode = @exactTerm THEN 0
+                    WHEN p.barcode = @searchTerm THEN 0
                     ELSE 1
                 END,
                 [상품명];

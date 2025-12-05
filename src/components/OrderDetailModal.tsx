@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
@@ -12,8 +13,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import SearchDropdown from './SearchDropdown';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
-
-const MAX_SEARCH_RESULTS = 50;
+import { useProductSearch } from '../hooks/useProductSearch';
 
 // Helper to create a consistent, comparable representation of an item list for content changes.
 const normalizeItemsForComparison = (items: OrderItem[]): Omit<OrderItem, 'price'>[] => {
@@ -82,8 +82,19 @@ const OrderDetailModal: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [draftLoaded, setDraftLoaded] = useState(false);
 
-    const [productSearch, setProductSearch] = useState('');
-    const debouncedProductSearch = useDebounce(productSearch, 200);
+    const { 
+        searchTerm: productSearch, 
+        setSearchTerm: setProductSearch, 
+        results: productSearchResults, 
+        isSearching: isSearchingProducts, 
+        search 
+    } = useProductSearch('newOrder');
+    const debouncedProductSearch = useDebounce(productSearch, 300);
+
+    useEffect(() => {
+        search(debouncedProductSearch);
+    }, [debouncedProductSearch, search]);
+
     const [showProductDropdown, setShowProductDropdown] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
 
@@ -280,7 +291,7 @@ const OrderDetailModal: React.FC = () => {
         setProductSearch('');
         setShowProductDropdown(false);
         productSearchInputRef.current?.blur();
-    }, [items, openAddItemModal, addOrUpdateItem, isBoxUnitDefault]);
+    }, [items, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, setProductSearch]);
     
     const handleOpenScanner = useCallback(() => {
         const onScan = (barcode: string) => {
@@ -319,12 +330,6 @@ const OrderDetailModal: React.FC = () => {
         );
     }, [showAlert, removeItem]);
     
-    const filteredProducts = useMemo(() => {
-        const searchTerm = debouncedProductSearch.trim().toLowerCase();
-        if (!searchTerm) return [];
-        return products.filter(p => p.name.toLowerCase().includes(searchTerm) || p.barcode.includes(searchTerm)).slice(0, MAX_SEARCH_RESULTS);
-    }, [products, debouncedProductSearch]);
-
     if (!isMounted || !originalOrder) return null;
 
     return createPortal(
@@ -343,6 +348,17 @@ const OrderDetailModal: React.FC = () => {
                 } ${isRendered ? 'translate-y-0' : 'translate-y-full'} rounded-t-2xl will-change-transform border-t border-gray-100`}
                 onClick={e => e.stopPropagation()}
             >
+                {isSearchingProducts && (
+                    <div className="absolute top-0 left-0 w-full h-1 bg-blue-100 z-[100] overflow-hidden rounded-t-2xl">
+                        <div className="h-full bg-blue-600 animate-[indeterminate_1.5s_infinite_linear] origin-left"></div>
+                    </div>
+                )}
+                <style>{`
+                    @keyframes indeterminate {
+                        0% { transform: translateX(-100%); width: 100%; }
+                        100% { transform: translateX(100%); width: 100%; }
+                    }
+                `}</style>
                 <header className="relative bg-white py-2 px-4 flex-shrink-0 border-b border-gray-200 z-20 flex items-center justify-center rounded-t-2xl">
                     <div className="text-center">
                         <h2 className="text-lg font-bold text-gray-800 truncate" title={originalOrder.customer.name}>{originalOrder.customer.name}</h2>
@@ -379,10 +395,11 @@ const OrderDetailModal: React.FC = () => {
                                     autoComplete="off"
                                 />
                                 <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
+                                    {isSearchingProducts && <SpinnerIcon className="w-5 h-5 text-blue-500 mr-2" />}
                                     <ToggleSwitch id="edit-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
                                 </div>
                                 <SearchDropdown<Product>
-                                    items={filteredProducts}
+                                    items={productSearchResults}
                                     renderItem={(p) => <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />}
                                     show={showProductDropdown && !!debouncedProductSearch}
                                 />

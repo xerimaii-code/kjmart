@@ -2,7 +2,7 @@
 import { useState, useCallback } from 'react';
 import { Product } from '../types';
 import { useDataState, useDeviceSettings, useMiscUI } from '../context/AppContext';
-import { searchProductsOnline, executeUserQuery } from '../services/sqlService';
+import { searchProductsOnline } from '../services/sqlService';
 import { mapSqlResultToProduct } from '../utils/mapper';
 
 interface UseProductSearchReturn {
@@ -15,26 +15,8 @@ interface UseProductSearchReturn {
     clear: () => void;
 }
 
-// Helper to extract params (same as in ProductEditPage to keep consistent behavior)
-const extractParamsForQuery = (queryText: string, sourceParams: Record<string, any>) => {
-    const matches = Array.from(queryText.matchAll(/@([a-zA-Z0-9_가-힣]+)/g), m => m[1]);
-    const uniqueVars = [...new Set(matches)];
-    const lookup: Record<string, any> = {};
-    Object.keys(sourceParams).forEach(k => {
-        lookup[k.toLowerCase()] = sourceParams[k];
-    });
-    const finalParams: Record<string, any> = {};
-    uniqueVars.forEach(v => {
-        const lowerV = v.toLowerCase();
-        if (lookup[lowerV] !== undefined) {
-            finalParams[v] = lookup[lowerV];
-        }
-    });
-    return finalParams;
-};
-
 export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry', maxResults: number = 50): UseProductSearchReturn {
-    const { products, userQueries } = useDataState();
+    const { products } = useDataState();
     const { dataSourceSettings } = useDeviceSettings();
     const { sqlStatus } = useMiscUI();
     
@@ -62,31 +44,7 @@ export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry'
 
         if (useOnline) {
             try {
-                // Check if user defined query '상품조회' exists
-                const userSearchQuery = userQueries.find(q => q.name === '상품조회');
-                let onlineData: any[] = [];
-
-                if (userSearchQuery) {
-                    // Use dynamic param extraction with comprehensive aliases for compatibility
-                    const contextParams = {
-                        kw: term, keyword: term, search: term, 
-                        
-                        barcode: term, 
-                        name: term, 
-                        Descr: term, // Explicitly requested capitalized alias
-                        descr: term,
-                        spec: term,
-                        
-                        상품명: term, 바코드: term, 검색어: term, 규격: term
-                    };
-                    const dynamicParams = extractParamsForQuery(userSearchQuery.query, contextParams);
-                    
-                    onlineData = await executeUserQuery('상품조회', dynamicParams, userSearchQuery.query);
-                } else {
-                    // Fallback to default system query if user query not found
-                    onlineData = await searchProductsOnline(term, maxResults);
-                }
-                
+                const onlineData = await searchProductsOnline(term, maxResults);
                 setResults(onlineData.map(mapSqlResultToProduct));
             } catch (e) {
                 console.error("Online search failed:", e);
@@ -136,7 +94,7 @@ export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry'
             setResults(filtered.slice(0, maxResults));
             setIsSearching(false);
         }
-    }, [searchTerm, products, dataSourceSettings, sourceSettingKey, sqlStatus, maxResults, userQueries]);
+    }, [searchTerm, products, dataSourceSettings, sourceSettingKey, sqlStatus, maxResults]);
 
     const clear = useCallback(() => {
         setSearchTerm('');
