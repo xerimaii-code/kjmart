@@ -87,7 +87,14 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         <div className={`fixed inset-0 z-[100] flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="addItemModalTitle">
             <div ref={modalContentRef} className={`bg-white rounded-xl shadow-lg w-full max-w-sm transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
-                    <h3 id="addItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={product.name}>{product.name}</h3>
+                    <div className="flex items-center justify-center gap-2 mb-1">
+                        <h3 id="addItemModalTitle" className="text-xl font-bold text-gray-800 truncate" title={product.name}>{product.name}</h3>
+                        {existingItem ? (
+                            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">추가</span>
+                        ) : (
+                            <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">신규</span>
+                        )}
+                    </div>
                     <div className="text-center text-sm text-gray-500 mb-2">
                         <span>{product.barcode}</span>
                         {product.stockQuantity !== undefined && (

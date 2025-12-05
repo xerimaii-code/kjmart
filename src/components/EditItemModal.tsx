@@ -96,7 +96,10 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
         <div className={`fixed inset-0 z-[80] flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="editItemModalTitle">
             <div ref={modalContentRef} className={`bg-white rounded-xl shadow-lg w-full max-w-sm transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
-                    <h3 id="editItemModalTitle" className="text-xl font-bold text-gray-800 text-center mb-1 truncate" title={item.name}>{item.name}</h3>
+                    <div className="flex items-center justify-center gap-2 mb-1">
+                        <h3 id="editItemModalTitle" className="text-xl font-bold text-gray-800 truncate" title={item.name}>{item.name}</h3>
+                        <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">수정</span>
+                    </div>
                     {product && (
                         <div className="text-center text-sm text-gray-500 mb-2">
                             <span>{product.barcode}</span>

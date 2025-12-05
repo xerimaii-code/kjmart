@@ -585,7 +585,13 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
     };
 
     return (
-        <ActionModal isOpen={isOpen} onClose={onClose} title="상품 등록/수정" disableBodyScroll zIndexClass="z-40">
+        <ActionModal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title="상품 등록/수정" 
+            disableBodyScroll 
+            zIndexClass="z-40"
+        >
             <div className="flex flex-col h-full bg-white">
                 <div className="flex-shrink-0 bg-white p-1.5 border-b shadow-sm z-10">
                     <div className="flex items-center gap-2">
@@ -610,7 +616,7 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                         <button onClick={() => handleSearch()} disabled={isSearching} className="w-10 h-9 bg-blue-600 text-white font-bold rounded-lg transition hover:bg-blue-700 active:scale-95 shadow-md flex items-center justify-center">
                             {isSearching ? <SpinnerIcon className="w-5 h-5" /> : <SearchIcon className="w-5 h-5" />}
                         </button>
-                        <button onClick={handleScan} className="w-20 h-9 bg-gray-700 text-white font-bold rounded-lg transition hover:bg-gray-800 active:scale-95 shadow-md flex items-center justify-center">
+                        <button onClick={handleScan} className="w-12 h-9 bg-gray-700 text-white font-bold rounded-lg transition hover:bg-gray-800 active:scale-95 shadow-md flex items-center justify-center">
                             <BarcodeScannerIcon className="w-6 h-6" />
                         </button>
                     </div>
@@ -720,6 +726,25 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                             </label>
                         </div>
 
+                        {/* Save and Reset Button Group */}
+                        <div className="flex w-full items-stretch gap-2 mt-1">
+                            <button
+                                onClick={handleReset}
+                                className="flex-[2] py-3 bg-orange-100 text-orange-600 rounded-lg font-bold shadow-md active:scale-95 transition-all hover:bg-orange-200 flex items-center justify-center border border-orange-200"
+                                title="초기화"
+                            >
+                                <UndoIcon className="w-5 h-5" />
+                            </button>
+                            <button 
+                                onClick={handleSave} 
+                                disabled={isSaving} 
+                                className="flex-[5] py-3 bg-blue-600 text-white rounded-lg font-bold shadow-md active:scale-95 disabled:bg-gray-400 disabled:shadow-none transition-all hover:bg-blue-700 flex items-center justify-center gap-2 text-base"
+                            >
+                                {isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckSquareIcon className="w-5 h-5" />}
+                                <span>저장</span>
+                            </button>
+                        </div>
+
                         {/* Info Boxes with flex grow and min height */}
                         <div className="grid grid-cols-2 gap-1.5 text-center flex-grow min-h-[120px]">
                             <div className="bg-gray-100 p-1.5 rounded-lg border h-full overflow-y-auto flex flex-col">
@@ -770,17 +795,6 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                                 ) : <div className="flex items-center justify-center h-full text-gray-400 text-xs">{bomStatus === '묶음' ? '구성품 정보 없음' : '일반 상품'}</div>}
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <div className="flex-shrink-0 bg-white p-1.5 border-t pb-safe">
-                    <div className="flex items-center gap-2 max-w-2xl mx-auto">
-                        <button onClick={handleReset} className="h-10 bg-gray-200 text-gray-700 rounded-lg font-bold text-base flex-grow transition hover:bg-gray-300 active:scale-95 flex items-center justify-center gap-2">
-                           <UndoIcon className="w-5 h-5" /> 초기화
-                        </button>
-                        <button onClick={handleSave} disabled={isSaving} className="h-10 bg-blue-600 text-white rounded-lg font-bold text-base flex-grow transition hover:bg-blue-700 active:scale-95 shadow-lg shadow-blue-500/30 disabled:bg-gray-400 flex items-center justify-center gap-2">
-                           {isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckSquareIcon className="w-5 h-5" />} {isEditMode ? "수정 저장" : "신규 저장"}
-                        </button>
                     </div>
                 </div>
             </div>
