@@ -96,7 +96,8 @@ export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry'
                     const lowercasedFilter = term.toLowerCase();
                     const filtered = products.filter(p => 
                         p.name.toLowerCase().includes(lowercasedFilter) || 
-                        p.barcode.includes(lowercasedFilter)
+                        p.barcode.includes(lowercasedFilter) ||
+                        (p.spec && p.spec.toLowerCase().includes(lowercasedFilter))
                     );
                     
                     // Sort to match online behavior: Exact barcode match first
@@ -119,7 +120,8 @@ export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry'
             const lowercasedFilter = term.toLowerCase();
             const filtered = products.filter(p => 
                 p.name.toLowerCase().includes(lowercasedFilter) || 
-                p.barcode.includes(lowercasedFilter)
+                p.barcode.includes(lowercasedFilter) ||
+                (p.spec && p.spec.toLowerCase().includes(lowercasedFilter))
             );
 
             // Sort to match online behavior: Exact barcode match first, then alphabetical

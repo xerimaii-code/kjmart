@@ -161,6 +161,7 @@ SELECT
     p.gubun2 AS [중분류],
     p.gubun3 AS [소분류],
     (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END) AS [상품명],
+    p.spec AS [규격],
     p.money0vat AS [매입가],
     p.money1 AS [판매가],
     sr.salemoney0 AS [행사매입가],
@@ -200,6 +201,7 @@ SELECT
     p.gubun2 AS [중분류],
     p.gubun3 AS [소분류],
     (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END) AS [상품명],
+    p.spec AS [규격],
     p.money0vat AS [매입가],
     p.money1 AS [판매가],
     sr.salemoney0 AS [행사매입가],
@@ -487,37 +489,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         request.input('exactTerm', sql.NVarChar, searchTerm);
         request.input('limit', sql.Int, limit || 100);
         
-        // Searches by barcode (exact match priority) or name (fuzzy)
         const searchProductsQuery = `
             SELECT TOP (@limit)
-              p.*,
-              c.comname as [거래처명],
-              (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END) AS [상품명],
-              p.money0vat as [매입가],
-              p.money1 as [판매가],
-              sr.salemoney0 AS [행사매입가],
-              sr.salemoney1 AS [행사판매가],
-              sr.startday AS [행사시작일],
-              p.saleendday AS [행사종료일],
-              p.curjago AS [재고수량],
-              CASE
-                WHEN p.ispack = '1' THEN '묶음'
-                WHEN p.ispack = '0' THEN '일반'
-                ELSE 'X'
-              END AS [BOM여부]
-         
- FROM parts p WITH (NOLOCK)
-          LEFT JOIN comp c WITH (NOLOCK) ON p.comcode = c.comcode
-          LEFT JOIN sale_ready sr WITH (NOLOCK) ON p.barcode = sr.barcode AND p.comcode = sr.comcode
-              AND sr.isappl = '1' 
-              AND CONVERT(VARCHAR(10), GETDATE(), 121) BETWEEN sr.startday AND sr.endday
-          WHERE 
-            p.barcode = @exactTerm 
-            OR p.descr LIKE @searchTerm 
-            OR p.barcode LIKE @searchTerm
-          ORDER BY 
-            (CASE WHEN p.barcode = @exactTerm THEN 0 ELSE 1 END), -- Exact barcode match first
-            p.descr;
+                p.barcode AS [바코드],
+                c.comname AS [거래처명],
+                p.comcode AS [거래처코드],
+                p.gubun1 AS [대분류],
+                p.gubun2 AS [중분류],
+                p.gubun3 AS [소분류],
+                (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END) AS [상품명],
+                p.spec AS [규격],
+                p.money0vat AS [매입가],
+                p.money1 AS [판매가],
+                sr.salemoney0 AS [행사매입가],
+                sr.salemoney1 AS [행사판매가],
+                sr.startday AS [행사시작일],
+                p.saleendday AS [행사종료일],
+                p.curjago AS [재고수량],
+                p.upday1 AS [최종수정일],
+                CASE
+                    WHEN p.ispack = '1' THEN '묶음'
+                    WHEN p.ispack = '0' THEN '일반'
+                    ELSE 'X'
+                END AS [BOM여부]
+            FROM
+                dbo.parts AS p WITH (NOLOCK)
+            LEFT JOIN
+                dbo.comp AS c WITH (NOLOCK) ON p.comcode = c.comcode
+            LEFT JOIN
+                dbo.sale_ready AS sr WITH (NOLOCK) ON p.barcode = sr.barcode AND p.comcode = sr.comcode
+                AND sr.isappl = '1'
+                AND CONVERT(VARCHAR(10), GETDATE(), 121) BETWEEN sr.startday AND sr.endday
+            WHERE
+                (
+                    p.isuse = '1' AND p.barcode IS NOT NULL AND p.barcode NOT LIKE '0000000%'
+                    AND (CASE WHEN p.spec IS NOT NULL AND p.spec <> '' THEN p.descr + ' [' + p.spec + ']' ELSE p.descr END) NOT LIKE N'%*---*%'
+                )
+                AND (
+                    p.barcode = @exactTerm OR
+                    p.barcode LIKE @searchTerm OR
+                    p.descr LIKE @searchTerm OR
+                    p.spec LIKE @searchTerm
+                )
+            ORDER BY
+                CASE 
+                    WHEN p.barcode = @exactTerm THEN 0
+                    ELSE 1
+                END,
+                [상품명];
         `;
         
         const result = await request.query(searchProductsQuery);

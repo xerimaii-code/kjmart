@@ -1,3 +1,4 @@
+
 // src/config.ts
 
 /**
@@ -71,4 +72,4 @@ export const IS_DEVELOPER_MODE = detectDeveloperMode();
  * Incrementing this version will trigger a local data reset and full re-sync
  * on app startup, ensuring data consistency after schema changes.
  */
-export const DATA_SCHEMA_VERSION = 'v1';
+export const DATA_SCHEMA_VERSION = 'v2';

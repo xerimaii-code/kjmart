@@ -23,14 +23,14 @@ const ProductCard: React.FC<{ product: Product, index: number, onClick: (product
         >
             {/* Row 1: Product Name & Sale Badge */}
             <div className="flex items-start justify-between w-full gap-2">
-                <p className="font-bold text-gray-800 text-lg whitespace-pre-wrap flex-grow">{product.name}</p>
+                <p className="font-bold text-gray-800 text-lg whitespace-pre-wrap flex-grow leading-tight">{product.name}</p>
                 {saleIsActive && hasAnySalePrice && (
                     <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 whitespace-nowrap mt-1">행사중</span>
                 )}
             </div>
             
             {/* Row 2: Cost / Selling Price */}
-            <div className="flex items-center gap-2 text-sm w-full">
+            <div className="flex items-center gap-2 text-sm w-full mt-0.5">
                 <span className="text-gray-500 font-medium">매입/판매:</span>
                 <div className="flex items-center gap-1">
                     <span className={`font-semibold ${saleIsActive && hasAnySalePrice ? 'text-gray-400 line-through' : 'text-gray-900'}`}>

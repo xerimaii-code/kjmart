@@ -8,6 +8,7 @@ export interface Customer {
 export interface Product {
     barcode: string;
     name: string;
+    spec?: string; // Added spec field
     costPrice: number;
     sellingPrice: number;
     eventCostPrice?: number;

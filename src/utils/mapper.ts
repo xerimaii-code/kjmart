@@ -33,6 +33,7 @@ export const formatDateFromSQL = (dateValue: any): string | undefined => {
 export const mapSqlResultToProduct = (p: any): Product => ({
     barcode: sanitizeString(p.바코드 || p.barcode || ''),
     name: sanitizeString(p.상품명 || p.descr || ''),
+    spec: sanitizeString(p.규격 || p.spec || '') || undefined,
     costPrice: Number(p.매입가 ?? p.money0vat ?? 0),
     sellingPrice: Number(p.판매가 ?? p.money1 ?? 0),
     eventCostPrice: p.행사매입가 ? Number(p.행사매입가) : undefined,

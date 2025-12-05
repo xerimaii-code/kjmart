@@ -24,9 +24,9 @@ const ProductSearchResultItem: React.FC<ProductSearchResultItemProps> = ({ produ
                         <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 whitespace-nowrap mt-0.5">행사중</span>
                     )}
                 </div>
-
+                
                 {/* Row 2: Normal Price (Moved Up) */}
-                <div className="text-sm text-gray-700 font-medium flex items-center gap-x-2 w-full">
+                <div className="text-sm text-gray-700 font-medium flex items-center gap-x-2 w-full mt-0.5">
                     <span className="text-gray-500 text-xs">매입/판매:</span>
                     <span className={`font-bold ${saleIsActive && hasAnySalePrice ? 'text-gray-400 line-through decoration-gray-400' : 'text-gray-900'}`}>
                         {product.costPrice?.toLocaleString()}
