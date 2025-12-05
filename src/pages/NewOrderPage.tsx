@@ -451,7 +451,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <SearchDropdown<Customer>
                                 items={filteredCustomers}
                                 renderItem={(c) => (
-                                    <div onClick={() => handleSelectCustomer(c)} className="p-3 hover:bg-gray-100 cursor-pointer">
+                                    <div onMouseDown={(e) => { e.preventDefault(); handleSelectCustomer(c); }} className="p-3 hover:bg-gray-100 cursor-pointer">
                                         <p className="font-semibold text-gray-800">{c.name}</p>
                                         <p className="text-sm text-gray-500">{c.comcode}</p>
                                     </div>

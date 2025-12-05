@@ -21,7 +21,7 @@ const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> 
     <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-3 items-center p-2 bg-white rounded-lg shadow-sm border text-xs">
         {/* Name & Barcode */}
         <div className="flex flex-col min-w-0">
-            <p className="font-bold text-gray-800 truncate text-sm">{item.name}</p>
+            <p className="font-bold text-gray-800 truncate text-sm">{item.name || '(미등록 상품)'}</p>
             <p className="text-gray-400 font-mono">{item.barcode}</p>
         </div>
         {/* Prices */}
@@ -59,7 +59,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [selectedSupplier, setSelectedSupplier] = useState<Customer | null>(null);
     const [currentItems, setCurrentItems] = useState<ReceivingItem[]>([]);
     const [isSavingBatch, setIsSavingBatch] = useState(false);
-    const [receiveModalProps, setReceiveModalProps] = useState<{ itemInfo: (Product & { isNew?: false }) | { barcode: string, isNew: true } } | null>(null);
+    const [receiveModalProps, setReceiveModalProps] = useState<{ product: Product } | null>(null);
     
     // Draft Hook
     const { draft, isLoading: isDraftLoading, save: saveDraft, remove: removeDraft } = useDraft<ReceivingDraft>(DRAFT_KEY);
@@ -183,7 +183,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
     
     const handleProductSelect = (product: Product) => {
-        setReceiveModalProps({ itemInfo: { ...product, isNew: false } });
+        setReceiveModalProps({ product });
         setSearchTerm('');
         setShowProductDropdown(false);
     };
@@ -192,9 +192,15 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         openScanner('modal', (barcode) => {
             const product = products.find(p => p.barcode === barcode);
             if (product) {
-                setReceiveModalProps({ itemInfo: { ...product, isNew: false } });
+                setReceiveModalProps({ product });
             } else {
-                setReceiveModalProps({ itemInfo: { barcode, isNew: true } });
+                const placeholderProduct: Product = {
+                    barcode: barcode,
+                    name: '',
+                    costPrice: 0,
+                    sellingPrice: 0,
+                };
+                setReceiveModalProps({ product: placeholderProduct });
             }
         }, false);
     };
@@ -407,7 +413,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </div>
              <ReceiveItemModal
                 isOpen={!!receiveModalProps}
-                itemInfo={receiveModalProps?.itemInfo || null}
+                product={receiveModalProps?.product || null}
                 onClose={() => setReceiveModalProps(null)}
                 onAdd={handleAddItem}
             />

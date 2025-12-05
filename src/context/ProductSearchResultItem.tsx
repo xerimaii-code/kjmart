@@ -14,8 +14,13 @@ const ProductSearchResultItem: React.FC<ProductSearchResultItemProps> = ({ produ
     const hasSalePrice = product.salePrice !== undefined && product.salePrice !== null && product.salePrice > 0;
     const hasAnySalePrice = hasEventCostPrice || hasSalePrice;
 
+    const handleMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault(); // This prevents the search input from losing focus and its onBlur event from firing prematurely.
+        onClick(product);
+    };
+
     return (
-        <div onClick={() => onClick(product)} className="relative overflow-hidden p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
+        <div onMouseDown={handleMouseDown} className="relative overflow-hidden p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
             <div className="flex flex-col items-start w-full gap-y-1">
                 {/* Row 1: Name & Sale Badge */}
                 <div className="flex items-start justify-between w-full gap-2">

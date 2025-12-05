@@ -1,11 +1,13 @@
 
 import React, { useMemo, useCallback, useState } from 'react';
-import { useScanner, useDeviceSettings, useMiscUI } from '../context/AppContext';
-import { Product } from '../types';
+import { useScanner, useDeviceSettings, useMiscUI, useModals, useAlert } from '../context/AppContext';
+import { Product, NewOrderDraft } from '../types';
 import { SearchIcon, SpinnerIcon, BarcodeScannerIcon } from '../components/Icons';
 import { isSaleActive } from '../hooks/useOrderManager';
 import { useProductSearch } from '../hooks/useProductSearch';
 import ProductEditPage from './ProductEditPage';
+import ProductActionModal from '../components/ProductActionModal';
+import { useDraft } from '../hooks/useDraft';
 
 const MAX_RESULTS_TO_DISPLAY = 100;
 
@@ -93,10 +95,18 @@ const ProductCard: React.FC<{ product: Product, index: number, onClick: (product
 const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { openScanner } = useScanner();
     const { sqlStatus } = useMiscUI();
+    const { openAddItemModal, openEditItemModal } = useModals(); // Note: openEditItemModal is not used but kept for context.
+    const { showToast } = useAlert();
     
     // State for ProductEditPage modal
     const [editModalOpen, setEditModalOpen] = useState(false);
-    const [selectedBarcode, setSelectedBarcode] = useState<string>('');
+    const [selectedBarcodeForEdit, setSelectedBarcodeForEdit] = useState<string>('');
+    
+    // State for new action modal
+    const [actionModalOpen, setActionModalOpen] = useState(false);
+    const [selectedProductForAction, setSelectedProductForAction] = useState<Product | null>(null);
+
+    const { draft: newOrderDraft, save: saveNewOrderDraft } = useDraft<NewOrderDraft>('new-order-draft');
     
     // Use manual search mode
     const { searchTerm, setSearchTerm, results, isSearching, searchSource, search } = useProductSearch('productInquiry', MAX_RESULTS_TO_DISPLAY);
@@ -118,9 +128,59 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, [openScanner, setSearchTerm, search]);
 
     const handleProductClick = useCallback((product: Product) => {
-        setSelectedBarcode(product.barcode);
+        setSelectedProductForAction(product);
+        setActionModalOpen(true);
+    }, []);
+
+    const handleEditProduct = useCallback((product: Product) => {
+        setSelectedBarcodeForEdit(product.barcode);
         setEditModalOpen(true);
     }, []);
+
+    const handleAddToOrder = useCallback((product: Product) => {
+        if (!newOrderDraft) {
+            // This case is unlikely if the draft hook is working, but it's good practice.
+            showToast("발주 임시 저장 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.", "error");
+            return;
+        }
+
+        const existingItem = newOrderDraft.items.find(i => i.barcode === product.barcode) || null;
+        
+        openAddItemModal({
+            product,
+            existingItem,
+            trigger: 'search', // 'search' trigger gives a standard modal, not continuous scan mode
+            onAdd: (details) => {
+                // Logic to add/update item in draft
+                const newItems = [...newOrderDraft.items];
+                const existingIndex = newItems.findIndex(i => i.barcode === product.barcode);
+                const priceToUse = product.costPrice;
+
+                if (existingIndex > -1) {
+                    const newQuantity = newItems[existingIndex].quantity + details.quantity;
+                    if (newQuantity <= 0) {
+                        newItems.splice(existingIndex, 1);
+                    } else {
+                        newItems[existingIndex] = { ...newItems[existingIndex], quantity: newQuantity, unit: details.unit, memo: details.memo || '', price: priceToUse };
+                    }
+                } else {
+                    if (details.quantity > 0) {
+                        newItems.push({ barcode: product.barcode, name: product.name, price: priceToUse, quantity: details.quantity, unit: details.unit, memo: details.memo || '' });
+                    }
+                }
+
+                saveNewOrderDraft({
+                    selectedCustomer: newOrderDraft.selectedCustomer,
+                    items: newItems,
+                    isBoxUnitDefault: newOrderDraft.isBoxUnitDefault,
+                });
+                showToast(`${product.name}이(가) 신규 발주에 추가되었습니다.`, 'success');
+            },
+            initialSettings: { unit: newOrderDraft.isBoxUnitDefault ? '박스' : '개' }
+        });
+
+    }, [newOrderDraft, saveNewOrderDraft, openAddItemModal, showToast]);
+
 
     const { displayedProducts, totalFound } = useMemo(() => {
         return {
@@ -216,11 +276,19 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 <div className="max-w-2xl mx-auto w-full h-full">{renderContent()}</div>
             </div>
 
+            <ProductActionModal
+                isOpen={actionModalOpen}
+                onClose={() => setActionModalOpen(false)}
+                product={selectedProductForAction}
+                onEdit={handleEditProduct}
+                onAddToOrder={handleAddToOrder}
+            />
+
             {/* Nested Product Edit Modal */}
             <ProductEditPage 
                 isOpen={editModalOpen}
                 onClose={() => setEditModalOpen(false)}
-                initialBarcode={selectedBarcode}
+                initialBarcode={selectedBarcodeForEdit}
             />
         </div>
     );

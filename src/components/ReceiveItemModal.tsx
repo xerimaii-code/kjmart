@@ -7,77 +7,51 @@ import { ReturnBoxIcon } from './Icons';
 
 interface ReceiveItemModalProps {
     isOpen: boolean;
-    itemInfo: (Product & { isNew?: false }) | { barcode: string, isNew: true } | null;
+    product: Product | null;
     onClose: () => void;
     onAdd: (item: Omit<ReceivingItem, 'uniqueId'>) => void;
 }
 
-const formatInteger = (value: number | string): string => {
-    if (value === '' || value === undefined || value === null) return '';
-    const num = String(value).replace(/[^0-9]/g, '');
-    return num ? Number(num).toLocaleString() : '';
-};
-
-
-const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, itemInfo, onClose, onAdd }) => {
+const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd }) => {
     const [quantity, setQuantity] = useState<number | string>(1);
     const [isReturn, setIsReturn] = useState(false);
     
-    // State for new items
-    const [name, setName] = useState('');
-    const [costPrice, setCostPrice] = useState<number | string>('');
-    const [sellingPrice, setSellingPrice] = useState<number | string>('');
-
     const quantityInputRef = useRef<HTMLInputElement>(null);
-    const nameInputRef = useRef<HTMLInputElement>(null);
     const modalContentRef = useRef<HTMLDivElement>(null);
     const [isRendered, setIsRendered] = useState(false);
 
     useAdjustForKeyboard(modalContentRef, isOpen);
 
-    const isNewItem = itemInfo?.isNew === true;
-
     useEffect(() => {
         if (isOpen) {
             const timer = setTimeout(() => setIsRendered(true), 10);
-            if (itemInfo) {
+            if (product) {
                 setQuantity(1);
                 setIsReturn(false);
-
-                if (itemInfo.isNew) {
-                    setName('');
-                    setCostPrice('');
-                    setSellingPrice('');
-                    setTimeout(() => nameInputRef.current?.focus(), 150);
-                } else {
-                    setTimeout(() => {
-                        quantityInputRef.current?.focus();
-                        quantityInputRef.current?.select();
-                    }, 150);
-                }
+                setTimeout(() => {
+                    quantityInputRef.current?.focus();
+                    quantityInputRef.current?.select();
+                }, 150);
             }
             return () => clearTimeout(timer);
         } else {
             setIsRendered(false);
         }
-    }, [isOpen, itemInfo]);
+    }, [isOpen, product]);
 
-    if (!isOpen || !itemInfo) return null;
+    if (!isOpen || !product) return null;
     
     const finalQuantity = Number(quantity);
-    const isFormValid = isNewItem
-        ? name.trim() !== '' && String(costPrice).trim() !== '' && String(sellingPrice).trim() !== ''
-        : true;
-    const isQuantityValid = !isNaN(finalQuantity) && finalQuantity !== 0 && isFormValid;
+    const isQuantityValid = !isNaN(finalQuantity) && finalQuantity !== 0;
 
     const handleAdd = () => {
         if (!isQuantityValid) return;
         
         const itemData: Omit<ReceivingItem, 'uniqueId'> = {
-            barcode: itemInfo.barcode,
-            name: isNewItem ? name.trim() : (itemInfo as Product).name,
-            costPrice: isNewItem ? Number(String(costPrice).replace(/,/g, '')) : (itemInfo as Product).costPrice,
-            sellingPrice: isNewItem ? Number(String(sellingPrice).replace(/,/g, '')) : (itemInfo as Product).sellingPrice,
+            barcode: product.barcode,
+            name: product.name,
+            costPrice: product.costPrice,
+            sellingPrice: product.sellingPrice,
             quantity: isReturn ? -finalQuantity : finalQuantity,
         };
         onAdd(itemData);
@@ -94,37 +68,18 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, itemInfo, o
         <div className={`fixed inset-0 z-[100] flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} onClick={onClose} role="dialog" aria-modal="true">
             <div ref={modalContentRef} className={`bg-white rounded-xl shadow-lg w-full max-w-sm transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`} onClick={e => e.stopPropagation()}>
                 <div className="p-5">
-                    <h3 className="text-xl font-bold text-gray-800 truncate text-center" title={isNewItem ? '신규 상품 등록' : (itemInfo as Product).name}>
-                        {isNewItem ? '신규 상품 등록' : (itemInfo as Product).name}
+                    <h3 className="text-xl font-bold text-gray-800 truncate text-center" title={product.name || '신규 상품'}>
+                        {product.name || '신규 상품'}
                     </h3>
-                    <p className="text-center text-sm text-gray-500 mb-4">{itemInfo.barcode}</p>
+                    <p className="text-center text-sm text-gray-500 mb-4">{product.barcode}</p>
                     
-                    {isNewItem ? (
-                        <div className="space-y-3 mb-6">
-                            <div>
-                                <label htmlFor="new-item-name" className="block text-xs font-bold text-gray-600 mb-1">상품명</label>
-                                <input id="new-item-name" ref={nameInputRef} type="text" value={name} onChange={e => setName(e.target.value)} className="w-full h-10 px-3 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500" />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label htmlFor="new-item-cost" className="block text-xs font-bold text-gray-600 mb-1">매입가</label>
-                                    <input id="new-item-cost" type="text" inputMode="numeric" value={formatInteger(costPrice)} onChange={e => setCostPrice(e.target.value)} className="w-full h-10 px-3 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right font-mono" />
-                                </div>
-                                <div>
-                                    <label htmlFor="new-item-selling" className="block text-xs font-bold text-gray-600 mb-1">판매가</label>
-                                    <input id="new-item-selling" type="text" inputMode="numeric" value={formatInteger(sellingPrice)} onChange={e => setSellingPrice(e.target.value)} className="w-full h-10 px-3 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right font-mono" />
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="text-center text-gray-600 mb-6">
-                            <span className="text-sm">매입가: </span>
-                            <span className="font-semibold text-gray-800 text-lg">{(itemInfo as Product).costPrice.toLocaleString()}원</span>
-                            <span className="mx-2 text-gray-300">/</span>
-                            <span className="text-sm">판매가: </span>
-                            <span className="font-semibold text-gray-800 text-lg">{(itemInfo as Product).sellingPrice.toLocaleString()}원</span>
-                        </div>
-                    )}
+                    <div className="text-center text-gray-600 mb-6">
+                        <span className="text-sm">매입가: </span>
+                        <span className="font-semibold text-gray-800 text-lg">{product.costPrice.toLocaleString()}원</span>
+                        <span className="mx-2 text-gray-300">/</span>
+                        <span className="text-sm">판매가: </span>
+                        <span className="font-semibold text-gray-800 text-lg">{product.sellingPrice.toLocaleString()}원</span>
+                    </div>
 
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2 text-center">수량</label>
