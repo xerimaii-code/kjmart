@@ -2,7 +2,7 @@
 import { useState, useCallback } from 'react';
 import { Product } from '../types';
 import { useDataState, useDeviceSettings, useMiscUI } from '../context/AppContext';
-import { searchProductsOnline } from '../services/sqlService';
+import { searchProductsOnline, executeUserQuery } from '../services/sqlService';
 import { mapSqlResultToProduct } from '../utils/mapper';
 
 interface UseProductSearchReturn {
@@ -15,8 +15,29 @@ interface UseProductSearchReturn {
     clear: () => void;
 }
 
+const extractParamsForQuery = (queryText: string, sourceParams: Record<string, any>) => {
+    const matches = Array.from(queryText.matchAll(/@([a-zA-Z0-9_가-힣]+)/g), m => m[1]);
+    const uniqueVars = [...new Set(matches)];
+    
+    const lookup: Record<string, any> = {};
+    Object.keys(sourceParams).forEach(k => {
+        lookup[k.toLowerCase()] = sourceParams[k];
+    });
+
+    const finalParams: Record<string, any> = {};
+    uniqueVars.forEach(v => {
+        const lowerV = v.toLowerCase();
+        if (lookup[lowerV] !== undefined) {
+            finalParams[v] = lookup[lowerV];
+        }
+    });
+    
+    return finalParams;
+};
+
+
 export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry', maxResults: number = 50): UseProductSearchReturn {
-    const { products } = useDataState();
+    const { products, userQueries } = useDataState();
     const { dataSourceSettings } = useDeviceSettings();
     const { sqlStatus } = useMiscUI();
     
@@ -44,7 +65,16 @@ export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry'
 
         if (useOnline) {
             try {
-                const onlineData = await searchProductsOnline(term, maxResults);
+                const userSearchQuery = userQueries.find(q => q.name === '상품조회');
+                let onlineData;
+
+                if (userSearchQuery) {
+                    const params = { kw: term, keyword: term, search: term, limit: maxResults };
+                    const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
+                    onlineData = await executeUserQuery('상품조회', dynamicParams, userSearchQuery.query);
+                } else {
+                    onlineData = await searchProductsOnline(term, maxResults);
+                }
                 setResults(onlineData.map(mapSqlResultToProduct));
             } catch (e) {
                 console.error("Online search failed:", e);
@@ -94,7 +124,7 @@ export function useProductSearch(sourceSettingKey: 'newOrder' | 'productInquiry'
             setResults(filtered.slice(0, maxResults));
             setIsSearching(false);
         }
-    }, [searchTerm, products, dataSourceSettings, sourceSettingKey, sqlStatus, maxResults]);
+    }, [searchTerm, products, userQueries, dataSourceSettings, sourceSettingKey, sqlStatus, maxResults]);
 
     const clear = useCallback(() => {
         setSearchTerm('');

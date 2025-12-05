@@ -10,7 +10,7 @@ import {
 } from 'firebase/database';
 
 import { firebaseConfig } from '../firebaseConfig';
-import { Order, OrderItem, Customer, Product, DeviceSettings, SyncLog, UserQuery } from '../types';
+import { Order, OrderItem, Customer, Product, DeviceSettings, SyncLog, UserQuery, ReceivingBatch } from '../types';
 
 export { getDatabase, ref, push, update, set };
 
@@ -327,4 +327,9 @@ export const deleteUserQuery = async (id: string): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
     const queryRef = ref(db, `saved-queries/${id}`);
     await set(queryRef, null);
+};
+
+export const addReceivingBatch = async (batch: ReceivingBatch): Promise<void> => {
+    if (!db) throw DB_UNAVAILABLE_ERROR;
+    await set(ref(db, `receiving-batches/${batch.id}`), batch);
 };

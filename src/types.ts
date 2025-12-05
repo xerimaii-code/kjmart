@@ -51,9 +51,11 @@ export interface Order {
 }
 
 export interface ReceivingItem {
+    uniqueId: number;
     barcode: string;
     name: string;
     costPrice: number; // 입고 시점의 매입가
+    sellingPrice: number;
     quantity: number;
 }
 

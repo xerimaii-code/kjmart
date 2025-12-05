@@ -8,7 +8,9 @@ import { useProductSearch } from '../hooks/useProductSearch';
 import SearchDropdown from '../components/SearchDropdown';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
 import * as receiveDb from '../services/receiveDbService';
+import { addReceivingBatch } from '../services/dbService';
 import { useDraft } from '../hooks/useDraft';
+import ReceiveItemModal from '../components/ReceiveItemModal';
 
 type View = 'entry' | 'list';
 const DRAFT_KEY = 'receiving-entry-draft';
@@ -16,24 +18,34 @@ const DRAFT_KEY = 'receiving-entry-draft';
 // --- Sub-components ---
 
 const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> = ({ item, onRemove }) => (
-    <div className="flex items-center p-3 bg-white rounded-lg shadow-sm border">
-        <div className="flex-grow min-w-0">
-            <p className="font-bold text-gray-800 truncate">{item.name}</p>
-            <p className="text-sm text-gray-500">{item.costPrice.toLocaleString()}원</p>
+    <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-3 items-center p-2 bg-white rounded-lg shadow-sm border text-xs">
+        {/* Name & Barcode */}
+        <div className="flex flex-col min-w-0">
+            <p className="font-bold text-gray-800 truncate text-sm">{item.name}</p>
+            <p className="text-gray-400 font-mono">{item.barcode}</p>
         </div>
-        <div className="flex items-center gap-3">
-            <span className="font-bold text-lg text-blue-600">{item.quantity}</span>
-            <button onClick={onRemove} className="p-2 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50">
-                <TrashIcon className="w-5 h-5" />
-            </button>
+        {/* Prices */}
+        <div className="text-right">
+            <p className="font-mono">{item.costPrice.toLocaleString()}</p>
         </div>
+        <div className="text-right">
+            <p className="font-mono text-gray-600">{item.sellingPrice.toLocaleString()}</p>
+        </div>
+        {/* Qty & Amount */}
+        <p className={`text-center font-bold text-base ${item.quantity < 0 ? 'text-red-600' : 'text-blue-600'}`}>{item.quantity}</p>
+        <p className="text-right font-mono font-semibold">{(item.costPrice * item.quantity).toLocaleString()}</p>
+        {/* Remove button */}
+        <button onClick={onRemove} className="p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50">
+            <TrashIcon className="w-4 h-4" />
+        </button>
     </div>
 );
+
 
 // --- Main Manager Component ---
 
 const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
-    const { customers } = useDataState();
+    const { customers, products } = useDataState();
     const { openScanner } = useScanner();
     const { showAlert, showToast } = useAlert();
     const { sqlStatus } = useMiscUI();
@@ -46,9 +58,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10));
     const [selectedSupplier, setSelectedSupplier] = useState<Customer | null>(null);
     const [currentItems, setCurrentItems] = useState<ReceivingItem[]>([]);
-    const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-    const [quantity, setQuantity] = useState<number | string>(1);
     const [isSavingBatch, setIsSavingBatch] = useState(false);
+    const [receiveModalProps, setReceiveModalProps] = useState<{ itemInfo: (Product & { isNew?: false }) | { barcode: string, isNew: true } } | null>(null);
     
     // Draft Hook
     const { draft, isLoading: isDraftLoading, save: saveDraft, remove: removeDraft } = useDraft<ReceivingDraft>(DRAFT_KEY);
@@ -108,40 +119,24 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setCurrentDate(new Date().toISOString().slice(0, 10));
         setSelectedSupplier(null);
         setCurrentItems([]);
-        setSelectedProduct(null);
         setSearchTerm('');
-        setQuantity(1);
     };
 
     // --- Entry View Handlers ---
-
-    const handleAddProduct = () => {
-        if (!selectedProduct || Number(quantity) <= 0) return;
-        
+    const handleAddItem = (itemData: Omit<ReceivingItem, 'uniqueId'>) => {
+        if (itemData.quantity === 0) return;
+    
         const newItem: ReceivingItem = {
-            barcode: selectedProduct.barcode,
-            name: selectedProduct.name,
-            costPrice: selectedProduct.costPrice,
-            quantity: Number(quantity),
+            ...itemData,
+            uniqueId: Date.now() + Math.random(), // Add unique ID for list management
         };
-
-        const existingIndex = currentItems.findIndex(i => i.barcode === newItem.barcode);
-        if (existingIndex > -1) {
-            const updatedItems = [...currentItems];
-            updatedItems[existingIndex].quantity += newItem.quantity;
-            setCurrentItems(updatedItems);
-        } else {
-            setCurrentItems(prev => [...prev, newItem]);
-        }
-
-        // Reset inputs for next item
-        setSelectedProduct(null);
-        setSearchTerm('');
-        setQuantity(1);
+    
+        // Just append the new item, don't aggregate
+        setCurrentItems(prev => [...prev, newItem]);
     };
 
-    const handleRemoveItem = (barcode: string) => {
-        setCurrentItems(prev => prev.filter(item => item.barcode !== barcode));
+    const handleRemoveItem = (uniqueId: number) => {
+        setCurrentItems(prev => prev.filter(item => item.uniqueId !== uniqueId));
     };
 
     const handleSaveBatch = async () => {
@@ -164,30 +159,43 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 items: currentItems,
                 itemCount: currentItems.length,
                 totalAmount,
-                status: 'draft',
+                status: 'draft', // Default to draft
             };
+
+            if (sqlStatus === 'connected') {
+                await addReceivingBatch(newBatch);
+                newBatch.status = 'sent';
+                newBatch.sentAt = new Date().toISOString();
+                showToast('입고 내역이 서버에 저장되었습니다.', 'success');
+            } else {
+                showToast('오프라인 상태라 기기에 임시 저장되었습니다.', 'success');
+            }
+
             await receiveDb.saveOrUpdateBatch(newBatch);
-            showToast('입고 내역이 저장되었습니다.', 'success');
             await removeDraft();
             resetEntryForm();
             await loadBatches();
-        } catch (e) {
-            showAlert('저장에 실패했습니다.');
+        } catch (e: any) {
+            showAlert(`저장에 실패했습니다: ${e.message}`);
         } finally {
             setIsSavingBatch(false);
         }
     };
     
     const handleProductSelect = (product: Product) => {
-        setSelectedProduct(product);
-        setSearchTerm(product.name);
+        setReceiveModalProps({ itemInfo: { ...product, isNew: false } });
+        setSearchTerm('');
         setShowProductDropdown(false);
     };
 
     const handleScan = () => {
         openScanner('modal', (barcode) => {
-            setSearchTerm(barcode);
-            search(barcode);
+            const product = products.find(p => p.barcode === barcode);
+            if (product) {
+                setReceiveModalProps({ itemInfo: { ...product, isNew: false } });
+            } else {
+                setReceiveModalProps({ itemInfo: { barcode, isNew: true } });
+            }
         }, false);
     };
     
@@ -233,11 +241,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     for (const id of selectedBatches) {
                         const batch = batches.find(b => b.id === id);
                         if (batch) {
-                            // --- !! Placeholder for actual API call !! ---
-                            // For this test, we just simulate a network delay
-                            await new Promise(res => setTimeout(res, 500)); 
-                            
-                            // On success, update the batch status
+                            await addReceivingBatch(batch);
                             const updatedBatch = { ...batch, status: 'sent' as 'sent', sentAt: new Date().toISOString() };
                             await receiveDb.saveOrUpdateBatch(updatedBatch);
                         }
@@ -297,7 +301,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                             </div>
                                             {expandedBatch === batch.id && (
                                                 <div className="mt-3 pl-8 space-y-2">
-                                                    {batch.items.map(item => <ReceivingItemRow key={item.barcode} item={item} onRemove={() => {}} />)}
+                                                    {batch.items.map(item => <ReceivingItemRow key={item.uniqueId} item={item} onRemove={() => {}} />)}
                                                 </div>
                                             )}
                                         </div>
@@ -341,33 +345,41 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             {/* Item Entry */}
             {selectedSupplier && (
                 <div className="flex-shrink-0 bg-white p-3 border-b">
-                    <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
-                        <div className="space-y-2">
-                            <div className="relative">
-                                <input type="text" placeholder="상품 검색 또는 스캔" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onFocus={() => setShowProductDropdown(true)} onBlur={() => { productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200); }} className="w-full h-14 p-3 pl-10 border rounded-lg text-lg" />
-                                <SearchIcon className="w-6 h-6 absolute top-1/2 left-3 -translate-y-1/2 text-gray-400" />
-                                <SearchDropdown items={results} renderItem={p => <ProductSearchResultItem product={p} onClick={handleProductSelect} />} show={showProductDropdown && !!debouncedSearchTerm} />
-                            </div>
-                            {selectedProduct && (
-                                <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
-                                    <p className="flex-grow font-semibold text-blue-800 truncate">{selectedProduct.name}</p>
-                                    <input type="number" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-20 p-2 border rounded text-center font-bold text-lg" />
-                                    <button onClick={handleAddProduct} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg">추가</button>
-                                </div>
-                            )}
+                     <div className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
+                        <div className="relative flex-grow">
+                            <input
+                                type="text"
+                                placeholder="품목명 또는 바코드 검색"
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                                onFocus={() => setShowProductDropdown(true)}
+                                onBlur={() => { productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200); }}
+                                className="w-full px-3 h-11 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400 transition-colors duration-200 text-base"
+                                autoComplete="off"
+                            />
+                            <SearchDropdown items={results} renderItem={p => <ProductSearchResultItem product={p} onClick={handleProductSelect} />} show={showProductDropdown && !!debouncedSearchTerm} />
                         </div>
-                        <button onClick={handleScan} className="w-20 h-full bg-gray-700 text-white rounded-lg flex flex-col items-center justify-center gap-1">
-                            <BarcodeScannerIcon className="w-8 h-8" />
-                            <span className="text-xs font-bold">스캔</span>
+                        <button onClick={handleScan} className="w-11 h-11 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold hover:bg-blue-700 transition active:scale-95 shadow shadow-blue-500/30 flex-shrink-0">
+                            <BarcodeScannerIcon className="w-6 h-6" />
                         </button>
                     </div>
                 </div>
             )}
             
             {/* Item List */}
-            <div className="flex-grow overflow-y-auto p-3 space-y-2">
+            <div className="flex-grow overflow-y-auto p-3">
                 {currentItems.length > 0 ? (
-                    currentItems.map(item => <ReceivingItemRow key={item.barcode} item={item} onRemove={() => handleRemoveItem(item.barcode)} />)
+                    <div className="space-y-2">
+                        <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-3 px-2 pb-1 text-[10px] font-bold text-gray-500">
+                            <span>상품정보</span>
+                            <span className="text-right">매입가</span>
+                            <span className="text-right">판매가</span>
+                            <span className="text-center">수량</span>
+                            <span className="text-right">금액</span>
+                            <span></span>
+                        </div>
+                        {currentItems.map(item => <ReceivingItemRow key={item.uniqueId} item={item} onRemove={() => handleRemoveItem(item.uniqueId)} />)}
+                    </div>
                 ) : (
                     <div className="text-center text-gray-400 pt-16">
                         <BriefcaseIcon className="w-16 h-16 mx-auto text-gray-300" />
@@ -393,6 +405,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     )}
                 </button>
             </div>
+             <ReceiveItemModal
+                isOpen={!!receiveModalProps}
+                itemInfo={receiveModalProps?.itemInfo || null}
+                onClose={() => setReceiveModalProps(null)}
+                onAdd={handleAddItem}
+            />
         </div>
     );
 };
