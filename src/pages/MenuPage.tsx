@@ -1,12 +1,10 @@
 
-
-
 import React, { memo, useState, useEffect } from 'react';
 import { 
     ChartBarIcon, SearchIcon, PencilSquareIcon, HistoryIcon, 
     UserCircleIcon, CurrencyDollarIcon, BriefcaseIcon, 
     SparklesIcon, SettingsIcon, ChevronRightIcon,
-    DocumentIcon, ClipboardIcon, SpinnerIcon, DatabaseIcon
+    DocumentIcon, ClipboardIcon, SpinnerIcon, DatabaseIcon, BarcodeScannerIcon
 } from '../components/Icons';
 import { useMiscUI, useAlert, useSyncState } from '../context/AppContext';
 
@@ -143,7 +141,7 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                         />
                          <MenuButton 
                             label="입고 등록" 
-                            icon={<BriefcaseIcon className={iconClass} />} 
+                            icon={<BarcodeScannerIcon className={iconClass} />} 
                             onClick={() => onNavigate('receiveGoods')}
                         />
                     </div>

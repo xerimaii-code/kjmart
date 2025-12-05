@@ -60,6 +60,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [currentItems, setCurrentItems] = useState<ReceivingItem[]>([]);
     const [isSavingBatch, setIsSavingBatch] = useState(false);
     const [receiveModalProps, setReceiveModalProps] = useState<{ product: Product } | null>(null);
+    const [isReady, setIsReady] = useState(false); // New state to force render after timeout
     
     // Draft Hook
     const { draft, isLoading: isDraftLoading, save: saveDraft, remove: removeDraft } = useDraft<ReceivingDraft>(DRAFT_KEY);
@@ -77,6 +78,20 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     useEffect(() => {
         search(debouncedSearchTerm);
     }, [debouncedSearchTerm, search]);
+
+    // Force ready state after timeout to prevent blank screen if draft loading hangs
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsReady(true);
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    useEffect(() => {
+        if (!isDraftLoading) {
+            setIsReady(true);
+        }
+    }, [isDraftLoading]);
 
     // --- List View State ---
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
@@ -267,7 +282,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     // --- Render Logic ---
 
-    if (isDraftLoading) {
+    // Show loading only if not forced ready and draft is loading
+    if (isDraftLoading && !isReady) {
         return <div className="flex items-center justify-center h-full"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>;
     }
 
@@ -328,12 +344,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }
 
     return (
-        <div className="flex flex-col h-full bg-gray-50">
+        <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
             {/* Header */}
             <div className="flex-shrink-0 bg-white p-3 border-b shadow-sm space-y-3">
                 <div className="flex items-center gap-3">
-                    <label htmlFor="receive-date" className="font-bold text-gray-700">입고일</label>
-                    <input type="date" id="receive-date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="flex-grow p-2 border rounded-lg" />
+                    <label htmlFor="receive-date" className="font-bold text-gray-700 whitespace-nowrap">입고일</label>
+                    <input type="date" id="receive-date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="flex-grow p-2 border rounded-lg bg-gray-50" />
                 </div>
                 <select 
                     value={selectedSupplier?.comcode || ''} 
@@ -395,11 +411,11 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </div>
 
             {/* Footer */}
-            <div className="flex-shrink-0 p-3 bg-white border-t safe-area-pb grid grid-cols-10 gap-3">
-                <button onClick={handleSaveBatch} disabled={isSavingBatch} className="col-span-7 h-14 bg-blue-600 text-white font-bold rounded-lg text-lg flex items-center justify-center disabled:bg-gray-400">
+            <div className="flex-shrink-0 p-3 bg-white border-t safe-area-pb grid grid-cols-10 gap-3 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+                <button onClick={handleSaveBatch} disabled={isSavingBatch} className="col-span-7 h-14 bg-blue-600 text-white font-bold rounded-lg text-lg flex items-center justify-center disabled:bg-gray-400 transition active:scale-95 shadow-md shadow-blue-500/30">
                     {isSavingBatch ? <SpinnerIcon className="w-6 h-6" /> : '현재 입고 저장'}
                 </button>
-                <button onClick={() => setView('list')} className="col-span-3 h-14 bg-gray-600 text-white font-bold rounded-lg relative">
+                <button onClick={() => setView('list')} className="col-span-3 h-14 bg-gray-600 text-white font-bold rounded-lg relative transition active:scale-95 shadow-md">
                     <div className="flex flex-col items-center justify-center">
                         <span className="text-sm">목록</span>
                         <span className="text-xs">& 전송</span>
