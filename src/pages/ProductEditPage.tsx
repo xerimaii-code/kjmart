@@ -5,6 +5,7 @@ import { SearchIcon, BarcodeScannerIcon, SpinnerIcon, CheckSquareIcon, UndoIcon 
 import { executeUserQuery, searchProductsForEdit } from '../services/sqlService';
 import ProductSelectionModal from '../components/ProductSelectionModal';
 import ActionModal from '../components/ActionModal';
+import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 interface ProductEditPageProps {
     isOpen: boolean;
@@ -134,9 +135,12 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
     const isPopulating = useRef(false);
     const productNameRef = useRef<HTMLInputElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const modalContainerRef = useRef<HTMLDivElement>(null);
     
     // Ref for long press timer (now used for search input)
     const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useAdjustForKeyboard(modalContainerRef, isOpen);
 
     const margin = useMemo(() => {
         const cost = Number(String(costPrice).replace(/,/g, '')) || 0;
@@ -591,6 +595,7 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
             title="상품 등록/수정" 
             disableBodyScroll 
             zIndexClass="z-40"
+            containerRef={modalContainerRef}
         >
             <div className="flex flex-col h-full bg-white">
                 <div className="flex-shrink-0 bg-white p-1.5 border-b shadow-sm z-10">

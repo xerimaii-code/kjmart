@@ -663,8 +663,7 @@ export const SqlRunnerView: React.FC<{
         setEditingLearningItem(newItem);
     };
     
-    const handleDeleteLearningItem = (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
+    const confirmDeleteLearningItem = (id: string) => {
         const itemToDelete = learningItems.find(item => item.id === id);
         if (!itemToDelete) return;
 
@@ -676,6 +675,11 @@ export const SqlRunnerView: React.FC<{
                     await setValue('learning/sqlContext', newItems);
                     setLearningItems(newItems);
                     showToast('규칙이 삭제되었습니다.', 'success');
+                    
+                    if (editLearningForm?.id === id) {
+                        setEditLearningForm(null);
+                        setAiModalOpen(true);
+                    }
                 } catch (err) {
                     showAlert('규칙 삭제에 실패했습니다.');
                 }
@@ -683,6 +687,11 @@ export const SqlRunnerView: React.FC<{
             '삭제',
             'bg-rose-500 hover:bg-rose-600 focus:ring-rose-500'
         );
+    };
+    
+    const handleDeleteLearningItem = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        confirmDeleteLearningItem(id);
     };
     
     const handleLearningDragStart = (e: React.DragEvent, index: number) => {
@@ -1433,7 +1442,7 @@ export const SqlRunnerView: React.FC<{
                                             <h3 className="font-bold text-gray-800 truncate">{item.title}</h3>
                                         </div>
                                     </div>
-                                    <button onClick={(e) => handleDeleteLearningItem(e, item.id)} className="p-2 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50 transition-colors flex-shrink-0" onClickCapture={e => e.stopPropagation()}>
+                                    <button onClick={(e) => handleDeleteLearningItem(e, item.id)} className="p-2 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50 transition-colors flex-shrink-0">
                                         <TrashIcon className="w-5 h-5" />
                                     </button>
                                 </div>
