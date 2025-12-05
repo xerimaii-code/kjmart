@@ -1,5 +1,4 @@
 
-
 import React, { useState, lazy, Suspense, useMemo, useEffect } from 'react';
 import { AppProvider, useModals, useScanner, useSyncState, useDataActions, useAlert, useMiscUI } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -11,7 +10,7 @@ import AddItemModal from './components/AddItemModal';
 import EditItemModal from './components/EditItemModal';
 
 // Lazy load pages and heavy modals
-const SqlRunnerPage = lazy(() => import('./pages/SqlRunnerPage')); 
+const MainView = lazy(() => import('./pages/MainView')); 
 const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
 const ScannerModal = lazy(() => import('./components/ScannerModal'));
 const ClearHistoryModal = lazy(() => import('./components/ClearHistoryModal'));
@@ -87,7 +86,7 @@ const AppContent: React.FC = () => {
             <Header />
             <main className="main-content flex-grow relative overflow-y-auto">
                  <Suspense fallback={<PageSuspenseFallback />}>
-                    <SqlRunnerPage isActive={true} />
+                    <MainView isActive={true} />
                 </Suspense>
             </main>
 
