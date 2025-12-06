@@ -52,6 +52,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [isTaxable, setIsTaxable] = useState(true);
     const [isPoint, setIsPoint] = useState(true);
     const [isStockManaged, setIsStockManaged] = useState(true);
+    
+    // UI Logic Flags
+    const [isCategoryFixed, setIsCategoryFixed] = useState(false); // 분류 고정 체크박스
 
     // Info Panels
     const [saleInfoText, setSaleInfoText] = useState('할인 정보 없음');
@@ -196,13 +199,16 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             setMCats([]);
             setSCats([]);
         } else {
+            // 부분 초기화 (분류고정 시): 상품 기본 정보만 초기화
             setBarcode('');
             setProductName('');
+            setSpec('');
             setCostPrice(0);
             setSellingPrice(0);
             setStockQty(0);
             setSaleInfoText('할인 정보 없음');
             setIsEditMode(false);
+            // 거래처, 분류, 플래그는 유지
         }
     }, []);
 
@@ -259,7 +265,13 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 showToast('상품 정보를 불러왔습니다.', 'success');
             } else {
                 if (/^\d+$/.test(code)) {
-                    resetForm(false);
+                    // 신규 등록 모드 진입 시: 분류 고정이 아닐 때만 완전 초기화
+                    if (!isCategoryFixed) {
+                        resetForm(true);
+                    } else {
+                        // 분류 고정 상태라면, 바코드/이름 등만 리셋하고 바코드 세팅
+                        resetForm(false);
+                    }
                     setBarcode(code);
                     setIsEditMode(false);
                     showToast('등록되지 않은 바코드입니다. 신규 등록합니다.', 'success');
@@ -271,7 +283,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             console.error(e);
             showToast('상품 조회 중 오류가 발생했습니다.', 'error');
         }
-    }, [resetForm, showToast, loadMediumCats, loadSmallCats]);
+    }, [resetForm, showToast, loadMediumCats, loadSmallCats, isCategoryFixed]);
 
     useEffect(() => {
         if (isOpen) {
@@ -351,7 +363,14 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             
             showToast(isEditMode ? "상품 정보가 수정되었습니다." : "신규 상품이 등록되었습니다.", "success");
             setSearchInput('');
-            resetForm(true); 
+            
+            // 분류 고정 체크 여부에 따른 초기화 로직 분기
+            if (isCategoryFixed) {
+                resetForm(false); // Partial reset (keep Category/Customer)
+            } else {
+                resetForm(true); // Full reset
+            }
+            
             setTimeout(() => searchInputRef.current?.focus(), 100);
 
         } catch (e: any) {
@@ -406,6 +425,13 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                         <BarcodeScannerIcon className="w-6 h-6" />
                     </button>
                 </form>
+                
+                {/* [NEW] Barcode Display below search bar */}
+                {barcode && (
+                    <div className="text-xs text-gray-500 font-mono -mt-2 px-1">
+                        Barcode: <span className="font-bold text-gray-800 tracking-wide">{barcode}</span>
+                    </div>
+                )}
 
                 {/* 2. Row: Product Name & Spec */}
                 <div className="flex gap-2">
@@ -470,10 +496,10 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     </div>
                 </div>
 
-                {/* 4. Row: Classification (Category) Dropdowns */}
+                {/* 4. Row: Classification (Category) Dropdowns & [NEW] Fix Category Checkbox */}
                 <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-gray-700">상품 분류</label>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 items-center">
                         <select 
                             value={lCode} 
                             onChange={handleLargeChange} 
@@ -498,6 +524,15 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             <option value="">소분류</option>
                             {sCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                         </select>
+                        <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap px-1 ml-1">
+                            <input 
+                                type="checkbox" 
+                                checked={isCategoryFixed} 
+                                onChange={(e) => setIsCategoryFixed(e.target.checked)} 
+                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                            />
+                            <span className="text-xs font-bold text-gray-700">분류고정</span>
+                        </label>
                     </div>
                 </div>
 
