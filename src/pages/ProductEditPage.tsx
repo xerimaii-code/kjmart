@@ -21,6 +21,14 @@ interface CategoryOption {
     name: string;
 }
 
+interface SaleInfo {
+    name: string;
+    cost: number;
+    price: number;
+    start: string;
+    end: string;
+}
+
 export default function ProductEditPage({ isOpen, onClose, initialBarcode }: ProductEditPageProps) {
     const { userQueries, customers: offlineCustomers } = useDataState();
     const { showAlert, showToast } = useAlert();
@@ -57,9 +65,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     // UI Logic
     const [isCategoryFixed, setIsCategoryFixed] = useState(false);
 
-    // Info Panels
-    const [saleInfoText, setSaleInfoText] = useState('할인 정보 없음');
-    const [bomInfoText, setBomInfoText] = useState('일반 상품');
+    // Info Panels Data
+    const [saleInfo, setSaleInfo] = useState<SaleInfo | null>(null);
+    const [bomList, setBomList] = useState<any[]>([]);
 
     const [isEditMode, setIsEditMode] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -185,13 +193,14 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             setComcode(''); setLCode(''); setMCode(''); setSCode('');
             setStockQty(0);
             setIsUse(true); setIsTaxable(true); setIsPoint(true); setIsStockManaged(true);
-            setSaleInfoText('할인 정보 없음'); setBomInfoText('일반 상품');
+            setSaleInfo(null);
+            setBomList([]);
             setIsEditMode(false);
             setMCats([]); setSCats([]);
         } else {
             setBarcode(''); setProductName(''); setSpec('');
             setCostPrice(0); setSellingPrice(0); setStockQty(0);
-            setSaleInfoText('할인 정보 없음');
+            setSaleInfo(null);
             setIsEditMode(false);
         }
     }, []);
@@ -228,12 +237,31 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             setMCode(''); setSCode(''); setMCats([]); setSCats([]);
         }
 
+        // Sale Info Logic
         if (p.행사유무 === 'Y') {
-            setSaleInfoText(`[${p.행사명}] ${p.행사매입가?.toLocaleString()} / ${p.행사판매가?.toLocaleString()}\n(${p.행사시작일}~${p.행사종료일})`);
+            setSaleInfo({
+                name: p.행사명,
+                cost: p.행사매입가,
+                price: p.행사판매가,
+                start: p.행사시작일,
+                end: p.행사종료일
+            });
         } else {
-            setSaleInfoText('할인 정보 없음');
+            setSaleInfo(null);
         }
-        setBomInfoText(p.BOM여부 || '일반 상품');
+
+        // BOM Info Logic
+        if (String(p.ispack) === '1' || p.BOM여부 === '묶음') {
+            // Fetch BOM components
+            executeUserQuery('getBomComponents', { barcode: p.바코드 || p.barcode })
+                .then(res => setBomList(res))
+                .catch(err => {
+                    console.error("Failed to fetch BOM", err);
+                    setBomList([]);
+                });
+        } else {
+            setBomList([]);
+        }
 
         setIsEditMode(true);
         showToast('상품 정보를 불러왔습니다.', 'success');
@@ -570,16 +598,55 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
                     {/* 8. Bottom Info Panels */}
                     <div className="grid grid-cols-2 gap-1 mt-1 mb-2">
-                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
-                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">할인정보</div>
-                            <div className="p-1 flex items-center justify-center text-center h-10">
-                                <p className="text-[10px] text-gray-500 whitespace-pre-line leading-tight">{saleInfoText}</p>
+                        {/* Discount Info Panel */}
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col h-24">
+                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">할인정보</div>
+                            <div className="p-1 flex-1 flex flex-col items-center justify-center overflow-hidden">
+                                {saleInfo ? (
+                                    <>
+                                        <div className="flex-1 flex items-center justify-center w-full">
+                                            <p className="text-xs font-bold text-blue-700 text-center leading-tight line-clamp-2">{saleInfo.name}</p>
+                                        </div>
+                                        <div className="flex-shrink-0 text-center w-full">
+                                            <p className="text-sm font-bold text-red-600 leading-none my-0.5">
+                                                {Number(saleInfo.cost).toLocaleString()} / {Number(saleInfo.price).toLocaleString()}
+                                            </p>
+                                            <p className="text-[10px] text-gray-500 leading-tight">
+                                                {saleInfo.start} ~ {saleInfo.end}
+                                            </p>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="text-xs text-gray-400">할인 정보 없음</p>
+                                )}
                             </div>
                         </div>
-                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
-                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">BOM 정보</div>
-                            <div className="p-1 flex items-center justify-center text-center h-10">
-                                <p className="text-[10px] text-gray-500">{bomInfoText}</p>
+
+                        {/* BOM Info Panel */}
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col h-24">
+                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">BOM 정보</div>
+                            <div className="p-1 flex-1 overflow-y-auto scrollbar-hide">
+                                {bomList.length > 0 ? (
+                                    <div className="space-y-1">
+                                        {bomList.map((item, idx) => (
+                                            <div key={idx} className="bg-white border border-gray-100 rounded p-1 shadow-sm">
+                                                <p className="text-[9px] font-mono text-gray-400 leading-none">{item.바코드}</p>
+                                                <div className="flex justify-between items-center gap-1">
+                                                    <p className="text-[10px] font-bold text-gray-700 truncate">{item.상품명}</p>
+                                                    <p className="text-[9px] text-gray-500 whitespace-nowrap">{item.규격}</p>
+                                                </div>
+                                                <div className="flex justify-end items-center gap-2">
+                                                    <p className="text-[10px] text-gray-600">{Number(item.매입가).toLocaleString()}원</p>
+                                                    <p className="text-[10px] font-bold text-blue-600">x{item.수량}</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="h-full flex items-center justify-center">
+                                        <p className="text-xs text-gray-400">일반 상품</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
