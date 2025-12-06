@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ActionModal from '../components/ActionModal';
-import { useAlert, useDataState, useScanner } from '../context/AppContext';
+import { useAlert, useDataState, useScanner, useMiscUI } from '../context/AppContext';
 import { executeUserQuery, searchProductsForEdit } from '../services/sqlService';
 import { extractParamsForQuery } from '../hooks/useProductSearch';
-import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon, CheckSquareIcon } from '../components/Icons';
-import { Customer } from '../types';
-import SearchDropdown from '../components/SearchDropdown';
+import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon } from '../components/Icons';
+import { Customer, Category } from '../types';
+import { getCachedData } from '../services/cacheDbService';
 
 interface ProductEditPageProps {
     isOpen: boolean;
@@ -14,10 +14,16 @@ interface ProductEditPageProps {
     initialBarcode?: string;
 }
 
+interface CategoryOption {
+    code: string;
+    name: string;
+}
+
 export default function ProductEditPage({ isOpen, onClose, initialBarcode }: ProductEditPageProps) {
-    const { userQueries, customers } = useDataState();
+    const { userQueries, customers: offlineCustomers } = useDataState();
     const { showAlert, showToast } = useAlert();
     const { openScanner } = useScanner();
+    const { sqlStatus } = useMiscUI();
 
     // --- State Variables ---
     const [barcode, setBarcode] = useState('');
@@ -26,13 +32,20 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [costPrice, setCostPrice] = useState<number | string>(0);
     const [sellingPrice, setSellingPrice] = useState<number | string>(0);
     
-    // 분류 (현재는 텍스트 입력, 추후 드롭다운으로 확장 가능)
+    // 분류 (드롭다운 바인딩용)
     const [lCode, setLCode] = useState(''); // 대분류
     const [mCode, setMCode] = useState(''); // 중분류
     const [sCode, setSCode] = useState(''); // 소분류
     
+    // 분류 옵션 목록
+    const [lCats, setLCats] = useState<CategoryOption[]>([]);
+    const [mCats, setMCats] = useState<CategoryOption[]>([]);
+    const [sCats, setSCats] = useState<CategoryOption[]>([]);
+    
     const [comcode, setComcode] = useState('');
-    const [stockQty, setStockQty] = useState<number>(0); // 재고수량
+    const [supplierList, setSupplierList] = useState<Customer[]>([]);
+    
+    const [stockQty, setStockQty] = useState<number>(0);
 
     // Flags
     const [isUse, setIsUse] = useState(true);
@@ -50,19 +63,106 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [searchInput, setSearchInput] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // Helpers for UI
-    const [customerSearch, setCustomerSearch] = useState('');
-    const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+    // --- Data Fetching Logic ---
 
-    // Sync comcode with search input
-    useEffect(() => {
-        if (comcode && customers.length > 0) {
-            const cust = customers.find(c => c.comcode === comcode);
-            if (cust) setCustomerSearch(cust.name);
-        } else if (!comcode) {
-            setCustomerSearch('');
+    // 거래처 목록 로드
+    const loadSuppliers = useCallback(async () => {
+        if (sqlStatus === 'connected') {
+            try {
+                const res = await executeUserQuery('getSuppliers');
+                // SQL 결과 매핑 (comcode, comname -> comcode, name)
+                const mapped = res.map((r: any) => ({
+                    comcode: r.comcode,
+                    name: r.comname
+                }));
+                setSupplierList(mapped);
+            } catch (e) {
+                console.error("Online supplier fetch failed", e);
+                setSupplierList(offlineCustomers);
+            }
+        } else {
+            setSupplierList(offlineCustomers);
         }
-    }, [comcode, customers]);
+    }, [sqlStatus, offlineCustomers]);
+
+    // 대분류 목록 로드
+    const loadLargeCats = useCallback(async () => {
+        if (sqlStatus === 'connected') {
+            try {
+                const res = await executeUserQuery('getLargeCategories');
+                setLCats(res.map((r: any) => ({ code: r.code, name: r.name })));
+            } catch (e) {
+                console.error(e);
+            }
+        } else {
+            const allCats = await getCachedData<Category>('categories');
+            const filtered = allCats.filter(c => c.level === 1).map(c => ({ code: c.code1, name: c.name }));
+            setLCats(filtered);
+        }
+    }, [sqlStatus]);
+
+    // 중분류 목록 로드
+    const loadMediumCats = useCallback(async (largeCode: string) => {
+        if (!largeCode) {
+            setMCats([]);
+            return;
+        }
+        if (sqlStatus === 'connected') {
+            try {
+                const res = await executeUserQuery('getMediumCategories', { lCode: largeCode });
+                setMCats(res.map((r: any) => ({ code: r.code, name: r.name })));
+            } catch (e) { console.error(e); }
+        } else {
+            const allCats = await getCachedData<Category>('categories');
+            const filtered = allCats.filter(c => c.level === 2 && c.code1 === largeCode)
+                                    .map(c => ({ code: c.code2!, name: c.name }));
+            setMCats(filtered);
+        }
+    }, [sqlStatus]);
+
+    // 소분류 목록 로드
+    const loadSmallCats = useCallback(async (largeCode: string, mediumCode: string) => {
+        if (!largeCode || !mediumCode) {
+            setSCats([]);
+            return;
+        }
+        if (sqlStatus === 'connected') {
+            try {
+                const res = await executeUserQuery('getSmallCategories', { lCode: largeCode, mCode: mediumCode });
+                setSCats(res.map((r: any) => ({ code: r.code, name: r.name })));
+            } catch (e) { console.error(e); }
+        } else {
+            const allCats = await getCachedData<Category>('categories');
+            const filtered = allCats.filter(c => c.level === 3 && c.code1 === largeCode && c.code2 === mediumCode)
+                                    .map(c => ({ code: c.code3!, name: c.name }));
+            setSCats(filtered);
+        }
+    }, [sqlStatus]);
+
+    // 초기 데이터 로드 (모달 열릴 때)
+    useEffect(() => {
+        if (isOpen) {
+            loadSuppliers();
+            loadLargeCats();
+        }
+    }, [isOpen, loadSuppliers, loadLargeCats]);
+
+    // 분류 변경 핸들러
+    const handleLargeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value;
+        setLCode(val);
+        setMCode('');
+        setSCode('');
+        setSCats([]); // Clear small cats
+        loadMediumCats(val);
+    };
+
+    const handleMediumChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value;
+        setMCode(val);
+        setSCode('');
+        loadSmallCats(lCode, val);
+    };
 
     // Calculate Margin Rate
     const marginRate = useMemo(() => {
@@ -80,7 +180,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             setCostPrice(0);
             setSellingPrice(0);
             setComcode('');
-            setCustomerSearch('');
             setLCode('');
             setMCode('');
             setSCode('');
@@ -92,8 +191,11 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             setSaleInfoText('할인 정보 없음');
             setBomInfoText('일반 상품');
             setIsEditMode(false);
+            
+            // Reset category lists
+            setMCats([]);
+            setSCats([]);
         } else {
-            // 저장 후 부분 초기화 (바코드/상품명/가격만 리셋)
             setBarcode('');
             setProductName('');
             setCostPrice(0);
@@ -116,9 +218,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 setCostPrice(p.매입가);
                 setSellingPrice(p.판매가);
                 setComcode(p.거래처코드 || '');
-                setLCode(p.대분류코드 || '');
-                setMCode(p.중분류코드 || '');
-                setSCode(p.소분류코드 || '');
                 setStockQty(p.재고수량 || 0);
                 
                 setIsUse(p.사용유무 === '1' || p.사용유무 === 'Y');
@@ -126,7 +225,29 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 setIsPoint(p.고객점수가산 === '1' || p.고객점수가산 === 'Y');
                 setIsStockManaged(p.재고관리여부 === '1' || p.재고관리여부 === 'Y');
                 
-                // 정보 패널 설정
+                // 분류 설정 및 하위 목록 로드
+                const lc = p.대분류코드 || '';
+                const mc = p.중분류코드 || '';
+                const sc = p.소분류코드 || '';
+                
+                setLCode(lc);
+                if (lc) {
+                    await loadMediumCats(lc);
+                    setMCode(mc);
+                    if (mc) {
+                        await loadSmallCats(lc, mc);
+                        setSCode(sc);
+                    } else {
+                        setSCode('');
+                        setSCats([]);
+                    }
+                } else {
+                    setMCode('');
+                    setSCode('');
+                    setMCats([]);
+                    setSCats([]);
+                }
+
                 if (p.행사유무 === 'Y') {
                     setSaleInfoText(`[${p.행사명}] ${p.행사매입가?.toLocaleString()} / ${p.행사판매가?.toLocaleString()}\n(${p.행사시작일}~${p.행사종료일})`);
                 } else {
@@ -150,7 +271,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             console.error(e);
             showToast('상품 조회 중 오류가 발생했습니다.', 'error');
         }
-    }, [resetForm, showToast]);
+    }, [resetForm, showToast, loadMediumCats, loadSmallCats]);
 
     useEffect(() => {
         if (isOpen) {
@@ -177,12 +298,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }, false);
     };
 
-    const handleCustomerSelect = (customer: Customer) => {
-        setComcode(customer.comcode);
-        setCustomerSearch(customer.name);
-        setShowCustomerDropdown(false);
-    };
-
     const handleSave = async () => {
         if (!barcode || !productName) {
             showAlert("바코드와 상품명은 필수 항목입니다.");
@@ -202,7 +317,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             const safeCost = Number(String(costPrice).replace(/,/g, ''));
             const safeSelling = Number(String(sellingPrice).replace(/,/g, ''));
 
-            // Base values mapping
             const contextParams = {
                 money0vat: String(isNaN(safeCost) ? 0 : safeCost),
                 money1: String(isNaN(safeSelling) ? 0 : safeSelling),
@@ -237,7 +351,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             
             showToast(isEditMode ? "상품 정보가 수정되었습니다." : "신규 상품이 등록되었습니다.", "success");
             setSearchInput('');
-            resetForm(true); // 항상 초기화 (이미지 UI에는 초기화 옵션이 없으므로)
+            resetForm(true); 
             setTimeout(() => searchInputRef.current?.focus(), 100);
 
         } catch (e: any) {
@@ -252,13 +366,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     };
 
     if (!isOpen) return null;
-
-    const filteredCustomers = customers.filter(c => 
-        c.name.toLowerCase().includes(customerSearch.toLowerCase()) || 
-        c.comcode.includes(customerSearch)
-    );
-
-    // --- Custom UI Components for Image Matching ---
 
     const CustomToggleButton = ({ label, checked, onChange }: { label: string, checked: boolean, onChange: (v: boolean) => void }) => (
         <button 
@@ -276,9 +383,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         <ActionModal
             isOpen={isOpen}
             onClose={onClose}
-            title={isEditMode ? "상품 수정" : "상품 등록/수정"} // 이미지 헤더에 맞춤
+            title={isEditMode ? "상품 수정" : "상품 등록/수정"} 
             disableBodyScroll={false}
-            // 이미지와 달리 Footer를 Body 내부에 통합하여 커스텀 레이아웃 구현
         >
             <div className="p-3 space-y-3 bg-white min-h-full">
                 {/* 1. Search Bar */}
@@ -289,7 +395,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             type="text"
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            placeholder="바코드 또는 상품명 (길게 눌러 초기화)" // 이미지 플레이스홀더
+                            placeholder="바코드 또는 상품명 (길게 눌러 초기화)"
                             className="w-full h-10 pl-3 pr-10 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
                         />
                         <button type="submit" className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-white bg-blue-600 rounded-r-md hover:bg-blue-700">
@@ -364,50 +470,51 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     </div>
                 </div>
 
-                {/* 4. Row: Classification (Category) */}
+                {/* 4. Row: Classification (Category) Dropdowns */}
                 <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-gray-700">상품 분류</label>
                     <div className="flex gap-1">
-                        <input type="text" value={lCode} onChange={(e) => setLCode(e.target.value)} className="flex-1 h-9 px-2 border border-gray-300 rounded text-sm text-center" placeholder="대분류" />
-                        <input type="text" value={mCode} onChange={(e) => setMCode(e.target.value)} className="flex-1 h-9 px-2 border border-gray-300 rounded text-sm text-center" placeholder="중분류" />
-                        <input type="text" value={sCode} onChange={(e) => setSCode(e.target.value)} className="flex-1 h-9 px-2 border border-gray-300 rounded text-sm text-center" placeholder="소분류" />
-                        <button 
-                            onClick={() => { setLCode(''); setMCode(''); setSCode(''); }}
-                            className="w-16 h-9 bg-white border border-gray-300 rounded text-xs font-bold text-gray-600 flex items-center justify-center gap-1 hover:bg-gray-50"
+                        <select 
+                            value={lCode} 
+                            onChange={handleLargeChange} 
+                            className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500"
                         >
-                            <CheckSquareIcon className="w-3 h-3 text-blue-500" />
-                            초기화
-                        </button>
+                            <option value="">대분류</option>
+                            {lCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                        </select>
+                        <select 
+                            value={mCode} 
+                            onChange={handleMediumChange} 
+                            className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500"
+                        >
+                            <option value="">중분류</option>
+                            {mCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                        </select>
+                        <select 
+                            value={sCode} 
+                            onChange={(e) => setSCode(e.target.value)} 
+                            className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500"
+                        >
+                            <option value="">소분류</option>
+                            {sCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                        </select>
                     </div>
                 </div>
 
-                {/* 5. Row: Customer & Stock */}
+                {/* 5. Row: Customer (Dropdown) & Stock */}
                 <div className="flex gap-2">
-                    <div className="flex-grow relative flex flex-col gap-1">
+                    <div className="flex-grow flex flex-col gap-1">
                         <label className="text-xs font-bold text-gray-700">거래처</label>
-                        <input
-                            type="text"
-                            value={customerSearch}
-                            onChange={(e) => {
-                                setCustomerSearch(e.target.value);
-                                setShowCustomerDropdown(true);
-                            }}
-                            onFocus={() => setShowCustomerDropdown(true)}
-                            onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
+                        <select
+                            value={comcode}
+                            onChange={(e) => setComcode(e.target.value)}
                             className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm bg-white"
-                            placeholder="거래처를 선택하세요"
-                        />
-                        <div className="absolute right-2 bottom-3 pointer-events-none text-gray-400">▼</div>
-                        <SearchDropdown<Customer>
-                            items={filteredCustomers}
-                            renderItem={(c) => (
-                                <div onClick={() => handleCustomerSelect(c)} className="p-3 hover:bg-gray-100 cursor-pointer border-b last:border-none">
-                                    <div className="font-bold text-gray-800">{c.name}</div>
-                                    <div className="text-xs text-gray-500">{c.comcode}</div>
-                                </div>
-                            )}
-                            show={showCustomerDropdown && filteredCustomers.length > 0}
-                        />
+                        >
+                            <option value="">거래처를 선택하세요</option>
+                            {supplierList.map(c => (
+                                <option key={c.comcode} value={c.comcode}>{c.name}</option>
+                            ))}
+                        </select>
                     </div>
                     <div className="w-1/3 flex flex-col gap-1">
                         <label className="text-xs font-bold text-gray-700">재고수량</label>
