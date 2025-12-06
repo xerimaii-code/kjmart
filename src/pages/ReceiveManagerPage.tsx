@@ -8,7 +8,7 @@ import { executeUserQuery } from '../services/sqlService';
 import { 
     SpinnerIcon, CheckSquareIcon, CancelSquareIcon, TrashIcon, 
     BarcodeScannerIcon, ChevronLeftIcon, CheckCircleIcon, SearchIcon,
-    CloudArrowDownIcon
+    CloudArrowDownIcon, SparklesIcon
 } from '../components/Icons';
 import ReceiveItemModal from '../components/ReceiveItemModal';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
@@ -32,6 +32,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
     const [isSending, setIsSending] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
 
     // Edit Mode State
     const [editingBatch, setEditingBatch] = useState<ReceivingBatch | null>(null);
@@ -86,6 +87,49 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         searchProduct(debouncedProductSearch);
     }, [debouncedProductSearch, searchProduct]);
 
+    // --- Smart Sync Logic ---
+    const syncLocalToRemote = useCallback(async (silent = true) => {
+        if (!navigator.onLine) return;
+        
+        try {
+            if (!silent) setIsBackgroundSyncing(true);
+            const localBatches = await receiveDb.getAllBatches();
+            
+            // Only sync drafts that haven't been marked as sent (though technically sent ones are deleted)
+            const drafts = localBatches.filter(b => b.status === 'draft');
+            
+            if (drafts.length === 0) return;
+
+            // Push all local drafts to Firebase
+            // This ensures that even if a previous save failed due to offline, it gets synced now.
+            // addReceivingBatch uses 'set', so it idempotently updates the record.
+            const promises = drafts.map(batch => addReceivingBatch(batch));
+            await Promise.all(promises);
+            
+            if (!silent) showToast("모든 로컬 데이터가 서버와 동기화되었습니다.", 'success');
+        } catch (e) {
+            console.error("Background sync failed", e);
+        } finally {
+            if (!silent) setIsBackgroundSyncing(false);
+        }
+    }, [showToast]);
+
+    // Monitor Online Status for Auto-Sync
+    useEffect(() => {
+        // 1. Try sync on mount (if online) silently
+        syncLocalToRemote(true);
+
+        // 2. Listen for online event
+        const handleOnline = () => {
+            showToast("온라인 상태입니다. 데이터를 동기화합니다.", 'success');
+            syncLocalToRemote(false);
+        };
+
+        window.addEventListener('online', handleOnline);
+        return () => window.removeEventListener('online', handleOnline);
+    }, [syncLocalToRemote, showToast]);
+
+
     // Handle Send
     const handleSend = () => {
         if (selectedBatches.size === 0) {
@@ -109,7 +153,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 let failCount = 0;
 
                 // User-provided SQL for Receiving Registration
-                // Uses device inputs for cost/price/dtcomcode/comcode and parts table for lstmoney0vat
                 const safeInsertQuery = `
                     ; INSERT INTO dbo.dt900_ipgo (
                         day1, dtcomcode, comcode, comname, barcode, descr, 
@@ -132,7 +175,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 `;
 
                 try {
-                    // Generate one unified timestamp for the entire batch transmission
                     const now = new Date();
                     const hh = now.getHours().toString().padStart(2, '0');
                     const mm = now.getMinutes().toString().padStart(2, '0');
@@ -145,23 +187,26 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 const params = {
                                     date: batch.date,
                                     time: unifiedTime,
-                                    dtcomcode: batch.supplier.comcode, // dtcomcode (selected supplier)
-                                    comname: batch.supplier.name,      // comname (selected supplier name)
+                                    dtcomcode: batch.supplier.comcode,
+                                    comname: batch.supplier.name,
                                     barcode: item.barcode,
                                     qty: item.quantity,
-                                    cost: item.costPrice, // Device input cost
-                                    price: item.sellingPrice, // Device input price
+                                    cost: item.costPrice,
+                                    price: item.sellingPrice,
                                     item_name: item.name
                                 };
-                                
                                 await executeUserQuery('입고등록_Direct', params, safeInsertQuery);
                             }
 
                             // 1. Update Firebase first to keep history (mark as sent)
                             const updatedBatch: ReceivingBatch = { ...batch, status: 'sent', sentAt: new Date().toISOString() };
-                            await addReceivingBatch(updatedBatch);
+                            try {
+                                await addReceivingBatch(updatedBatch);
+                            } catch (error) {
+                                console.warn("Firebase update failed during send:", error);
+                            }
                             
-                            // 2. Delete from Local App Storage upon success
+                            // 2. Delete from Local App Storage upon success (Space Cleanup)
                             await receiveDb.deleteBatch(batch.id);
                             
                             successCount++;
@@ -172,7 +217,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             throw new Error(`'${batch.supplier.name}' 전송 중 오류: ${err.message}`);
                         }
                     }
-                    showToast(`${successCount}건 전송 완료 (앱에서 삭제됨)`, 'success');
+                    showToast(`${successCount}건 전송 및 기기 삭제 완료`, 'success');
                     setSelectedBatches(new Set());
                     await loadBatches();
                 } catch (e: any) {
@@ -211,14 +256,10 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         const toImport = remoteBatches.filter(b => selectedRemoteBatches.has(b.id));
         try {
             for (const batch of toImport) {
-                // When importing back to app, reset status to 'draft' or keep 'sent'? 
-                // Usually if recovering to edit/resend, maybe draft. 
-                // But let's keep original status or force draft if intended for correction.
-                // Assuming recovery for re-send or check, let's just save as is. 
-                // User can edit it.
+                // When importing, we save it as is. If it was sent, it stays sent.
                 await receiveDb.saveOrUpdateBatch(batch);
             }
-            showToast(`${toImport.length}건을 불러왔습니다.`, 'success');
+            showToast(`${toImport.length}건을 기기로 불러왔습니다.`, 'success');
             setIsLoadModalOpen(false);
             loadBatches();
         } catch (e) {
@@ -244,7 +285,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const handleDeleteSelected = () => {
         if (selectedBatches.size === 0) return;
         showAlert(
-            `선택한 ${selectedBatches.size}건의 입고 내역을 삭제하시겠습니까?`,
+            `선택한 ${selectedBatches.size}건의 입고 내역을 기기에서 삭제하시겠습니까?`,
             async () => {
                 try {
                     for (const id of selectedBatches) {
@@ -320,13 +361,22 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         };
 
         try {
+            // 1. Save to Local IndexedDB (Primary Storage - Always works offline)
             await receiveDb.saveOrUpdateBatch(batchToSave);
-            // Also save to Firebase as draft immediately for backup
-            await addReceivingBatch(batchToSave); 
+            
+            // 2. Try to save to Firebase as backup (Secondary - Smart Sync)
+            try {
+                await addReceivingBatch(batchToSave);
+            } catch (firebaseErr) {
+                console.warn("Failed to backup batch to Firebase (Offline):", firebaseErr);
+                // No error shown to user, will sync later via useEffect
+            }
+
             showToast('저장되었습니다.', 'success');
             setMode('list');
-        } catch (e) {
-            showAlert('저장에 실패했습니다.');
+        } catch (e: any) {
+            console.error("Save Error:", e);
+            showAlert(`저장에 실패했습니다. (${e.message})`);
         }
     };
 
@@ -334,7 +384,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         openScanner('modal', (code) => {
             const product = products.find(p => p.barcode === code);
             if (product) {
-                // When scanned, source is 'scan', enabling "Scan Next"
                 setAddItemModalProps({ isOpen: true, product, source: 'scan' });
             } else {
                 showToast('등록되지 않은 상품입니다.', 'error');
@@ -368,6 +417,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         )}
                     </div>
                     <div className="flex gap-2">
+                        {isBackgroundSyncing && <SpinnerIcon className="w-5 h-5 text-blue-500 animate-spin self-center" />}
                         <button onClick={() => setIsLoadModalOpen(true)} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm active:scale-95 flex items-center gap-1 border border-gray-300 hover:bg-gray-200">
                             <CloudArrowDownIcon className="w-4 h-4" /> 서버 불러오기
                         </button>
@@ -378,7 +428,10 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
                 <div className="flex-grow overflow-y-auto p-2 space-y-2">
                     {batches.length === 0 ? (
-                        <div className="text-center text-gray-400 mt-10">입고 내역이 없습니다.</div>
+                        <div className="text-center text-gray-400 mt-10">
+                            <p>기기에 저장된 입고 내역이 없습니다.</p>
+                            <p className="text-xs mt-1">서버에서 불러오거나 신규 등록하세요.</p>
+                        </div>
                     ) : (
                         batches.map(batch => (
                             <div key={batch.id} className={`bg-white p-3 rounded-xl border shadow-sm flex items-center gap-3 ${selectedBatches.has(batch.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}>
@@ -388,9 +441,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 <div className="flex-grow min-w-0" onClick={() => editBatch(batch)}>
                                     <div className="flex justify-between items-start">
                                         <h3 className="font-bold text-gray-800 truncate">{batch.supplier.name}</h3>
-                                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${batch.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                            {batch.status === 'sent' ? '전송됨' : '작성중'}
-                                        </span>
+                                        <div className="flex items-center gap-1">
+                                            {batch.status === 'draft' && !isBackgroundSyncing && <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded">미전송</span>}
+                                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${batch.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                {batch.status === 'sent' ? '전송됨' : '작성중'}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div className="text-xs text-gray-500 mt-1 flex gap-2">
                                         <span>{batch.date}</span>
@@ -468,7 +524,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 disabled={selectedRemoteBatches.size === 0}
                                 className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg shadow-md active:scale-95 disabled:bg-gray-400"
                             >
-                                {selectedRemoteBatches.size}건 가져오기
+                                {selectedRemoteBatches.size}건 기기로 가져오기
                             </button>
                         </div>
                     </div>
