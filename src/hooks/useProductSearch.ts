@@ -15,7 +15,7 @@ interface UseProductSearchReturn {
     clear: () => void;
 }
 
-const extractParamsForQuery = (queryText: string, sourceParams: Record<string, any>) => {
+export const extractParamsForQuery = (queryText: string, sourceParams: Record<string, any>) => {
     const matches = Array.from(queryText.matchAll(/@([a-zA-Z0-9_가-힣]+)/g), m => m[1]);
     const uniqueVars = [...new Set(matches)];
     
