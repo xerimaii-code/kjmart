@@ -3,17 +3,19 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useDataState, useAlert, useMiscUI, useScanner, useModals } from '../context/AppContext';
 import { ReceivingBatch, ReceivingItem, Product, Customer } from '../types';
 import * as receiveDb from '../services/receiveDbService';
-import { addReceivingBatch } from '../services/dbService';
+import { addReceivingBatch, getReceivingBatchesByDateRange } from '../services/dbService';
 import { executeUserQuery } from '../services/sqlService';
 import { 
     SpinnerIcon, CheckSquareIcon, CancelSquareIcon, TrashIcon, 
-    BarcodeScannerIcon, ChevronLeftIcon, CheckCircleIcon, SearchIcon
+    BarcodeScannerIcon, ChevronLeftIcon, CheckCircleIcon, SearchIcon,
+    CloudArrowDownIcon
 } from '../components/Icons';
 import ReceiveItemModal from '../components/ReceiveItemModal';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
 import SearchDropdown from '../components/SearchDropdown';
 import { useProductSearch } from '../hooks/useProductSearch';
 import { useDebounce } from '../hooks/useDebounce';
+import ActionModal from '../components/ActionModal';
 
 const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     // Contexts
@@ -41,7 +43,18 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     // Items editing
     const [currentItems, setCurrentItems] = useState<ReceivingItem[]>([]);
-    const [addItemModalProps, setAddItemModalProps] = useState<{ isOpen: boolean, product: Product | null }>({ isOpen: false, product: null });
+    const [addItemModalProps, setAddItemModalProps] = useState<{ 
+        isOpen: boolean; 
+        product: Product | null;
+        source: 'scan' | 'search'; // 'scan' | 'search' to toggle buttons
+    }>({ isOpen: false, product: null, source: 'search' });
+
+    // Firebase Load Modal State
+    const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
+    const [loadDate, setLoadDate] = useState(new Date().toISOString().slice(0, 10));
+    const [remoteBatches, setRemoteBatches] = useState<ReceivingBatch[]>([]);
+    const [isLoadingRemote, setIsLoadingRemote] = useState(false);
+    const [selectedRemoteBatches, setSelectedRemoteBatches] = useState<Set<number>>(new Set());
 
     // Search for adding items
     const { searchTerm: productSearch, setSearchTerm: setProductSearch, results: productSearchResults, search: searchProduct } = useProductSearch('newOrder');
@@ -95,8 +108,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 let successCount = 0;
                 let failCount = 0;
 
-                // Safe Insert Query with Semicolon to prevent 'Incorrect syntax near with' error
-                // This ensures the statement is properly terminated before the WITH clause if concatenated.
+                // User-provided SQL for Receiving Registration
+                // Uses device inputs for cost/price/dtcomcode and parts table for comcode/lstmoney0vat
                 const safeInsertQuery = `
                     ; INSERT INTO dbo.dt900_ipgo (
                         day1, dtcomcode, comcode, comname, barcode, descr, 
@@ -104,7 +117,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     )
                     SELECT
                         LEFT(@date + ':' + @time, 20),
-                        LEFT(@comcode, 10),
+                        LEFT(@dtcomcode, 10),
                         LEFT(ISNULL(p.comcode, ''), 10),
                         LEFT(ISNULL(c.comname, ''), 20),
                         LEFT(@barcode, 20),
@@ -120,11 +133,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 `;
 
                 try {
+                    // Generate one unified timestamp for the entire batch transmission
                     const now = new Date();
                     const hh = now.getHours().toString().padStart(2, '0');
                     const mm = now.getMinutes().toString().padStart(2, '0');
-                    const mmm = now.getMilliseconds().toString().padStart(3, '0');
-                    const unifiedTime = `${hh}:${mm}:${mmm}`;
+                    const ss = now.getSeconds().toString().padStart(2, '0');
+                    const unifiedTime = `${hh}:${mm}:${ss}`;
 
                     for (const batch of batchesToSend) {
                         try {
@@ -132,21 +146,23 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 const params = {
                                     date: batch.date,
                                     time: unifiedTime,
-                                    comcode: batch.supplier.comcode,
+                                    dtcomcode: batch.supplier.comcode, // dtcomcode (selected supplier)
                                     barcode: item.barcode,
                                     qty: item.quantity,
-                                    cost: item.costPrice,
-                                    price: item.sellingPrice,
+                                    cost: item.costPrice, // Device input cost
+                                    price: item.sellingPrice, // Device input price
                                     item_name: item.name
                                 };
-                                // Pass the safe hardcoded query directly
+                                
                                 await executeUserQuery('입고등록_Direct', params, safeInsertQuery);
                             }
 
+                            // 1. Update Firebase first to keep history (mark as sent)
                             const updatedBatch: ReceivingBatch = { ...batch, status: 'sent', sentAt: new Date().toISOString() };
-                            
-                            await receiveDb.saveOrUpdateBatch(updatedBatch);
                             await addReceivingBatch(updatedBatch);
+                            
+                            // 2. Delete from Local App Storage upon success
+                            await receiveDb.deleteBatch(batch.id);
                             
                             successCount++;
 
@@ -156,7 +172,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             throw new Error(`'${batch.supplier.name}' 전송 중 오류: ${err.message}`);
                         }
                     }
-                    showToast(`${successCount}건 전송 완료`, 'success');
+                    showToast(`${successCount}건 전송 완료 (앱에서 삭제됨)`, 'success');
                     setSelectedBatches(new Set());
                     await loadBatches();
                 } catch (e: any) {
@@ -168,6 +184,53 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             '전송 (SQL)',
             'bg-blue-600 hover:bg-blue-700'
         );
+    };
+
+    // Firebase Load Handlers
+    const handleFetchRemoteBatches = async () => {
+        setIsLoadingRemote(true);
+        setRemoteBatches([]);
+        setSelectedRemoteBatches(new Set());
+        try {
+            const data = await getReceivingBatchesByDateRange(loadDate, loadDate);
+            setRemoteBatches(data);
+            if (data.length === 0) {
+                showToast('해당 날짜에 저장된 입고 내역이 없습니다.', 'error');
+            }
+        } catch (e) {
+            console.error(e);
+            showAlert('서버에서 데이터를 불러오는데 실패했습니다.');
+        } finally {
+            setIsLoadingRemote(false);
+        }
+    };
+
+    const handleImportBatches = async () => {
+        if (selectedRemoteBatches.size === 0) return;
+        
+        const toImport = remoteBatches.filter(b => selectedRemoteBatches.has(b.id));
+        try {
+            for (const batch of toImport) {
+                // When importing back to app, reset status to 'draft' or keep 'sent'? 
+                // Usually if recovering to edit/resend, maybe draft. 
+                // But let's keep original status or force draft if intended for correction.
+                // Assuming recovery for re-send or check, let's just save as is. 
+                // User can edit it.
+                await receiveDb.saveOrUpdateBatch(batch);
+            }
+            showToast(`${toImport.length}건을 불러왔습니다.`, 'success');
+            setIsLoadModalOpen(false);
+            loadBatches();
+        } catch (e) {
+            showAlert('저장 중 오류가 발생했습니다.');
+        }
+    };
+
+    const toggleRemoteSelect = (id: number) => {
+        const newSet = new Set(selectedRemoteBatches);
+        if (newSet.has(id)) newSet.delete(id);
+        else newSet.add(id);
+        setSelectedRemoteBatches(newSet);
     };
 
     // Helpers
@@ -228,7 +291,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const handleAddItem = (itemData: Omit<ReceivingItem, 'uniqueId'>) => {
         const newItem: ReceivingItem = { ...itemData, uniqueId: Date.now() + Math.random() };
         setCurrentItems(prev => [...prev, newItem]);
-        setAddItemModalProps({ isOpen: false, product: null });
+        setAddItemModalProps({ isOpen: false, product: null, source: 'search' });
         setProductSearch('');
     };
 
@@ -258,6 +321,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
         try {
             await receiveDb.saveOrUpdateBatch(batchToSave);
+            // Also save to Firebase as draft immediately for backup
+            await addReceivingBatch(batchToSave); 
             showToast('저장되었습니다.', 'success');
             setMode('list');
         } catch (e) {
@@ -269,7 +334,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         openScanner('modal', (code) => {
             const product = products.find(p => p.barcode === code);
             if (product) {
-                setAddItemModalProps({ isOpen: true, product });
+                // When scanned, source is 'scan', enabling "Scan Next"
+                setAddItemModalProps({ isOpen: true, product, source: 'scan' });
             } else {
                 showToast('등록되지 않은 상품입니다.', 'error');
             }
@@ -302,6 +368,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         )}
                     </div>
                     <div className="flex gap-2">
+                        <button onClick={() => setIsLoadModalOpen(true)} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm active:scale-95 flex items-center gap-1 border border-gray-300 hover:bg-gray-200">
+                            <CloudArrowDownIcon className="w-4 h-4" /> 서버 불러오기
+                        </button>
                         <button onClick={startNewBatch} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm active:scale-95">
                             + 신규 등록
                         </button>
@@ -345,6 +414,65 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         </button>
                     </div>
                 )}
+
+                {/* Firebase Load Modal */}
+                <ActionModal
+                    isOpen={isLoadModalOpen}
+                    onClose={() => setIsLoadModalOpen(false)}
+                    title="서버 데이터 불러오기"
+                    disableBodyScroll
+                >
+                    <div className="flex flex-col h-full bg-gray-50">
+                        <div className="p-3 bg-white border-b flex gap-2 items-center">
+                            <input 
+                                type="date" 
+                                value={loadDate} 
+                                onChange={e => setLoadDate(e.target.value)} 
+                                className="flex-grow border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-700"
+                            />
+                            <button onClick={handleFetchRemoteBatches} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm shadow active:scale-95 whitespace-nowrap">
+                                조회
+                            </button>
+                        </div>
+                        <div className="flex-grow overflow-y-auto p-2">
+                            {isLoadingRemote ? (
+                                <div className="flex justify-center items-center h-40"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>
+                            ) : remoteBatches.length === 0 ? (
+                                <div className="text-center text-gray-400 mt-10">조회된 데이터가 없습니다.</div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {remoteBatches.map(batch => (
+                                        <div key={batch.id} className={`bg-white p-3 rounded-xl border shadow-sm flex items-center gap-3 cursor-pointer ${selectedRemoteBatches.has(batch.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`} onClick={() => toggleRemoteSelect(batch.id)}>
+                                            <div className="text-gray-400">
+                                                {selectedRemoteBatches.has(batch.id) ? <CheckSquareIcon className="w-6 h-6 text-blue-600" /> : <CancelSquareIcon className="w-6 h-6" />}
+                                            </div>
+                                            <div className="flex-grow">
+                                                <div className="flex justify-between">
+                                                    <h3 className="font-bold text-gray-800">{batch.supplier.name}</h3>
+                                                    <span className={`text-xs px-1.5 py-0.5 rounded ${batch.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                        {batch.status === 'sent' ? '전송됨' : '작성중'}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xs text-gray-500 mt-1">
+                                                    {batch.itemCount}품목 / {batch.totalAmount.toLocaleString()}원
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-3 bg-white border-t">
+                            <button 
+                                onClick={handleImportBatches} 
+                                disabled={selectedRemoteBatches.size === 0}
+                                className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg shadow-md active:scale-95 disabled:bg-gray-400"
+                            >
+                                {selectedRemoteBatches.size}건 가져오기
+                            </button>
+                        </div>
+                    </div>
+                </ActionModal>
             </div>
         );
     }
@@ -418,7 +546,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 <ProductSearchResultItem 
                                     product={p} 
                                     onClick={(prod) => {
-                                        setAddItemModalProps({ isOpen: true, product: prod });
+                                        setAddItemModalProps({ isOpen: true, product: prod, source: 'search' });
                                         setShowProductDropdown(false);
                                     }} 
                                 />
@@ -481,10 +609,11 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     currentItems={currentItems}
                     onClose={() => setAddItemModalProps({ ...addItemModalProps, isOpen: false })}
                     onAdd={handleAddItem}
-                    onScanNext={() => {
-                        // Re-open scanner after adding
-                        handleScan();
-                    }}
+                    onScanNext={
+                        addItemModalProps.source === 'scan' 
+                        ? () => { handleScan(); } 
+                        : undefined
+                    }
                 />
             )}
         </div>

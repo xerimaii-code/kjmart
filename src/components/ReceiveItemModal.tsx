@@ -172,14 +172,23 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
                 
                 <div className="bg-gray-50 px-3 py-3 rounded-b-xl border-t border-gray-100">
                     <div className="space-y-2">
-                         <button onMouseDown={(e) => e.preventDefault()} onClick={handleAddAndScan} disabled={!isQuantityValid} className="w-full text-white px-4 h-12 flex items-center justify-center rounded-lg font-bold text-lg bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-md shadow-blue-500/30 gap-2">
-                            <BarcodeScannerIcon className="w-5 h-5" />
-                            추가 후 계속 스캔
-                        </button>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-2 h-10 flex items-center justify-center rounded-lg font-bold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">스캔 종료</button>
-                            <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="px-2 h-10 flex items-center justify-center rounded-lg font-bold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95 disabled:bg-gray-200 disabled:text-gray-400">추가 후 종료</button>
-                        </div>
+                        {onScanNext ? (
+                            <>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleAddAndScan} disabled={!isQuantityValid} className="w-full text-white px-4 h-12 flex items-center justify-center rounded-lg font-bold text-lg bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-md shadow-blue-500/30 gap-2">
+                                    <BarcodeScannerIcon className="w-5 h-5" />
+                                    추가 후 계속 스캔
+                                </button>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-2 h-10 flex items-center justify-center rounded-lg font-bold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-sm active:scale-95">스캔 종료</button>
+                                    <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="px-2 h-10 flex items-center justify-center rounded-lg font-bold text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm active:scale-95 disabled:bg-gray-200 disabled:text-gray-400">추가 후 종료</button>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={onClose} className="px-2 h-11 flex items-center justify-center rounded-lg font-bold text-gray-600 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-base active:scale-95">취소</button>
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleAdd} disabled={!isQuantityValid} className="px-2 h-11 flex items-center justify-center rounded-lg font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base active:scale-95 shadow-md disabled:bg-gray-400 disabled:cursor-not-allowed">추가</button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
