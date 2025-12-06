@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Customer, Product, ReceivingItem, ReceivingBatch, ReceivingDraft } from '../types';
 import { useDataState, useScanner, useAlert, useModals, useMiscUI } from '../context/AppContext';
-import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon } from '../components/Icons';
+import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon, PencilSquareIcon } from '../components/Icons';
 import { useDebounce } from '../hooks/useDebounce';
 import { useProductSearch } from '../hooks/useProductSearch';
 import SearchDropdown from '../components/SearchDropdown';
@@ -18,17 +18,20 @@ const DRAFT_KEY = 'receiving-entry-draft';
 const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> = ({ item, onRemove }) => (
     <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-3 items-center p-2 bg-white rounded-lg shadow-sm border text-xs">
         <div className="flex flex-col min-w-0">
-            <p className="font-bold text-gray-800 truncate text-sm">{item.name || '(미등록 상품)'}</p>
+            <div className="flex items-center gap-1">
+                <p className="font-bold text-gray-800 truncate text-sm">{item.name || '(미등록 상품)'}</p>
+                <span className="bg-yellow-100 text-yellow-700 text-[10px] px-1.5 py-0.5 rounded font-bold whitespace-nowrap">신규</span>
+            </div>
             <p className="text-gray-400 font-mono">{item.barcode}</p>
         </div>
         <div className="text-right">
-            <p className="font-mono">{item.costPrice.toLocaleString()}</p>
+            <p className="font-mono">{(item.costPrice || 0).toLocaleString()}</p>
         </div>
         <div className="text-right">
-            <p className="font-mono text-gray-600">{item.sellingPrice.toLocaleString()}</p>
+            <p className="font-mono text-gray-600">{(item.sellingPrice || 0).toLocaleString()}</p>
         </div>
         <p className={`text-center font-bold text-base ${item.quantity < 0 ? 'text-red-600' : 'text-blue-600'}`}>{item.quantity}</p>
-        <p className="text-right font-mono font-semibold">{(item.costPrice * item.quantity).toLocaleString()}</p>
+        <p className="text-right font-mono font-semibold">{((item.costPrice || 0) * item.quantity).toLocaleString()}</p>
         <button onClick={onRemove} className="p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50">
             <TrashIcon className="w-4 h-4" />
         </button>
@@ -59,8 +62,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
     // Safe access to customers - Create a copy before sorting to avoid mutating state
+    // Also handle potential undefined 'name' to prevent crashes during sort
     const sortedCustomers = useMemo(() => {
-        return [...(customers || [])].sort((a, b) => a.name.localeCompare(b.name));
+        return [...(customers || [])].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }, [customers]);
 
     useEffect(() => {
@@ -111,6 +115,19 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setSearchTerm('');
     };
 
+    const handleReset = () => {
+        showAlert(
+            "작성 중인 내용을 초기화하시겠습니까?\n임시 저장된 내역도 삭제됩니다.",
+            () => {
+                removeDraft();
+                resetEntryForm();
+                showToast("초기화되었습니다.", 'success');
+            },
+            '초기화',
+            'bg-red-500 hover:bg-red-600 focus:ring-red-500'
+        );
+    };
+
     const handleAddItem = (itemData: Omit<ReceivingItem, 'uniqueId'>) => {
         if (itemData.quantity === 0) return;
         const newItem: ReceivingItem = {
@@ -136,7 +153,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         
         setIsSavingBatch(true);
         try {
-            const totalAmount = currentItems.reduce((sum, item) => sum + item.costPrice * item.quantity, 0);
+            const totalAmount = currentItems.reduce((sum, item) => sum + (item.costPrice || 0) * item.quantity, 0);
             const newBatch: ReceivingBatch = {
                 id: Date.now(),
                 date: currentDate,
@@ -191,6 +208,20 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }, false);
     };
     
+    const handleContinueBatch = (batch: ReceivingBatch) => {
+        showAlert(
+            "이 입고 내역을 불러와서 계속 작성하시겠습니까?\n현재 작성 중이던 내용은 사라집니다.",
+            () => {
+                setCurrentDate(batch.date);
+                setSelectedSupplier(batch.supplier);
+                setCurrentItems(batch.items);
+                // Draft status removal is handled when saving the new edits
+                setView('entry');
+            },
+            '불러오기'
+        );
+    };
+
     const groupedBatches = useMemo(() => {
         const groups: Record<string, ReceivingBatch[]> = {};
         batches.forEach(batch => {
@@ -285,6 +316,17 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                             </div>
                                             {expandedBatch === batch.id && (
                                                 <div className="mt-3 pl-8 space-y-2">
+                                                    {batch.status === 'draft' && (
+                                                        <div className="mb-2">
+                                                            <button 
+                                                                onClick={() => handleContinueBatch(batch)}
+                                                                className="w-full py-2 bg-blue-50 text-blue-600 font-bold rounded-lg text-sm border border-blue-100 hover:bg-blue-100 flex items-center justify-center gap-2"
+                                                            >
+                                                                <PencilSquareIcon className="w-4 h-4" />
+                                                                이어서 등록
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                     {batch.items.map(item => <ReceivingItemRow key={item.uniqueId} item={item} onRemove={() => {}} />)}
                                                 </div>
                                             )}
@@ -341,8 +383,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             />
                             <SearchDropdown items={results} renderItem={p => <ProductSearchResultItem product={p} onClick={handleProductSelect} />} show={showProductDropdown && !!debouncedSearchTerm} />
                         </div>
-                        <button onClick={handleScan} className="w-11 h-11 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold hover:bg-blue-700 transition active:scale-95 shadow shadow-blue-500/30 flex-shrink-0">
+                        <button onClick={handleScan} className="w-24 h-11 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold hover:bg-blue-700 transition active:scale-95 shadow shadow-blue-500/30 flex-shrink-0 gap-1">
                             <BarcodeScannerIcon className="w-6 h-6" />
+                            <span>스캔</span>
                         </button>
                     </div>
                 </div>
@@ -369,15 +412,16 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 )}
             </div>
 
-            <div className="flex-shrink-0 p-3 bg-white border-t safe-area-pb grid grid-cols-10 gap-3 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
-                <button onClick={handleSaveBatch} disabled={isSavingBatch} className="col-span-7 h-14 bg-blue-600 text-white font-bold rounded-lg text-lg flex items-center justify-center disabled:bg-gray-400 transition active:scale-95 shadow-md shadow-blue-500/30">
-                    {isSavingBatch ? <SpinnerIcon className="w-6 h-6" /> : '현재 입고 저장'}
+            <div className="flex-shrink-0 p-3 bg-white border-t safe-area-pb grid grid-cols-4 gap-2 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+                <button onClick={handleReset} className="h-14 bg-gray-200 text-gray-700 font-bold rounded-lg flex items-center justify-center transition active:scale-95">
+                    초기화
                 </button>
-                <button onClick={() => setView('list')} className="col-span-3 h-14 bg-gray-600 text-white font-bold rounded-lg relative transition active:scale-95 shadow-md">
-                    <div className="flex flex-col items-center justify-center">
-                        <span className="text-sm">목록</span>
-                        <span className="text-xs">& 전송</span>
-                    </div>
+                <button onClick={handleSaveBatch} disabled={isSavingBatch} className="col-span-2 h-14 bg-blue-600 text-white font-bold rounded-lg text-lg flex items-center justify-center disabled:bg-gray-400 transition active:scale-95 shadow-md shadow-blue-500/30">
+                    {isSavingBatch ? <SpinnerIcon className="w-6 h-6" /> : '입고 저장'}
+                </button>
+                <button onClick={() => setView('list')} className="h-14 bg-gray-600 text-white font-bold rounded-lg relative transition active:scale-95 shadow-md flex flex-col items-center justify-center">
+                    <span className="text-sm">목록</span>
+                    <span className="text-[10px]">& 전송</span>
                     {draftCount > 0 && (
                         <div className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center border-2 border-white">
                             {draftCount}
