@@ -8,6 +8,7 @@ import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon 
 import { Customer, Category } from '../types';
 import { getCachedData } from '../services/cacheDbService';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
+import ProductSelectionModal from '../components/ProductSelectionModal';
 
 interface ProductEditPageProps {
     isOpen: boolean;
@@ -33,12 +34,11 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [costPrice, setCostPrice] = useState<number | string>(0);
     const [sellingPrice, setSellingPrice] = useState<number | string>(0);
     
-    // 분류 (드롭다운 바인딩용)
-    const [lCode, setLCode] = useState(''); // 대분류
-    const [mCode, setMCode] = useState(''); // 중분류
-    const [sCode, setSCode] = useState(''); // 소분류
+    // 분류
+    const [lCode, setLCode] = useState('');
+    const [mCode, setMCode] = useState('');
+    const [sCode, setSCode] = useState('');
     
-    // 분류 옵션 목록
     const [lCats, setLCats] = useState<CategoryOption[]>([]);
     const [mCats, setMCats] = useState<CategoryOption[]>([]);
     const [sCats, setSCats] = useState<CategoryOption[]>([]);
@@ -54,8 +54,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [isPoint, setIsPoint] = useState(true);
     const [isStockManaged, setIsStockManaged] = useState(true);
     
-    // UI Logic Flags
-    const [isCategoryFixed, setIsCategoryFixed] = useState(false); // 분류 고정 체크박스
+    // UI Logic
+    const [isCategoryFixed, setIsCategoryFixed] = useState(false);
 
     // Info Panels
     const [saleInfoText, setSaleInfoText] = useState('할인 정보 없음');
@@ -67,18 +67,28 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [searchInput, setSearchInput] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
     
-    // Keyboard Adjustment Ref
+    // Selection Modal
+    const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+
+    // Keyboard Adjustment
     const modalContainerRef = useRef<HTMLDivElement>(null);
     useAdjustForKeyboard(modalContainerRef, isOpen);
 
-    // --- Data Fetching Logic ---
+    // --- Format Helper ---
+    const formatBarcodeDisplay = (code: string) => {
+        if (!code) return '';
+        if (code.length === 13) {
+            return `${code.slice(0, 3)} ${code.slice(3, 7)} ${code.slice(7)}`;
+        }
+        return code;
+    };
 
-    // 거래처 목록 로드
+    // --- Data Fetching ---
     const loadSuppliers = useCallback(async () => {
         if (sqlStatus === 'connected') {
             try {
                 const res = await executeUserQuery('getSuppliers');
-                // SQL 결과 매핑 (comcode, comname -> comcode, name)
                 const mapped = res.map((r: any) => ({
                     comcode: r.comcode,
                     name: r.comname
@@ -93,7 +103,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
     }, [sqlStatus, offlineCustomers]);
 
-    // 대분류 목록 로드
     const loadLargeCats = useCallback(async () => {
         if (sqlStatus === 'connected') {
             try {
@@ -109,11 +118,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
     }, [sqlStatus]);
 
-    // 중분류 목록 로드
     const loadMediumCats = useCallback(async (largeCode: string) => {
         if (!largeCode) {
-            setMCats([]);
-            return;
+            setMCats([]); return;
         }
         if (sqlStatus === 'connected') {
             try {
@@ -128,11 +135,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
     }, [sqlStatus]);
 
-    // 소분류 목록 로드
     const loadSmallCats = useCallback(async (largeCode: string, mediumCode: string) => {
         if (!largeCode || !mediumCode) {
-            setSCats([]);
-            return;
+            setSCats([]); return;
         }
         if (sqlStatus === 'connected') {
             try {
@@ -147,7 +152,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
     }, [sqlStatus]);
 
-    // 초기 데이터 로드 (모달 열릴 때)
     useEffect(() => {
         if (isOpen) {
             loadSuppliers();
@@ -155,24 +159,18 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
     }, [isOpen, loadSuppliers, loadLargeCats]);
 
-    // 분류 변경 핸들러
     const handleLargeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value;
-        setLCode(val);
-        setMCode('');
-        setSCode('');
-        setSCats([]); // Clear small cats
+        setLCode(val); setMCode(''); setSCode(''); setSCats([]);
         loadMediumCats(val);
     };
 
     const handleMediumChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value;
-        setMCode(val);
-        setSCode('');
+        setMCode(val); setSCode('');
         loadSmallCats(lCode, val);
     };
 
-    // Calculate Margin Rate
     const marginRate = useMemo(() => {
         const cost = Number(String(costPrice).replace(/,/g, ''));
         const selling = Number(String(sellingPrice).replace(/,/g, ''));
@@ -182,136 +180,116 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
     const resetForm = useCallback((full: boolean = true) => {
         if (full) {
-            setBarcode('');
-            setProductName('');
-            setSpec('');
-            setCostPrice(0);
-            setSellingPrice(0);
-            setComcode('');
-            setLCode('');
-            setMCode('');
-            setSCode('');
+            setBarcode(''); setProductName(''); setSpec('');
+            setCostPrice(0); setSellingPrice(0);
+            setComcode(''); setLCode(''); setMCode(''); setSCode('');
             setStockQty(0);
-            setIsUse(true);
-            setIsTaxable(true);
-            setIsPoint(true);
-            setIsStockManaged(true);
-            setSaleInfoText('할인 정보 없음');
-            setBomInfoText('일반 상품');
+            setIsUse(true); setIsTaxable(true); setIsPoint(true); setIsStockManaged(true);
+            setSaleInfoText('할인 정보 없음'); setBomInfoText('일반 상품');
             setIsEditMode(false);
-            
-            // Reset category lists
-            setMCats([]);
-            setSCats([]);
+            setMCats([]); setSCats([]);
         } else {
-            // 부분 초기화 (분류고정 시): 상품 기본 정보만 초기화
-            setBarcode('');
-            setProductName('');
-            setSpec('');
-            setCostPrice(0);
-            setSellingPrice(0);
-            setStockQty(0);
+            setBarcode(''); setProductName(''); setSpec('');
+            setCostPrice(0); setSellingPrice(0); setStockQty(0);
             setSaleInfoText('할인 정보 없음');
             setIsEditMode(false);
-            // 거래처, 분류, 플래그는 유지
         }
     }, []);
 
-    const loadProduct = useCallback(async (code: string) => {
+    const populateProductData = useCallback(async (p: any) => {
+        setBarcode(p.바코드);
+        setProductName(p.상품명);
+        setSpec(p.규격 || '');
+        setCostPrice(p.매입가);
+        setSellingPrice(p.판매가);
+        setComcode(p.거래처코드 || '');
+        setStockQty(p.재고수량 || 0);
+        
+        setIsUse(p.사용유무 === '1' || p.사용유무 === 'Y');
+        setIsTaxable(p.과세여부 === '1' || p.과세여부 === 'Y');
+        setIsPoint(p.고객점수가산 === '1' || p.고객점수가산 === 'Y');
+        setIsStockManaged(p.재고관리여부 === '1' || p.재고관리여부 === 'Y');
+        
+        const lc = p.대분류코드 || '';
+        const mc = p.중분류코드 || '';
+        const sc = p.소분류코드 || '';
+        
+        setLCode(lc);
+        if (lc) {
+            await loadMediumCats(lc);
+            setMCode(mc);
+            if (mc) {
+                await loadSmallCats(lc, mc);
+                setSCode(sc);
+            } else {
+                setSCode(''); setSCats([]);
+            }
+        } else {
+            setMCode(''); setSCode(''); setMCats([]); setSCats([]);
+        }
+
+        if (p.행사유무 === 'Y') {
+            setSaleInfoText(`[${p.행사명}] ${p.행사매입가?.toLocaleString()} / ${p.행사판매가?.toLocaleString()}\n(${p.행사시작일}~${p.행사종료일})`);
+        } else {
+            setSaleInfoText('할인 정보 없음');
+        }
+        setBomInfoText(p.BOM여부 || '일반 상품');
+
+        setIsEditMode(true);
+        showToast('상품 정보를 불러왔습니다.', 'success');
+    }, [loadMediumCats, loadSmallCats, showToast]);
+
+    const performSearch = useCallback(async (code: string) => {
         if (!code) return;
         try {
             const results = await searchProductsForEdit(code);
             if (results && results.length > 0) {
-                const p = results[0];
-                setBarcode(p.바코드);
-                setProductName(p.상품명);
-                setSpec(p.규격 || '');
-                setCostPrice(p.매입가);
-                setSellingPrice(p.판매가);
-                setComcode(p.거래처코드 || '');
-                setStockQty(p.재고수량 || 0);
-                
-                setIsUse(p.사용유무 === '1' || p.사용유무 === 'Y');
-                setIsTaxable(p.과세여부 === '1' || p.과세여부 === 'Y');
-                setIsPoint(p.고객점수가산 === '1' || p.고객점수가산 === 'Y');
-                setIsStockManaged(p.재고관리여부 === '1' || p.재고관리여부 === 'Y');
-                
-                // 분류 설정 및 하위 목록 로드
-                const lc = p.대분류코드 || '';
-                const mc = p.중분류코드 || '';
-                const sc = p.소분류코드 || '';
-                
-                setLCode(lc);
-                if (lc) {
-                    await loadMediumCats(lc);
-                    setMCode(mc);
-                    if (mc) {
-                        await loadSmallCats(lc, mc);
-                        setSCode(sc);
-                    } else {
-                        setSCode('');
-                        setSCats([]);
-                    }
+                if (results.length === 1) {
+                    populateProductData(results[0]);
                 } else {
-                    setMCode('');
-                    setSCode('');
-                    setMCats([]);
-                    setSCats([]);
+                    setSearchResults(results);
+                    setIsSelectionModalOpen(true);
                 }
-
-                if (p.행사유무 === 'Y') {
-                    setSaleInfoText(`[${p.행사명}] ${p.행사매입가?.toLocaleString()} / ${p.행사판매가?.toLocaleString()}\n(${p.행사시작일}~${p.행사종료일})`);
-                } else {
-                    setSaleInfoText('할인 정보 없음');
-                }
-                setBomInfoText(p.BOM여부 || '일반 상품');
-
-                setIsEditMode(true);
-                showToast('상품 정보를 불러왔습니다.', 'success');
             } else {
                 if (/^\d+$/.test(code)) {
-                    // 신규 등록 모드 진입 시: 분류 고정이 아닐 때만 완전 초기화
-                    if (!isCategoryFixed) {
-                        resetForm(true);
-                    } else {
-                        // 분류 고정 상태라면, 바코드/이름 등만 리셋하고 바코드 세팅
-                        resetForm(false);
-                    }
+                    if (!isCategoryFixed) resetForm(true);
+                    else resetForm(false);
+                    
                     setBarcode(code);
                     setIsEditMode(false);
                     showToast('등록되지 않은 바코드입니다. 신규 등록합니다.', 'success');
                 } else {
-                    showToast('상품을 찾을 수 없습니다.', 'error');
+                    showToast('검색 결과가 없습니다.', 'error');
                 }
             }
         } catch (e) {
             console.error(e);
             showToast('상품 조회 중 오류가 발생했습니다.', 'error');
         }
-    }, [resetForm, showToast, loadMediumCats, loadSmallCats, isCategoryFixed]);
+    }, [populateProductData, resetForm, isCategoryFixed, showToast]);
 
     useEffect(() => {
         if (isOpen) {
             if (initialBarcode) {
                 setSearchInput(initialBarcode);
-                loadProduct(initialBarcode);
+                performSearch(initialBarcode);
             } else {
                 setSearchInput('');
                 resetForm(true);
                 setTimeout(() => searchInputRef.current?.focus(), 150);
             }
         }
-    }, [isOpen, initialBarcode, loadProduct, resetForm]);
+    }, [isOpen, initialBarcode, performSearch, resetForm]);
 
-    const handleSearch = (e: React.FormEvent) => {
+    const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        loadProduct(searchInput);
+        performSearch(searchInput);
     };
 
     const handleScan = () => {
         openScanner('modal', (code) => {
             setSearchInput(code);
-            loadProduct(code);
+            performSearch(code);
         }, false);
     };
 
@@ -352,7 +330,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 CurrentDate: new Date().toISOString().slice(0, 10),
                 kw: searchInput, 
                 stock_yn: isStockManaged ? '1' : '0',
-                RemarkParam: spec || '', // Added @RemarkParam mapped to spec
+                // RemarkParam removed as requested
             };
 
             const userQueryName = isEditMode ? '상품수정' : '상품등록';
@@ -370,12 +348,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             showToast(isEditMode ? "상품 정보가 수정되었습니다." : "신규 상품이 등록되었습니다.", "success");
             setSearchInput('');
             
-            // 분류 고정 체크 여부에 따른 초기화 로직 분기
-            if (isCategoryFixed) {
-                resetForm(false); // Partial reset (keep Category/Customer)
-            } else {
-                resetForm(true); // Full reset
-            }
+            if (isCategoryFixed) resetForm(false);
+            else resetForm(true);
             
             setTimeout(() => searchInputRef.current?.focus(), 100);
 
@@ -390,226 +364,225 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         setTimeout(() => searchInputRef.current?.focus(), 100);
     };
 
+    const handleProductSelect = (product: any) => {
+        setIsSelectionModalOpen(false);
+        setSearchInput(product.바코드 || product.barcode);
+        populateProductData(product);
+    };
+
     if (!isOpen) return null;
 
     const CustomToggleButton = ({ label, checked, onChange }: { label: string, checked: boolean, onChange: (v: boolean) => void }) => (
         <button 
             onClick={() => onChange(!checked)}
-            className={`flex items-center justify-center gap-1.5 p-2 rounded border transition-all ${checked ? 'bg-white border-blue-500 text-blue-700' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
+            className={`flex items-center justify-center gap-1 px-1 py-1.5 rounded border transition-all ${checked ? 'bg-white border-blue-500 text-blue-700' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
         >
-            <div className={`w-4 h-4 border rounded flex items-center justify-center ${checked ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
-                {checked && <CheckCircleIcon className="w-3.5 h-3.5 text-white" />}
+            <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${checked ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
+                {checked && <CheckCircleIcon className="w-2.5 h-2.5 text-white" />}
             </div>
-            <span className="text-xs font-bold whitespace-nowrap">{label}</span>
+            <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
         </button>
     );
 
     return (
-        <ActionModal
-            isOpen={isOpen}
-            onClose={onClose}
-            title={isEditMode ? "상품 수정" : "상품 등록/수정"} 
-            disableBodyScroll={false}
-            containerRef={modalContainerRef}
-        >
-            <div className="p-3 space-y-3 bg-white min-h-full">
-                {/* 1. Search Bar */}
-                <form onSubmit={handleSearch} className="flex gap-2">
-                    <div className="relative flex-grow">
+        <>
+            <ActionModal
+                isOpen={isOpen}
+                onClose={onClose}
+                title={isEditMode ? "상품 수정" : "상품 등록/수정"} 
+                disableBodyScroll={false}
+                containerRef={modalContainerRef}
+            >
+                <div className="p-2 space-y-1 bg-white flex flex-col h-full overflow-y-auto">
+                    {/* 1. Search Bar Row (Compact) */}
+                    <form onSubmit={handleSearchSubmit} className="flex gap-1 items-stretch">
                         <input
                             ref={searchInputRef}
                             type="text"
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            placeholder="바코드 또는 상품명 (길게 눌러 초기화)"
-                            className="w-full h-10 pl-3 pr-10 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-lg font-bold"
+                            placeholder="바코드/명칭 (길게 눌러 초기화)"
+                            className="flex-1 h-10 pl-2 pr-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-base" 
                         />
-                        <button type="submit" className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-white bg-blue-600 rounded-r-md hover:bg-blue-700">
+                        {/* 검색 버튼 (작게) */}
+                        <button type="submit" className="w-10 h-10 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm">
                             <SearchIcon className="w-5 h-5" />
                         </button>
-                    </div>
-                    <button type="button" onClick={handleScan} className="w-10 h-10 bg-gray-700 text-white rounded-md flex items-center justify-center">
-                        <BarcodeScannerIcon className="w-6 h-6" />
-                    </button>
-                </form>
-                
-                {/* [NEW] Barcode Display below search bar */}
-                {barcode && (
-                    <div className="text-xs text-gray-500 font-mono -mt-2 px-1">
-                        Barcode: <span className="font-bold text-gray-800 tracking-wide">{barcode}</span>
-                    </div>
-                )}
-
-                {/* 2. Row: Product Name & Spec */}
-                <div className="flex gap-2">
-                    <div className="flex-grow flex flex-col gap-1">
-                        <label className="text-xs font-bold text-gray-700">상품명</label>
-                        <input
-                            type="text"
-                            value={productName}
-                            onChange={(e) => setProductName(e.target.value)}
-                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
-                            placeholder="상품명"
-                        />
-                    </div>
-                    <div className="w-1/3 flex flex-col gap-1">
-                        <label className="text-xs font-bold text-gray-700">규격</label>
-                        <input
-                            type="text"
-                            value={spec}
-                            onChange={(e) => setSpec(e.target.value)}
-                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
-                            placeholder="규격"
-                        />
-                    </div>
-                </div>
-
-                {/* 3. Row: Prices, Margin, Tax */}
-                <div className="flex gap-1 items-end">
-                    <div className="flex-1 flex flex-col gap-1">
-                        <label className="text-xs font-bold text-gray-700">매입가</label>
-                        <input
-                            type="text" inputMode="numeric"
-                            value={costPrice}
-                            onChange={(e) => setCostPrice(e.target.value)}
-                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-semibold"
-                        />
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1">
-                        <label className="text-xs font-bold text-gray-700">판매가</label>
-                        <input
-                            type="text" inputMode="numeric"
-                            value={sellingPrice}
-                            onChange={(e) => setSellingPrice(e.target.value)}
-                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-bold text-blue-600"
-                        />
-                    </div>
-                    <div className="w-12 flex flex-col gap-1 items-center justify-center pb-2">
-                        <label className="text-[10px] text-gray-500">이익률</label>
-                        <span className={`text-xs font-bold ${marginRate >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                            {marginRate.toFixed(2)}%
-                        </span>
-                    </div>
-                    <div className="pb-1">
-                        <button 
-                            onClick={() => setIsTaxable(!isTaxable)}
-                            className={`flex items-center gap-1 px-1 py-2 rounded border ${isTaxable ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600'}`}
-                        >
-                            <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${isTaxable ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
-                                {isTaxable && <CheckCircleIcon className="w-3 h-3 text-white" />}
+                        {/* 스캔 버튼 (크게 - 2.5배 느낌) */}
+                        <button type="button" onClick={handleScan} className="flex-[2] h-10 bg-gray-700 text-white rounded-md flex items-center justify-center gap-1 active:scale-95 shadow-sm hover:bg-gray-800">
+                            <BarcodeScannerIcon className="w-6 h-6" />
+                            <span className="text-xs font-bold">스캔</span>
+                        </button>
+                    </form>
+                    
+                    {/* 2. Product Name & Barcode Display & Spec */}
+                    <div className="flex gap-1 pt-1">
+                        <div className="flex-grow flex flex-col gap-0.5">
+                            <div className="flex items-baseline gap-2">
+                                <label className="text-xs font-bold text-gray-700">상품명</label>
+                                {barcode && (
+                                    <span className="text-sm font-bold text-blue-600 font-mono tracking-tight">
+                                        [{formatBarcodeDisplay(barcode)}]
+                                    </span>
+                                )}
                             </div>
-                            <span className="text-xs font-bold">과세</span>
+                            <input
+                                type="text"
+                                value={productName}
+                                onChange={(e) => setProductName(e.target.value)}
+                                className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
+                                placeholder="상품명 입력"
+                            />
+                        </div>
+                        <div className="w-1/3 flex flex-col gap-0.5">
+                            <label className="text-xs font-bold text-gray-700">규격</label>
+                            <input
+                                type="text"
+                                value={spec}
+                                onChange={(e) => setSpec(e.target.value)}
+                                className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
+                                placeholder="규격"
+                            />
+                        </div>
+                    </div>
+
+                    {/* 3. Prices & Margin & Tax */}
+                    <div className="flex gap-1 items-end pt-1">
+                        <div className="flex-1 flex flex-col gap-0.5">
+                            <label className="text-xs font-bold text-gray-700">매입가</label>
+                            <input
+                                type="text" inputMode="numeric"
+                                value={costPrice}
+                                onChange={(e) => setCostPrice(e.target.value)}
+                                className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-semibold"
+                            />
+                        </div>
+                        <div className="flex-1 flex flex-col gap-0.5">
+                            <label className="text-xs font-bold text-gray-700">판매가</label>
+                            <input
+                                type="text" inputMode="numeric"
+                                value={sellingPrice}
+                                onChange={(e) => setSellingPrice(e.target.value)}
+                                className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-bold text-blue-600"
+                            />
+                        </div>
+                        <div className="w-12 flex flex-col items-center justify-center pb-1.5">
+                            <label className="text-[10px] text-gray-500 leading-none mb-0.5">이익률</label>
+                            <span className={`text-xs font-bold ${marginRate >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                                {marginRate.toFixed(1)}%
+                            </span>
+                        </div>
+                        <div className="pb-0.5">
+                            <button 
+                                onClick={() => setIsTaxable(!isTaxable)}
+                                className={`flex items-center gap-1 px-2 h-9 rounded border ${isTaxable ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600'}`}
+                            >
+                                <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${isTaxable ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
+                                    {isTaxable && <CheckCircleIcon className="w-2.5 h-2.5 text-white" />}
+                                </div>
+                                <span className="text-xs font-bold">과세</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 4. Classification & Fixed Toggle */}
+                    <div className="flex flex-col gap-0.5 pt-1">
+                        <label className="text-xs font-bold text-gray-700">상품 분류</label>
+                        <div className="flex gap-1 items-center">
+                            <select value={lCode} onChange={handleLargeChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate">
+                                <option value="">대분류</option>
+                                {lCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                            </select>
+                            <select value={mCode} onChange={handleMediumChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate">
+                                <option value="">중분류</option>
+                                {mCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                            </select>
+                            <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate">
+                                <option value="">소분류</option>
+                                {sCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                            </select>
+                            <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap px-1 ml-1 bg-gray-50 rounded border border-gray-200 h-9">
+                                <input type="checkbox" checked={isCategoryFixed} onChange={(e) => setIsCategoryFixed(e.target.checked)} className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                                <span className="text-[11px] font-bold text-gray-700">고정</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    {/* 5. Customer & Stock */}
+                    <div className="flex gap-1 pt-1">
+                        <div className="flex-grow flex flex-col gap-0.5">
+                            <label className="text-xs font-bold text-gray-700">거래처</label>
+                            <select
+                                value={comcode}
+                                onChange={(e) => setComcode(e.target.value)}
+                                className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm bg-white"
+                            >
+                                <option value="">거래처를 선택하세요</option>
+                                {supplierList.map(c => (
+                                    <option key={c.comcode} value={c.comcode}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="w-1/3 flex flex-col gap-0.5">
+                            <label className="text-xs font-bold text-gray-700">재고수량</label>
+                            <input
+                                type="text"
+                                value={stockQty.toLocaleString()}
+                                readOnly
+                                className="w-full h-9 px-2 border border-gray-300 rounded-md bg-gray-100 text-right text-sm font-bold text-gray-700"
+                            />
+                        </div>
+                    </div>
+
+                    {/* 6. Toggles */}
+                    <div className="grid grid-cols-3 gap-1 py-1">
+                        <CustomToggleButton label="사용유무" checked={isUse} onChange={setIsUse} />
+                        <CustomToggleButton label="포인트적립" checked={isPoint} onChange={setIsPoint} />
+                        <CustomToggleButton label="재고관리" checked={isStockManaged} onChange={setIsStockManaged} />
+                    </div>
+
+                    {/* 7. Bottom Info Panels */}
+                    <div className="grid grid-cols-2 gap-1 mt-1 mb-2">
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
+                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">할인정보</div>
+                            <div className="p-1 flex items-center justify-center text-center h-10">
+                                <p className="text-[10px] text-gray-500 whitespace-pre-line leading-tight">{saleInfoText}</p>
+                            </div>
+                        </div>
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
+                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">BOM 정보</div>
+                            <div className="p-1 flex items-center justify-center text-center h-10">
+                                <p className="text-[10px] text-gray-500">{bomInfoText}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 8. Action Buttons (Pushed to bottom) */}
+                    <div className="mt-auto grid grid-cols-[1fr_4fr] gap-2 pt-2 pb-1">
+                        <button 
+                            onClick={handleReset} 
+                            className="h-12 bg-orange-100 border border-orange-200 text-orange-600 rounded-md flex items-center justify-center hover:bg-orange-200 active:scale-95 transition-transform"
+                        >
+                            <UndoIcon className="w-6 h-6" />
+                        </button>
+                        <button 
+                            onClick={handleSave} 
+                            disabled={isSaving}
+                            className="h-12 bg-blue-600 text-white rounded-md font-bold text-lg flex items-center justify-center gap-2 hover:bg-blue-700 shadow-md active:scale-95 disabled:bg-gray-400 transition-transform"
+                        >
+                            {isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}
+                            저장
                         </button>
                     </div>
                 </div>
+            </ActionModal>
 
-                {/* 4. Row: Classification (Category) Dropdowns & [NEW] Fix Category Checkbox */}
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-gray-700">상품 분류</label>
-                    <div className="flex gap-1 items-center">
-                        <select 
-                            value={lCode} 
-                            onChange={handleLargeChange} 
-                            className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500"
-                        >
-                            <option value="">대분류</option>
-                            {lCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                        </select>
-                        <select 
-                            value={mCode} 
-                            onChange={handleMediumChange} 
-                            className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500"
-                        >
-                            <option value="">중분류</option>
-                            {mCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                        </select>
-                        <select 
-                            value={sCode} 
-                            onChange={(e) => setSCode(e.target.value)} 
-                            className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500"
-                        >
-                            <option value="">소분류</option>
-                            {sCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                        </select>
-                        <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap px-1 ml-1">
-                            <input 
-                                type="checkbox" 
-                                checked={isCategoryFixed} 
-                                onChange={(e) => setIsCategoryFixed(e.target.checked)} 
-                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                            />
-                            <span className="text-xs font-bold text-gray-700">분류고정</span>
-                        </label>
-                    </div>
-                </div>
-
-                {/* 5. Row: Customer (Dropdown) & Stock */}
-                <div className="flex gap-2">
-                    <div className="flex-grow flex flex-col gap-1">
-                        <label className="text-xs font-bold text-gray-700">거래처</label>
-                        <select
-                            value={comcode}
-                            onChange={(e) => setComcode(e.target.value)}
-                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm bg-white"
-                        >
-                            <option value="">거래처를 선택하세요</option>
-                            {supplierList.map(c => (
-                                <option key={c.comcode} value={c.comcode}>{c.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="w-1/3 flex flex-col gap-1">
-                        <label className="text-xs font-bold text-gray-700">재고수량</label>
-                        <input
-                            type="text"
-                            value={stockQty.toLocaleString()}
-                            readOnly
-                            className="w-full h-10 px-2 border border-gray-300 rounded-md bg-gray-100 text-right text-sm font-bold text-gray-700"
-                        />
-                    </div>
-                </div>
-
-                {/* 6. Row: Toggles */}
-                <div className="grid grid-cols-3 gap-2 py-1">
-                    <CustomToggleButton label="상품사용유무" checked={isUse} onChange={setIsUse} />
-                    <CustomToggleButton label="고객점수가산" checked={isPoint} onChange={setIsPoint} />
-                    <CustomToggleButton label="재고관리여부" checked={isStockManaged} onChange={setIsStockManaged} />
-                </div>
-
-                {/* 7. Action Buttons */}
-                <div className="grid grid-cols-[1fr_4fr] gap-2 pt-2">
-                    <button 
-                        onClick={handleReset} 
-                        className="h-12 bg-orange-100 border border-orange-200 text-orange-600 rounded-md flex items-center justify-center hover:bg-orange-200"
-                    >
-                        <UndoIcon className="w-6 h-6" />
-                    </button>
-                    <button 
-                        onClick={handleSave} 
-                        disabled={isSaving}
-                        className="h-12 bg-blue-600 text-white rounded-md font-bold text-lg flex items-center justify-center gap-2 hover:bg-blue-700 shadow-md active:scale-95 disabled:bg-gray-400"
-                    >
-                        {isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}
-                        저장
-                    </button>
-                </div>
-
-                {/* 8. Bottom Info Panels */}
-                <div className="grid grid-cols-2 gap-2 h-40 mt-2">
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg flex flex-col">
-                        <div className="bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-600 border-b border-gray-200 text-center">할인정보</div>
-                        <div className="flex-grow p-2 flex items-center justify-center text-center">
-                            <p className="text-xs text-gray-500 whitespace-pre-line leading-relaxed">{saleInfoText}</p>
-                        </div>
-                    </div>
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg flex flex-col">
-                        <div className="bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-600 border-b border-gray-200 text-center">BOM 정보</div>
-                        <div className="flex-grow p-2 flex items-center justify-center text-center">
-                            <p className="text-xs text-gray-500">{bomInfoText}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </ActionModal>
+            <ProductSelectionModal
+                isOpen={isSelectionModalOpen}
+                onClose={() => setIsSelectionModalOpen(false)}
+                products={searchResults}
+                onSelect={handleProductSelect}
+            />
+        </>
     );
 }

@@ -15,34 +15,25 @@ import ReceiveItemModal from '../components/ReceiveItemModal';
 type View = 'entry' | 'list';
 const DRAFT_KEY = 'receiving-entry-draft';
 
-// --- Sub-components ---
-
 const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> = ({ item, onRemove }) => (
     <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-3 items-center p-2 bg-white rounded-lg shadow-sm border text-xs">
-        {/* Name & Barcode */}
         <div className="flex flex-col min-w-0">
             <p className="font-bold text-gray-800 truncate text-sm">{item.name || '(미등록 상품)'}</p>
             <p className="text-gray-400 font-mono">{item.barcode}</p>
         </div>
-        {/* Prices */}
         <div className="text-right">
             <p className="font-mono">{item.costPrice.toLocaleString()}</p>
         </div>
         <div className="text-right">
             <p className="font-mono text-gray-600">{item.sellingPrice.toLocaleString()}</p>
         </div>
-        {/* Qty & Amount */}
         <p className={`text-center font-bold text-base ${item.quantity < 0 ? 'text-red-600' : 'text-blue-600'}`}>{item.quantity}</p>
         <p className="text-right font-mono font-semibold">{(item.costPrice * item.quantity).toLocaleString()}</p>
-        {/* Remove button */}
         <button onClick={onRemove} className="p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50">
             <TrashIcon className="w-4 h-4" />
         </button>
     </div>
 );
-
-
-// --- Main Manager Component ---
 
 const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { customers, products } = useDataState();
@@ -54,36 +45,32 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [batches, setBatches] = useState<ReceivingBatch[]>([]);
     const [draftCount, setDraftCount] = useState(0);
 
-    // --- Entry View State (now with Draft support) ---
     const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10));
     const [selectedSupplier, setSelectedSupplier] = useState<Customer | null>(null);
     const [currentItems, setCurrentItems] = useState<ReceivingItem[]>([]);
     const [isSavingBatch, setIsSavingBatch] = useState(false);
     const [receiveModalProps, setReceiveModalProps] = useState<{ product: Product } | null>(null);
     
-    // Draft Hook
     const { draft, isLoading: isDraftLoading, save: saveDraft, remove: removeDraft } = useDraft<ReceivingDraft>(DRAFT_KEY);
     
-    // Product Search states
     const { searchTerm, setSearchTerm, results, isSearching, search } = useProductSearch('newOrder');
     const [showProductDropdown, setShowProductDropdown] = useState(false);
     const productSearchBlurTimeout = useRef<number | null>(null);
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
+    // Safe access to customers
     const sortedCustomers = useMemo(() => {
-        return [...customers].sort((a, b) => a.name.localeCompare(b.name));
+        return (customers || []).sort((a, b) => a.name.localeCompare(b.name));
     }, [customers]);
 
     useEffect(() => {
         search(debouncedSearchTerm);
     }, [debouncedSearchTerm, search]);
 
-    // --- List View State ---
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
     const [expandedBatch, setExpandedBatch] = useState<number | null>(null);
     const [isSending, setIsSending] = useState(false);
     
-    // --- Draft and State Management ---
     useEffect(() => {
         if (draft) {
             setCurrentDate(draft.currentDate || new Date().toISOString().slice(0, 10));
@@ -100,13 +87,15 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [currentDate, selectedSupplier, currentItems, isDraftLoading, saveDraft]);
 
-    // --- General Logic ---
-
     const loadBatches = useCallback(async () => {
-        const allBatches = await receiveDb.getAllBatches();
-        setBatches(allBatches);
-        const drafts = allBatches.filter(b => b.status === 'draft').length;
-        setDraftCount(drafts);
+        try {
+            const allBatches = await receiveDb.getAllBatches();
+            setBatches(allBatches);
+            const drafts = allBatches.filter(b => b.status === 'draft').length;
+            setDraftCount(drafts);
+        } catch (e) {
+            console.error("Failed to load batches", e);
+        }
     }, []);
 
     useEffect(() => {
@@ -122,16 +111,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setSearchTerm('');
     };
 
-    // --- Entry View Handlers ---
     const handleAddItem = (itemData: Omit<ReceivingItem, 'uniqueId'>) => {
         if (itemData.quantity === 0) return;
-    
         const newItem: ReceivingItem = {
             ...itemData,
-            uniqueId: Date.now() + Math.random(), // Add unique ID for list management
+            uniqueId: Date.now() + Math.random(),
         };
-    
-        // Just append the new item, don't aggregate
         setCurrentItems(prev => [...prev, newItem]);
     };
 
@@ -159,7 +144,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 items: currentItems,
                 itemCount: currentItems.length,
                 totalAmount,
-                status: 'draft', // Default to draft
+                status: 'draft',
             };
 
             if (sqlStatus === 'connected') {
@@ -190,7 +175,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleScan = () => {
         openScanner('modal', (barcode) => {
-            const product = products.find(p => p.barcode === barcode);
+            const productList = products || [];
+            const product = productList.find(p => p.barcode === barcode);
             if (product) {
                 setReceiveModalProps({ product });
             } else {
@@ -205,8 +191,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }, false);
     };
     
-    // --- List View Handlers ---
-
     const groupedBatches = useMemo(() => {
         const groups: Record<string, ReceivingBatch[]> = {};
         batches.forEach(batch => {
@@ -264,8 +248,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             '전송'
         );
     };
-
-    // --- Render Logic ---
 
     if (view === 'list') {
         return (
@@ -325,7 +307,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     return (
         <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
-            {/* Header */}
             <div className="flex-shrink-0 bg-white p-3 border-b shadow-sm space-y-3">
                 <div className="flex items-center gap-3">
                     <label htmlFor="receive-date" className="font-bold text-gray-700 whitespace-nowrap">입고일</label>
@@ -334,7 +315,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 <select 
                     value={selectedSupplier?.comcode || ''} 
                     onChange={e => {
-                        const supplier = customers.find(c => c.comcode === e.target.value);
+                        const supplier = (customers || []).find(c => c.comcode === e.target.value);
                         setSelectedSupplier(supplier || null);
                     }} 
                     className="w-full p-2.5 border rounded-lg bg-white font-bold text-base border-gray-300 focus:ring-1 focus:ring-blue-500"
@@ -344,7 +325,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </select>
             </div>
 
-            {/* Item Entry */}
             {selectedSupplier && (
                 <div className="flex-shrink-0 bg-white p-3 border-b">
                      <div className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
@@ -368,7 +348,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             )}
             
-            {/* Item List */}
             <div className="flex-grow overflow-y-auto p-3">
                 {currentItems.length > 0 ? (
                     <div className="space-y-2">
@@ -390,7 +369,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 )}
             </div>
 
-            {/* Footer */}
             <div className="flex-shrink-0 p-3 bg-white border-t safe-area-pb grid grid-cols-10 gap-3 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
                 <button onClick={handleSaveBatch} disabled={isSavingBatch} className="col-span-7 h-14 bg-blue-600 text-white font-bold rounded-lg text-lg flex items-center justify-center disabled:bg-gray-400 transition active:scale-95 shadow-md shadow-blue-500/30">
                     {isSavingBatch ? <SpinnerIcon className="w-6 h-6" /> : '현재 입고 저장'}
