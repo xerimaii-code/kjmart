@@ -6,7 +6,8 @@ import {
     getDatabase, Database, ref, get, set, update, push,
     query, orderByChild, endAt, startAt, onChildAdded, onChildChanged, onChildRemoved,
     onValue,
-    limitToLast
+    limitToLast,
+    orderByKey
 } from 'firebase/database';
 
 import { firebaseConfig } from '../firebaseConfig';
@@ -332,4 +333,50 @@ export const deleteUserQuery = async (id: string): Promise<void> => {
 export const addReceivingBatch = async (batch: ReceivingBatch): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
     await set(ref(db, `receiving-batches/${batch.id}`), batch);
+};
+
+export const deleteReceivingBatch = async (batchId: number): Promise<void> => {
+    if (!db) throw DB_UNAVAILABLE_ERROR;
+    await set(ref(db, `receiving-batches/${batchId}`), null);
+};
+
+export const getReceivingBatchesByDateRange = async (startDate: string, endDate: string): Promise<ReceivingBatch[]> => {
+    if (!db) return [];
+    
+    // Parse YYYY-MM-DD explicitly as local time to avoid UTC offsets
+    const s = startDate.split('-').map(Number);
+    const e = endDate.split('-').map(Number);
+    
+    // Create Date objects for local midnight
+    // Month is 0-indexed in JS Date constructor (e.g. January is 0)
+    const startDt = new Date(s[0], s[1] - 1, s[2], 0, 0, 0, 0);
+    const endDt = new Date(e[0], e[1] - 1, e[2], 23, 59, 59, 999);
+
+    const startTs = startDt.getTime();
+    const endTs = endDt.getTime();
+
+    try {
+        const batchesRef = ref(db, 'receiving-batches');
+        // Query by key (timestamp)
+        const batchesQuery = query(
+            batchesRef, 
+            orderByKey(), 
+            startAt(String(startTs)), 
+            endAt(String(endTs))
+        );
+        
+        const snapshot = await get(batchesQuery);
+        if (!snapshot.exists()) return [];
+
+        const batches: ReceivingBatch[] = [];
+        snapshot.forEach((child) => {
+            batches.push(child.val());
+        });
+        
+        // Return newest first
+        return batches.reverse(); 
+    } catch (error) {
+        console.error("Error fetching batches by date range:", error);
+        return [];
+    }
 };

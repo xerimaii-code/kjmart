@@ -1,20 +1,29 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Customer, Product, ReceivingItem, ReceivingBatch, ReceivingDraft } from '../types';
 import { useDataState, useScanner, useAlert, useModals, useMiscUI } from '../context/AppContext';
-import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon, PencilSquareIcon, ChevronRightIcon, GoogleDriveIcon, DatabaseIcon } from '../components/Icons';
+import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon, PencilSquareIcon, ChevronRightIcon, GoogleDriveIcon, DatabaseIcon, CalendarIcon } from '../components/Icons';
 import { useDebounce } from '../hooks/useDebounce';
 import { useProductSearch } from '../hooks/useProductSearch';
 import SearchDropdown from '../components/SearchDropdown';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
 import * as receiveDb from '../services/receiveDbService';
-import { addReceivingBatch, getStore } from '../services/dbService';
+import { addReceivingBatch, deleteReceivingBatch, getReceivingBatchesByDateRange } from '../services/dbService';
 import { executeUserQuery } from '../services/sqlService';
 import { useDraft } from '../hooks/useDraft';
 import ReceiveItemModal from '../components/ReceiveItemModal';
 
 type View = 'entry' | 'list';
 const DRAFT_KEY = 'receiving-entry-draft';
+
+const getTodayString = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
 
 const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> = ({ item, onRemove }) => (
     <div className="grid grid-cols-[1fr_50px_50px_35px_60px_25px] gap-1 items-center p-1.5 bg-white rounded border border-gray-200 text-xs">
@@ -39,6 +48,247 @@ const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> 
     </div>
 );
 
+// --- Cloud Load Modal Component ---
+interface CloudLoadModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onConfirm: (batches: ReceivingBatch[]) => void;
+    onDelete: (batch: ReceivingBatch) => void;
+    data: ReceivingBatch[];
+    onSearch: (start: string, end: string) => void;
+    isLoading: boolean;
+}
+
+const CloudLoadModal: React.FC<CloudLoadModalProps> = ({ isOpen, onClose, onConfirm, onDelete, data, onSearch, isLoading }) => {
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    const [isRendered, setIsRendered] = useState(false);
+    
+    // Default range: Today ~ Today (Local Time)
+    const [startDate, setStartDate] = useState(getTodayString);
+    const [endDate, setEndDate] = useState(getTodayString);
+
+    useEffect(() => {
+        if (isOpen) {
+            setSelectedIds(new Set());
+            // Initial auto-search for today
+            const today = getTodayString();
+            setStartDate(today);
+            setEndDate(today);
+            onSearch(today, today);
+            
+            const timer = setTimeout(() => setIsRendered(true), 10);
+            return () => clearTimeout(timer);
+        } else {
+            setIsRendered(false);
+        }
+    }, [isOpen]); 
+
+    const handleSearchClick = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSearch(startDate, endDate);
+    };
+
+    const groupedData = useMemo(() => {
+        const groups: Record<string, ReceivingBatch[]> = {};
+        data.forEach(batch => {
+            const date = batch.date;
+            if (!groups[date]) groups[date] = [];
+            groups[date].push(batch);
+        });
+        return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
+    }, [data]);
+
+    const toggleSelection = (id: number) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleDateSelection = (dateBatches: ReceivingBatch[]) => {
+        const allSelected = dateBatches.every(b => selectedIds.has(b.id));
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            dateBatches.forEach(b => {
+                if (allSelected) next.delete(b.id);
+                else next.add(b.id);
+            });
+            return next;
+        });
+    };
+    
+    const handleSelectAll = () => {
+        const allIds = data.map(b => b.id);
+        const isAllSelected = allIds.every(id => selectedIds.has(id));
+        
+        if (isAllSelected) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(allIds));
+        }
+    };
+
+    const handleDelete = (e: React.MouseEvent, batch: ReceivingBatch) => {
+        e.stopPropagation();
+        onDelete(batch);
+    };
+
+    const handleConfirm = () => {
+        const selectedBatches = data.filter(b => selectedIds.has(b.id));
+        onConfirm(selectedBatches);
+    };
+
+    if (!isOpen) return null;
+
+    return createPortal(
+        <div className={`fixed inset-0 z-[100] flex items-center justify-center p-4 transition-colors duration-300 ${isRendered ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} role="dialog" aria-modal="true">
+            <div className={`bg-white rounded-xl shadow-lg w-full max-w-lg flex flex-col max-h-[85vh] transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+                
+                {/* Header with Date Search */}
+                <div className="p-4 border-b space-y-3 bg-white rounded-t-xl z-10">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-gray-800">클라우드 데이터 불러오기</h3>
+                        <button onClick={onClose} className="p-1 text-gray-500 hover:bg-gray-100 rounded-full">
+                            <ChevronDownIcon className="w-6 h-6" />
+                        </button>
+                    </div>
+                    <form onSubmit={handleSearchClick} className="flex gap-2 items-center bg-gray-50 p-2 rounded-lg border border-gray-200">
+                        <div className="flex items-center gap-1 flex-grow">
+                            <input 
+                                type="date" 
+                                value={startDate} 
+                                onChange={(e) => setStartDate(e.target.value)} 
+                                className="w-full bg-white border border-gray-300 rounded px-2 py-1.5 text-xs font-semibold"
+                            />
+                            <span className="text-gray-400">~</span>
+                            <input 
+                                type="date" 
+                                value={endDate} 
+                                onChange={(e) => setEndDate(e.target.value)} 
+                                className="w-full bg-white border border-gray-300 rounded px-2 py-1.5 text-xs font-semibold"
+                            />
+                        </div>
+                        <button 
+                            type="submit" 
+                            disabled={isLoading}
+                            className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-1 flex-shrink-0 h-full"
+                        >
+                            {isLoading ? <SpinnerIcon className="w-3 h-3" /> : <SearchIcon className="w-3 h-3" />}
+                            조회
+                        </button>
+                    </form>
+                    
+                    {data.length > 0 && (
+                        <div className="flex items-center justify-between px-1">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <input 
+                                    type="checkbox" 
+                                    checked={data.length > 0 && data.every(b => selectedIds.has(b.id))}
+                                    onChange={handleSelectAll}
+                                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                                />
+                                <span className="text-sm font-bold text-gray-600">전체 선택 ({data.length})</span>
+                            </label>
+                        </div>
+                    )}
+                </div>
+                
+                <div className="flex-grow overflow-y-auto p-2 space-y-3 bg-gray-50">
+                    {isLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                            <SpinnerIcon className="w-8 h-8 text-blue-500 mb-2" />
+                            <p>데이터를 불러오는 중...</p>
+                        </div>
+                    ) : groupedData.length === 0 ? (
+                        <div className="text-center text-gray-500 py-20 flex flex-col items-center">
+                            <CalendarIcon className="w-12 h-12 text-gray-300 mb-2" />
+                            <p className="font-medium">조회된 데이터가 없습니다.</p>
+                            <p className="text-xs mt-1">기간을 변경하여 조회해보세요.</p>
+                        </div>
+                    ) : (
+                        groupedData.map(([date, batches]) => {
+                            const isDateSelected = batches.every(b => selectedIds.has(b.id));
+                            return (
+                                <div key={date} className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+                                    <div 
+                                        className="bg-gray-100 px-3 py-2 flex items-center justify-between cursor-pointer active:bg-gray-200 transition-colors"
+                                        onClick={() => toggleDateSelection(batches)}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={isDateSelected}
+                                                onChange={() => {}}
+                                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 pointer-events-none"
+                                            />
+                                            <span className="font-bold text-gray-700">{date}</span>
+                                        </div>
+                                        <span className="text-xs text-gray-500 font-medium">{batches.length}건</span>
+                                    </div>
+                                    <div className="divide-y divide-gray-100">
+                                        {batches.map(batch => (
+                                            <div 
+                                                key={batch.id} 
+                                                className="px-3 py-2.5 flex items-center gap-3 hover:bg-blue-50 cursor-pointer"
+                                                onClick={() => toggleSelection(batch.id)}
+                                            >
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={selectedIds.has(batch.id)}
+                                                    onChange={() => {}}
+                                                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 pointer-events-none flex-shrink-0"
+                                                />
+                                                <div className="flex-grow min-w-0">
+                                                    <div className="flex justify-between items-start">
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <p className="font-semibold text-sm text-gray-800 truncate">{batch.supplier.name}</p>
+                                                            {batch.status === 'draft' ? 
+                                                                <span className="text-[10px] bg-orange-100 text-orange-600 px-1 rounded font-bold">작성중</span> : 
+                                                                <span className="text-[10px] bg-green-100 text-green-600 px-1 rounded font-bold">완료</span>
+                                                            }
+                                                        </div>
+                                                        <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(batch.id).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-xs text-gray-500 mt-0.5">
+                                                        <span>품목 {batch.itemCount}개</span>
+                                                        <span className="font-mono">{batch.totalAmount.toLocaleString()}원</span>
+                                                    </div>
+                                                </div>
+                                                <button 
+                                                    onClick={(e) => handleDelete(e, batch)} 
+                                                    className="p-2 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50 transition-colors"
+                                                    title="클라우드에서 삭제"
+                                                >
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+
+                <div className="p-3 border-t bg-white grid grid-cols-2 gap-3">
+                    <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-bold">취소</button>
+                    <button 
+                        onClick={handleConfirm} 
+                        disabled={selectedIds.size === 0}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold disabled:bg-gray-300 flex items-center justify-center gap-2 transition-all active:scale-95"
+                    >
+                        <span>{selectedIds.size}건 불러오기</span>
+                    </button>
+                </div>
+            </div>
+        </div>,
+        document.body
+    );
+};
+
+
 const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { customers, products, userQueries } = useDataState();
     const { openScanner } = useScanner();
@@ -49,7 +299,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [batches, setBatches] = useState<ReceivingBatch[]>([]);
     const [draftCount, setDraftCount] = useState(0);
 
-    const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10));
+    // Initial state set to today's local date
+    const [currentDate, setCurrentDate] = useState(getTodayString);
     const [selectedSupplier, setSelectedSupplier] = useState<Customer | null>(null);
     const [currentItems, setCurrentItems] = useState<ReceivingItem[]>([]);
     const [isSavingBatch, setIsSavingBatch] = useState(false);
@@ -58,6 +309,11 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     // UI State for List View
     const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
     
+    // Cloud Load Modal State
+    const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
+    const [cloudBatches, setCloudBatches] = useState<ReceivingBatch[]>([]);
+    const [isCloudLoading, setIsCloudLoading] = useState(false);
+
     const { draft, isLoading: isDraftLoading, save: saveDraft, remove: removeDraft } = useDraft<ReceivingDraft>(DRAFT_KEY);
     
     const { searchTerm, setSearchTerm, results, isSearching, search } = useProductSearch('newOrder');
@@ -75,7 +331,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
     const [isSending, setIsSending] = useState(false);
-    const [isCloudLoading, setIsCloudLoading] = useState(false);
     
     // --- Data Loading & Sync ---
 
@@ -118,7 +373,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (draft) {
             // Only restore if user hasn't explicitly started a new action
             if (!selectedSupplier && currentItems.length === 0) {
-                setCurrentDate(draft.currentDate || new Date().toISOString().slice(0, 10));
+                setCurrentDate(draft.currentDate || getTodayString());
                 setSelectedSupplier(draft.selectedSupplier || null);
                 setCurrentItems(draft.items || []);
             }
@@ -138,7 +393,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     // --- Actions ---
 
     const resetEntryForm = () => {
-        setCurrentDate(new Date().toISOString().slice(0, 10));
+        setCurrentDate(getTodayString());
         setSelectedSupplier(null);
         setCurrentItems([]);
         setSearchTerm('');
@@ -369,7 +624,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                     item_name: item.name
                                 };
                                 // Execute SQL Insert
-                                await executeUserQuery('입고등록', params, insertQuery.query);
+                                const result = await executeUserQuery('입고등록', params, insertQuery.query);
+                                
+                                // DEBUG: Show result for 'Kwangdong Pharm' if requested by user
+                                if (batch.supplier.name.includes("광동")) {
+                                    alert(`광동제약 전송 결과: ${JSON.stringify(result)}`);
+                                }
                             }
 
                             // 2. If all items in batch succeeded, update status
@@ -404,38 +664,65 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         );
     };
 
-    const handleLoadFromCloud = () => {
-        showAlert(
-            "클라우드(Firebase)에서 작성 중인 입고 내역을 불러오겠습니까?\n현재 기기의 로컬 데이터와 병합됩니다.",
-            async () => {
-                setIsCloudLoading(true);
-                try {
-                    // Fetch all batches from Firebase
-                    const remoteBatches = await getStore<ReceivingBatch>('receiving-batches');
-                    
-                    // Filter for 'draft' items to sync back
-                    const remoteDrafts = remoteBatches.filter(b => b.status === 'draft');
-                    
-                    if (remoteDrafts.length === 0) {
-                        showToast("불러올 작성 중인 내역이 없습니다.", 'error');
-                        return;
-                    }
+    // --- Cloud Load Handlers ---
 
-                    // Save to local IndexedDB
-                    for (const batch of remoteDrafts) {
-                        await receiveDb.saveOrUpdateBatch(batch);
-                    }
-                    
-                    await loadBatches();
-                    showToast(`${remoteDrafts.length}건의 데이터를 불러왔습니다.`, 'success');
+    const handleLoadFromCloud = async () => {
+        // Just open the modal, do not fetch immediately (or modal will do initial fetch)
+        setIsCloudModalOpen(true);
+    };
+
+    const handleCloudSearch = async (startDate: string, endDate: string) => {
+        setIsCloudLoading(true);
+        try {
+            const remoteBatches = await getReceivingBatchesByDateRange(startDate, endDate);
+            if (remoteBatches.length === 0) {
+                showToast("해당 기간의 데이터가 없습니다.", 'error');
+            }
+            setCloudBatches(remoteBatches);
+        } catch (e) {
+            console.error(e);
+            showAlert("데이터를 불러오는 데 실패했습니다.");
+        } finally {
+            setIsCloudLoading(false);
+        }
+    };
+
+    const handleCloudLoadConfirm = async (selectedBatches: ReceivingBatch[]) => {
+        if (selectedBatches.length === 0) {
+            setIsCloudModalOpen(false);
+            return;
+        }
+
+        try {
+            // Save to local IndexedDB
+            for (const batch of selectedBatches) {
+                await receiveDb.saveOrUpdateBatch(batch);
+            }
+            
+            await loadBatches();
+            showToast(`${selectedBatches.length}건의 데이터를 불러왔습니다.`, 'success');
+            setIsCloudModalOpen(false);
+        } catch (e) {
+            console.error(e);
+            showAlert("데이터 저장 중 오류가 발생했습니다.");
+        }
+    };
+
+    const handleCloudDelete = async (batch: ReceivingBatch) => {
+        showAlert(
+            `'${batch.supplier.name}' (${batch.date}) 내역을 클라우드에서 영구 삭제하시겠습니까?`,
+            async () => {
+                try {
+                    await deleteReceivingBatch(batch.id);
+                    setCloudBatches(prev => prev.filter(b => b.id !== batch.id));
+                    showToast("삭제되었습니다.", 'success');
                 } catch (e) {
                     console.error(e);
-                    showAlert("데이터를 불러오는 데 실패했습니다.");
-                } finally {
-                    setIsCloudLoading(false);
+                    showToast("삭제 실패", 'error');
                 }
             },
-            "불러오기"
+            "삭제",
+            "bg-red-500 hover:bg-red-600 focus:ring-red-500"
         );
     };
 
@@ -448,10 +735,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     <h2 className="font-bold text-gray-800 ml-2">입고 목록</h2>
                     <button 
                         onClick={handleLoadFromCloud} 
-                        disabled={isCloudLoading}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 disabled:opacity-50"
+                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
                     >
-                        {isCloudLoading ? <SpinnerIcon className="w-3 h-3" /> : <DatabaseIcon className="w-3 h-3" />}
+                        <DatabaseIcon className="w-3 h-3" />
                         클라우드 불러오기
                     </button>
                 </div>
@@ -472,8 +758,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
                             // Skip rendering if no drafts and not expanded (hide completed unless user digs)
                             if (!hasDrafts && sent.length > 0 && !isExpanded) {
-                                // Optionally show a summary of sent items or just hide
-                                // Requirement: "전송완료표기되고 검색목록에도 보이지않아야함" -> hide sent by default
                                 return null; 
                             }
 
@@ -685,6 +969,15 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 onAdd={handleAddItem}
                 onScanNext={handleScan}
                 currentItems={currentItems}
+            />
+            <CloudLoadModal 
+                isOpen={isCloudModalOpen}
+                onClose={() => setIsCloudModalOpen(false)}
+                onConfirm={handleCloudLoadConfirm}
+                onDelete={handleCloudDelete}
+                data={cloudBatches}
+                onSearch={handleCloudSearch}
+                isLoading={isCloudLoading}
             />
         </div>
     );
