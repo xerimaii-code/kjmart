@@ -1,11 +1,10 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ActionModal from '../components/ActionModal';
 import { useAlert, useDataState, useScanner } from '../context/AppContext';
 import { executeUserQuery, searchProductsForEdit } from '../services/sqlService';
 import { extractParamsForQuery } from '../hooks/useProductSearch';
-import ToggleSwitch from '../components/ToggleSwitch';
-import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon } from '../components/Icons';
+import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon, CheckSquareIcon } from '../components/Icons';
 import { Customer } from '../types';
 import SearchDropdown from '../components/SearchDropdown';
 
@@ -26,20 +25,27 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [spec, setSpec] = useState('');
     const [costPrice, setCostPrice] = useState<number | string>(0);
     const [sellingPrice, setSellingPrice] = useState<number | string>(0);
-    const [comcode, setComcode] = useState('');
-    const [lCode, setLCode] = useState('');
-    const [mCode, setMCode] = useState('');
-    const [sCode, setSCode] = useState('');
     
+    // 분류 (현재는 텍스트 입력, 추후 드롭다운으로 확장 가능)
+    const [lCode, setLCode] = useState(''); // 대분류
+    const [mCode, setMCode] = useState(''); // 중분류
+    const [sCode, setSCode] = useState(''); // 소분류
+    
+    const [comcode, setComcode] = useState('');
+    const [stockQty, setStockQty] = useState<number>(0); // 재고수량
+
     // Flags
     const [isUse, setIsUse] = useState(true);
     const [isTaxable, setIsTaxable] = useState(true);
     const [isPoint, setIsPoint] = useState(true);
     const [isStockManaged, setIsStockManaged] = useState(true);
 
+    // Info Panels
+    const [saleInfoText, setSaleInfoText] = useState('할인 정보 없음');
+    const [bomInfoText, setBomInfoText] = useState('일반 상품');
+
     const [isEditMode, setIsEditMode] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [resetAfterSave, setResetAfterSave] = useState(true);
     
     const [searchInput, setSearchInput] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +64,14 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
     }, [comcode, customers]);
 
+    // Calculate Margin Rate
+    const marginRate = useMemo(() => {
+        const cost = Number(String(costPrice).replace(/,/g, ''));
+        const selling = Number(String(sellingPrice).replace(/,/g, ''));
+        if (!selling || selling === 0) return 0;
+        return ((selling - cost) / selling) * 100;
+    }, [costPrice, sellingPrice]);
+
     const resetForm = useCallback((full: boolean = true) => {
         if (full) {
             setBarcode('');
@@ -70,17 +84,22 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             setLCode('');
             setMCode('');
             setSCode('');
+            setStockQty(0);
             setIsUse(true);
             setIsTaxable(true);
             setIsPoint(true);
             setIsStockManaged(true);
+            setSaleInfoText('할인 정보 없음');
+            setBomInfoText('일반 상품');
             setIsEditMode(false);
         } else {
-            // Partial reset: keep category/customer for faster entry
+            // 저장 후 부분 초기화 (바코드/상품명/가격만 리셋)
             setBarcode('');
             setProductName('');
             setCostPrice(0);
             setSellingPrice(0);
+            setStockQty(0);
+            setSaleInfoText('할인 정보 없음');
             setIsEditMode(false);
         }
     }, []);
@@ -90,8 +109,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         try {
             const results = await searchProductsForEdit(code);
             if (results && results.length > 0) {
-                // Assuming exact match or user selection logic could be added here.
-                // For simplicity, take the first result.
                 const p = results[0];
                 setBarcode(p.바코드);
                 setProductName(p.상품명);
@@ -102,12 +119,21 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 setLCode(p.대분류코드 || '');
                 setMCode(p.중분류코드 || '');
                 setSCode(p.소분류코드 || '');
+                setStockQty(p.재고수량 || 0);
                 
                 setIsUse(p.사용유무 === '1' || p.사용유무 === 'Y');
                 setIsTaxable(p.과세여부 === '1' || p.과세여부 === 'Y');
                 setIsPoint(p.고객점수가산 === '1' || p.고객점수가산 === 'Y');
                 setIsStockManaged(p.재고관리여부 === '1' || p.재고관리여부 === 'Y');
                 
+                // 정보 패널 설정
+                if (p.행사유무 === 'Y') {
+                    setSaleInfoText(`[${p.행사명}] ${p.행사매입가?.toLocaleString()} / ${p.행사판매가?.toLocaleString()}\n(${p.행사시작일}~${p.행사종료일})`);
+                } else {
+                    setSaleInfoText('할인 정보 없음');
+                }
+                setBomInfoText(p.BOM여부 || '일반 상품');
+
                 setIsEditMode(true);
                 showToast('상품 정보를 불러왔습니다.', 'success');
             } else {
@@ -162,8 +188,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             showAlert("바코드와 상품명은 필수 항목입니다.");
             return;
         }
-        
-        // [수정] 필수값 체크: 분류 및 거래처
         if (!lCode) {
             showAlert("대분류를 선택해주세요.");
             return;
@@ -178,84 +202,25 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             const safeCost = Number(String(costPrice).replace(/,/g, ''));
             const safeSelling = Number(String(sellingPrice).replace(/,/g, ''));
 
-            // Base values
-            const pBarcode = barcode;
-            const pProductName = productName;
-            const pSpec = spec || '';
-            const pMoney0vat = String(isNaN(safeCost) ? 0 : safeCost);
-            const pMoney1 = String(isNaN(safeSelling) ? 0 : safeSelling);
-            const pComcode = comcode || '';
-            const pIsUse = isUse ? '1' : '0';
-            const pIsVat = isTaxable ? '1' : '0';
-            const pIsPoint = isPoint ? '1' : '0';
-            const pIsStock = isStockManaged ? '1' : '0';
-            const pGubun1 = lCode || '';
-            const pGubun2 = mCode || '';
-            const pGubun3 = sCode || '';
-            
-            // Generate current date strings for SQL params
-            const now = new Date();
-            const pCurrentDate = now.toISOString().slice(0, 10); // YYYY-MM-DD
-            const pNow = now.toISOString();
-
-            // Comprehensive Context Params mapping
+            // Base values mapping
             const contextParams = {
-                // Section 1: Explicit inputs from Prompt & Specific SQL Requirements
-                money0vat: pMoney0vat, // Required by SQL: @money0vat
-                money1: pMoney1,       // Required by SQL: @money1
-                Descr: pProductName,   // Required by SQL: @Descr (case sensitive)
-                descr: pProductName,   // Fallback: @descr
-                isvat: pIsVat,         // Required by SQL: @isvat
-                gubun1: pGubun1,       // Required by SQL: @gubun1
-                gubun2: pGubun2,       // Required by SQL: @gubun2
-                gubun3: pGubun3,       // Required by SQL: @gubun3
-                barcode: pBarcode,     // Required by SQL: @barcode
-                spec: pSpec,           // Required by SQL: @spec
-                comcode: pComcode,     // Required by SQL: @comcode
-                isjago: pIsStock,      // Required by SQL: @isjago
-                ispoint: pIsPoint,     // Required by SQL: @ispoint
-                isuse: pIsUse,         // Required by SQL: @isuse
-                remark: '모바일',       // Default remark
-                
-                // --- NEW: Automatically injected date variables ---
-                CurrentDate: pCurrentDate, // Required by SQL: @CurrentDate
-                Date: pCurrentDate,        // Alias
-                Now: pNow,                 // Alias
-                
-                // Section 2: Helper/Internal variables provided for flexibility
+                money0vat: String(isNaN(safeCost) ? 0 : safeCost),
+                money1: String(isNaN(safeSelling) ? 0 : safeSelling),
+                Descr: productName,
+                descr: productName,
+                isvat: isTaxable ? '1' : '0',
+                gubun1: lCode || '',
+                gubun2: mCode || '',
+                gubun3: sCode || '',
+                barcode: barcode,
+                spec: spec || '',
+                comcode: comcode || '',
+                isjago: isStockManaged ? '1' : '0',
+                ispoint: isPoint ? '1' : '0',
+                isuse: isUse ? '1' : '0',
+                CurrentDate: new Date().toISOString().slice(0, 10),
                 kw: searchInput, 
-                
-                // Lowercase aliases
-                stock_yn: pIsStock,
-                
-                // Default flags (Available as variables in case user edits the query to use them)
-                iscashback: '1', 
-                pangacho: '0', 
-                isinclude: '1', 
-                islink: '0', 
-                weightoff: '1', 
-                autobalju: '0',
-                isprt: '0',
-                
-                // Korean aliases
-                바코드: pBarcode,
-                상품명: pProductName,
-                규격: pSpec,
-                매입가: pMoney0vat,
-                판매가: pMoney1,
-                거래처코드: pComcode,
-                사용유무: pIsUse,
-                사용여부: pIsUse,
-                과세유무: pIsVat,
-                과세여부: pIsVat,
-                고객점수가산: pIsPoint,
-                포인트유무: pIsPoint,
-                재고관리유무: pIsStock,
-                재고관리여부: pIsStock,
-                대분류: pGubun1,
-                중분류: pGubun2,
-                소분류: pGubun3,
-                현재날짜: pCurrentDate
+                stock_yn: isStockManaged ? '1' : '0',
             };
 
             const userQueryName = isEditMode ? '상품수정' : '상품등록';
@@ -263,31 +228,27 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
             if (!userDefinedQuery) {
                 setIsSaving(false);
-                showAlert(`'${userQueryName}' 쿼리가 설정되지 않았습니다.\n[설정 > SQL Runner]에서 '${userQueryName}' 쿼리를 추가해주세요.`);
+                showAlert(`'${userQueryName}' 쿼리가 설정되지 않았습니다.`);
                 return;
             }
 
-            // Dynamically match params to what is actually used in the SQL query
             const dynamicParams = extractParamsForQuery(userDefinedQuery.query, contextParams);
-
             await executeUserQuery(userQueryName, dynamicParams, userDefinedQuery.query);
+            
             showToast(isEditMode ? "상품 정보가 수정되었습니다." : "신규 상품이 등록되었습니다.", "success");
-            
             setSearchInput('');
-
-            if(resetAfterSave) { 
-                resetForm(false); 
-            } else { 
-                resetForm(true); 
-            }
-            
-            setTimeout(() => {
-                searchInputRef.current?.focus();
-            }, 100);
+            resetForm(true); // 항상 초기화 (이미지 UI에는 초기화 옵션이 없으므로)
+            setTimeout(() => searchInputRef.current?.focus(), 100);
 
         } catch (e: any) {
             showAlert(`저장 오류: ${e.message}`);
         } finally { setIsSaving(false); }
+    };
+
+    const handleReset = () => {
+        setSearchInput('');
+        resetForm(true);
+        setTimeout(() => searchInputRef.current?.focus(), 100);
     };
 
     if (!isOpen) return null;
@@ -297,28 +258,30 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         c.comcode.includes(customerSearch)
     );
 
+    // --- Custom UI Components for Image Matching ---
+
+    const CustomToggleButton = ({ label, checked, onChange }: { label: string, checked: boolean, onChange: (v: boolean) => void }) => (
+        <button 
+            onClick={() => onChange(!checked)}
+            className={`flex items-center justify-center gap-1.5 p-2 rounded border transition-all ${checked ? 'bg-white border-blue-500 text-blue-700' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
+        >
+            <div className={`w-4 h-4 border rounded flex items-center justify-center ${checked ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
+                {checked && <CheckCircleIcon className="w-3.5 h-3.5 text-white" />}
+            </div>
+            <span className="text-xs font-bold whitespace-nowrap">{label}</span>
+        </button>
+    );
+
     return (
         <ActionModal
             isOpen={isOpen}
             onClose={onClose}
-            title={isEditMode ? "상품 수정" : "상품 등록"}
+            title={isEditMode ? "상품 수정" : "상품 등록/수정"} // 이미지 헤더에 맞춤
             disableBodyScroll={false}
-            footer={
-                <div className="grid grid-cols-2 gap-3">
-                    <button onClick={onClose} className="h-12 rounded-xl bg-gray-200 text-gray-700 font-bold hover:bg-gray-300">취소</button>
-                    <button 
-                        onClick={handleSave} 
-                        disabled={isSaving}
-                        className="h-12 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 flex items-center justify-center gap-2 disabled:bg-gray-400"
-                    >
-                        {isSaving && <SpinnerIcon className="w-5 h-5"/>}
-                        {isEditMode ? '수정 저장' : '신규 등록'}
-                    </button>
-                </div>
-            }
+            // 이미지와 달리 Footer를 Body 내부에 통합하여 커스텀 레이아웃 구현
         >
-            <div className="p-4 space-y-4 bg-gray-50 min-h-full">
-                {/* Search Bar */}
+            <div className="p-3 space-y-3 bg-white min-h-full">
+                {/* 1. Search Bar */}
                 <form onSubmit={handleSearch} className="flex gap-2">
                     <div className="relative flex-grow">
                         <input
@@ -326,76 +289,102 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             type="text"
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            placeholder="바코드 스캔 또는 입력"
-                            className="w-full h-11 pl-4 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="바코드 또는 상품명 (길게 눌러 초기화)" // 이미지 플레이스홀더
+                            className="w-full h-10 pl-3 pr-10 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
                         />
-                        <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-600">
+                        <button type="submit" className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-white bg-blue-600 rounded-r-md hover:bg-blue-700">
                             <SearchIcon className="w-5 h-5" />
                         </button>
                     </div>
-                    <button type="button" onClick={handleScan} className="w-11 h-11 bg-blue-600 text-white rounded-lg flex items-center justify-center">
+                    <button type="button" onClick={handleScan} className="w-10 h-10 bg-gray-700 text-white rounded-md flex items-center justify-center">
                         <BarcodeScannerIcon className="w-6 h-6" />
                     </button>
                 </form>
 
-                {/* Form Fields */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-3">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">바코드</label>
-                        <input
-                            type="text"
-                            value={barcode}
-                            onChange={(e) => setBarcode(e.target.value)}
-                            className="w-full p-2.5 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500"
-                            placeholder="상품 바코드"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">상품명</label>
+                {/* 2. Row: Product Name & Spec */}
+                <div className="flex gap-2">
+                    <div className="flex-grow flex flex-col gap-1">
+                        <label className="text-xs font-bold text-gray-700">상품명</label>
                         <input
                             type="text"
                             value={productName}
                             onChange={(e) => setProductName(e.target.value)}
-                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                            placeholder="상품명 입력"
+                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
+                            placeholder="상품명"
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">규격</label>
+                    <div className="w-1/3 flex flex-col gap-1">
+                        <label className="text-xs font-bold text-gray-700">규격</label>
                         <input
                             type="text"
                             value={spec}
                             onChange={(e) => setSpec(e.target.value)}
-                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                            placeholder="예: 1.5L"
+                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
+                            placeholder="규격"
                         />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">매입가</label>
-                            <input
-                                type="text" inputMode="numeric"
-                                value={costPrice}
-                                onChange={(e) => setCostPrice(e.target.value)}
-                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-right font-mono"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">판매가</label>
-                            <input
-                                type="text" inputMode="numeric"
-                                value={sellingPrice}
-                                onChange={(e) => setSellingPrice(e.target.value)}
-                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-right font-bold text-blue-600 font-mono"
-                            />
-                        </div>
                     </div>
                 </div>
 
-                {/* Additional Info */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-3">
-                    <div className="relative">
-                        <label className="block text-sm font-bold text-gray-700 mb-1">거래처</label>
+                {/* 3. Row: Prices, Margin, Tax */}
+                <div className="flex gap-2 items-end">
+                    <div className="flex-1 flex flex-col gap-1">
+                        <label className="text-xs font-bold text-gray-700">매입가</label>
+                        <input
+                            type="text" inputMode="numeric"
+                            value={costPrice}
+                            onChange={(e) => setCostPrice(e.target.value)}
+                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-semibold"
+                        />
+                    </div>
+                    <div className="flex-1 flex flex-col gap-1">
+                        <label className="text-xs font-bold text-gray-700">판매가</label>
+                        <input
+                            type="text" inputMode="numeric"
+                            value={sellingPrice}
+                            onChange={(e) => setSellingPrice(e.target.value)}
+                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-bold text-blue-600"
+                        />
+                    </div>
+                    <div className="w-16 flex flex-col gap-1 items-center justify-center pb-2">
+                        <label className="text-[10px] text-gray-500">이익률</label>
+                        <span className={`text-xs font-bold ${marginRate >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                            {marginRate.toFixed(2)}%
+                        </span>
+                    </div>
+                    <div className="pb-1">
+                        <button 
+                            onClick={() => setIsTaxable(!isTaxable)}
+                            className={`flex items-center gap-1 px-2 py-2 rounded border ${isTaxable ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600'}`}
+                        >
+                            <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${isTaxable ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
+                                {isTaxable && <CheckCircleIcon className="w-3 h-3 text-white" />}
+                            </div>
+                            <span className="text-xs font-bold">과세</span>
+                        </button>
+                    </div>
+                </div>
+
+                {/* 4. Row: Classification (Category) */}
+                <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-gray-700">상품 분류</label>
+                    <div className="flex gap-1">
+                        <input type="text" value={lCode} onChange={(e) => setLCode(e.target.value)} className="flex-1 h-9 px-2 border border-gray-300 rounded text-sm text-center" placeholder="대분류" />
+                        <input type="text" value={mCode} onChange={(e) => setMCode(e.target.value)} className="flex-1 h-9 px-2 border border-gray-300 rounded text-sm text-center" placeholder="중분류" />
+                        <input type="text" value={sCode} onChange={(e) => setSCode(e.target.value)} className="flex-1 h-9 px-2 border border-gray-300 rounded text-sm text-center" placeholder="소분류" />
+                        <button 
+                            onClick={() => { setLCode(''); setMCode(''); setSCode(''); }}
+                            className="w-16 h-9 bg-white border border-gray-300 rounded text-xs font-bold text-gray-600 flex items-center justify-center gap-1 hover:bg-gray-50"
+                        >
+                            <CheckSquareIcon className="w-3 h-3 text-blue-500" />
+                            초기화
+                        </button>
+                    </div>
+                </div>
+
+                {/* 5. Row: Customer & Stock */}
+                <div className="flex gap-2">
+                    <div className="flex-grow relative flex flex-col gap-1">
+                        <label className="text-xs font-bold text-gray-700">거래처</label>
                         <input
                             type="text"
                             value={customerSearch}
@@ -405,9 +394,10 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             }}
                             onFocus={() => setShowCustomerDropdown(true)}
                             onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
-                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                            placeholder="거래처 검색"
+                            className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm bg-white"
+                            placeholder="거래처를 선택하세요"
                         />
+                        <div className="absolute right-2 bottom-3 pointer-events-none text-gray-400">▼</div>
                         <SearchDropdown<Customer>
                             items={filteredCustomers}
                             renderItem={(c) => (
@@ -419,39 +409,55 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             show={showCustomerDropdown && filteredCustomers.length > 0}
                         />
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-1">대분류</label>
-                            <input type="text" value={lCode} onChange={(e) => setLCode(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" placeholder="코드"/>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-1">중분류</label>
-                            <input type="text" value={mCode} onChange={(e) => setMCode(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" placeholder="코드"/>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-1">소분류</label>
-                            <input type="text" value={sCode} onChange={(e) => setSCode(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" placeholder="코드"/>
-                        </div>
+                    <div className="w-1/3 flex flex-col gap-1">
+                        <label className="text-xs font-bold text-gray-700">재고수량</label>
+                        <input
+                            type="text"
+                            value={stockQty.toLocaleString()}
+                            readOnly
+                            className="w-full h-10 px-2 border border-gray-300 rounded-md bg-gray-100 text-right text-sm font-bold text-gray-700"
+                        />
                     </div>
                 </div>
 
-                {/* Flags */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                    <div className="grid grid-cols-2 gap-4">
-                        <ToggleSwitch id="isUse" checked={isUse} onChange={setIsUse} label="사용 여부" color="blue" />
-                        <ToggleSwitch id="isTaxable" checked={isTaxable} onChange={setIsTaxable} label="과세 상품" color="blue" />
-                        <ToggleSwitch id="isPoint" checked={isPoint} onChange={setIsPoint} label="포인트 적립" color="blue" />
-                        <ToggleSwitch id="isStockManaged" checked={isStockManaged} onChange={setIsStockManaged} label="재고 관리" color="blue" />
-                    </div>
+                {/* 6. Row: Toggles */}
+                <div className="grid grid-cols-3 gap-2 py-1">
+                    <CustomToggleButton label="상품사용유무" checked={isUse} onChange={setIsUse} />
+                    <CustomToggleButton label="고객점수가산" checked={isPoint} onChange={setIsPoint} />
+                    <CustomToggleButton label="재고관리여부" checked={isStockManaged} onChange={setIsStockManaged} />
                 </div>
 
-                {/* Options */}
-                <div className="flex items-center justify-between px-2">
-                    <div className="flex items-center gap-2" onClick={() => setResetAfterSave(!resetAfterSave)}>
-                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${resetAfterSave ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
-                            {resetAfterSave && <CheckCircleIcon className="w-4 h-4 text-white" />}
+                {/* 7. Action Buttons */}
+                <div className="grid grid-cols-[1fr_4fr] gap-2 pt-2">
+                    <button 
+                        onClick={handleReset} 
+                        className="h-12 bg-orange-100 border border-orange-200 text-orange-600 rounded-md flex items-center justify-center hover:bg-orange-200"
+                    >
+                        <UndoIcon className="w-6 h-6" />
+                    </button>
+                    <button 
+                        onClick={handleSave} 
+                        disabled={isSaving}
+                        className="h-12 bg-blue-600 text-white rounded-md font-bold text-lg flex items-center justify-center gap-2 hover:bg-blue-700 shadow-md active:scale-95 disabled:bg-gray-400"
+                    >
+                        {isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}
+                        저장
+                    </button>
+                </div>
+
+                {/* 8. Bottom Info Panels */}
+                <div className="grid grid-cols-2 gap-2 h-40 mt-2">
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg flex flex-col">
+                        <div className="bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-600 border-b border-gray-200 text-center">할인정보</div>
+                        <div className="flex-grow p-2 flex items-center justify-center text-center">
+                            <p className="text-xs text-gray-500 whitespace-pre-line leading-relaxed">{saleInfoText}</p>
                         </div>
-                        <span className="text-sm font-medium text-gray-700">저장 후 입력 초기화</span>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg flex flex-col">
+                        <div className="bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-600 border-b border-gray-200 text-center">BOM 정보</div>
+                        <div className="flex-grow p-2 flex items-center justify-center text-center">
+                            <p className="text-xs text-gray-500">{bomInfoText}</p>
+                        </div>
                     </div>
                 </div>
             </div>
