@@ -2,13 +2,14 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Customer, Product, ReceivingItem, ReceivingBatch, ReceivingDraft } from '../types';
 import { useDataState, useScanner, useAlert, useModals, useMiscUI } from '../context/AppContext';
-import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon, PencilSquareIcon, ChevronRightIcon } from '../components/Icons';
+import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon, PencilSquareIcon, ChevronRightIcon, GoogleDriveIcon, DatabaseIcon } from '../components/Icons';
 import { useDebounce } from '../hooks/useDebounce';
 import { useProductSearch } from '../hooks/useProductSearch';
 import SearchDropdown from '../components/SearchDropdown';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
 import * as receiveDb from '../services/receiveDbService';
-import { addReceivingBatch } from '../services/dbService';
+import { addReceivingBatch, getStore } from '../services/dbService';
+import { executeUserQuery } from '../services/sqlService';
 import { useDraft } from '../hooks/useDraft';
 import ReceiveItemModal from '../components/ReceiveItemModal';
 
@@ -39,7 +40,7 @@ const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> 
 );
 
 const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
-    const { customers, products } = useDataState();
+    const { customers, products, userQueries } = useDataState();
     const { openScanner } = useScanner();
     const { showAlert, showToast } = useAlert();
     const { sqlStatus } = useMiscUI();
@@ -74,6 +75,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
     const [isSending, setIsSending] = useState(false);
+    const [isCloudLoading, setIsCloudLoading] = useState(false);
     
     // --- Data Loading & Sync ---
 
@@ -82,11 +84,16 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             const allBatches = await receiveDb.getAllBatches();
             setBatches(allBatches);
             
-            // Count unique suppliers that have drafts (since we group drafts by supplier now)
-            const draftSuppliers = new Set(
-                allBatches.filter(b => b.status === 'draft').map(b => b.supplier.comcode)
-            );
+            const drafts = allBatches.filter(b => b.status === 'draft');
+            const draftSuppliers = new Set(drafts.map(b => b.supplier.comcode));
             setDraftCount(draftSuppliers.size);
+            
+            // Auto-select all drafts initially
+            const draftIds = drafts.map(b => b.id);
+            if (draftIds.length > 0) {
+                // Only select if not already manually modified (simple heuristic: if set is empty)
+                setSelectedBatches(prev => prev.size === 0 ? new Set(draftIds) : prev);
+            }
         } catch (e) {
             console.error("Failed to load batches", e);
         }
@@ -97,6 +104,14 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             loadBatches();
         }
     }, [isActive, loadBatches]);
+
+    useEffect(() => {
+        if (view === 'list') {
+            // Re-evaluate default selection when entering list view
+            const drafts = batches.filter(b => b.status === 'draft');
+            setSelectedBatches(new Set(drafts.map(b => b.id)));
+        }
+    }, [view, batches]);
 
     // Restore draft from local storage (if app was closed improperly)
     useEffect(() => {
@@ -157,6 +172,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
 
     // Consolidated Save: "One Bundle Per Supplier"
+    // Also saves to Firebase for multi-device sync
     const handleSaveBatch = async () => {
         if (!selectedSupplier) {
             showAlert('거래처를 선택해주세요.');
@@ -180,7 +196,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             }
 
             // 3. Create new consolidated batch
-            // Reset 'isNew' flag on save, as they are now persisted
             const itemsToSave = currentItems.map(item => ({ ...item, isNew: false }));
             const totalAmount = itemsToSave.reduce((sum, item) => sum + (item.costPrice || 0) * item.quantity, 0);
             
@@ -191,18 +206,24 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 items: itemsToSave,
                 itemCount: itemsToSave.length,
                 totalAmount,
-                status: 'draft', // Saved as draft first (local save)
+                status: 'draft',
             };
 
+            // Save to Local DB
+            await receiveDb.saveOrUpdateBatch(newBatch);
+            
+            // Save to Firebase (Cloud Backup/Sync)
+            // Note: This does NOT send to SQL Server yet.
+            try {
+                await addReceivingBatch(newBatch);
+            } catch (fbError) {
+                console.warn("Firebase sync failed:", fbError);
+            }
+
             if (sqlStatus === 'connected') {
-                // If online, send directly to server? The requirement implies "Send" is a separate step from "List".
-                // But typically "Save" means save to device. 
-                // "전송전에는 거래처라는 하나의 보따리" implies we keep it as draft until explicitly sent.
-                await receiveDb.saveOrUpdateBatch(newBatch);
-                showToast('기기에 저장되었습니다. (전송 대기)', 'success');
+                showToast('저장 완료 (서버 전송 대기)', 'success');
             } else {
-                await receiveDb.saveOrUpdateBatch(newBatch);
-                showToast('오프라인 상태라 기기에 임시 저장되었습니다.', 'success');
+                showToast('오프라인 저장 완료', 'success');
             }
 
             await removeDraft(); // Clear auto-save draft
@@ -240,39 +261,26 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }, false);
     };
     
-    // Auto-load drafts when supplier is selected
     const handleSupplierChange = async (supplier: Customer) => {
         setSelectedSupplier(supplier);
-        
-        // Find existing draft batches for this supplier
         const supplierDrafts = batches.filter(b => 
             b.supplier.comcode === supplier.comcode && b.status === 'draft'
         );
 
         if (supplierDrafts.length > 0) {
-            // Consolidate items from all draft batches (usually just one, but handle multiple just in case)
             const allItems = supplierDrafts.flatMap(b => b.items);
-            // Mark loaded items as NOT new
             const cleanItems = allItems.map(i => ({...i, isNew: false}));
-            
             setCurrentItems(cleanItems);
-            
-            // Use the date of the most recent draft
             const latestDate = supplierDrafts.sort((a,b) => b.id - a.id)[0].date;
             setCurrentDate(latestDate);
-            
             showToast(`${supplier.name}의 작성 중인 내역을 불러왔습니다.`, 'success');
         } else {
             setCurrentItems([]);
-            // Don't change date to keep user's selection or today
         }
     };
 
     // --- List View Logic ---
 
-    // Group batches by Supplier. 
-    // For 'draft' status, we treat them as a single group that can be toggled.
-    // For 'sent' status, they are individual history items.
     const groupedBatches = useMemo(() => {
         const groups: Record<string, { supplier: Customer, drafts: ReceivingBatch[], sent: ReceivingBatch[] }> = {};
         
@@ -288,7 +296,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             }
         });
 
-        // Convert to array and sort
         return Object.values(groups).sort((a, b) => a.supplier.name.localeCompare(b.supplier.name));
     }, [batches]);
     
@@ -325,35 +332,110 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             return;
         }
         if (sqlStatus !== 'connected') {
-            showAlert('서버에 연결할 수 없어 전송할 수 없습니다. 오프라인 모드입니다.');
+            showAlert('SQL 서버에 연결되어 있지 않아 전송할 수 없습니다.');
+            return;
+        }
+
+        // Check if required query exists
+        const insertQuery = userQueries.find(q => q.name === '입고등록');
+        if (!insertQuery) {
+            showAlert("SQL Runner에 '입고등록' 쿼리가 등록되어 있지 않습니다.\n설정 > SQL Runner에서 쿼리를 추가해주세요.\n예: INSERT INTO 입고테이블 (날짜, 코드, 수량...) VALUES (@date, @barcode, @qty...)");
             return;
         }
         
-        // Calculate total items to send
         const batchesToSend = batches.filter(b => selectedBatches.has(b.id));
         const totalItems = batchesToSend.reduce((acc, b) => acc + b.itemCount, 0);
         const uniqueSuppliers = new Set(batchesToSend.map(b => b.supplier.name)).size;
 
         showAlert(
-            `${uniqueSuppliers}개 거래처, 총 ${totalItems}개 품목을 서버로 전송하시겠습니까?`,
+            `${uniqueSuppliers}개 거래처, 총 ${totalItems}개 품목을 서버(POS)로 전송하시겠습니까?`,
             async () => {
                 setIsSending(true);
+                let successCount = 0;
+                let failCount = 0;
+
                 try {
                     for (const batch of batchesToSend) {
-                        await addReceivingBatch(batch); // Send to Firebase/Server
-                        const updatedBatch = { ...batch, status: 'sent' as 'sent', sentAt: new Date().toISOString() };
-                        await receiveDb.saveOrUpdateBatch(updatedBatch); // Update local status
+                        try {
+                            // 1. Send items one by one (or handled by backend logic if adapted)
+                            for (const item of batch.items) {
+                                const params = {
+                                    date: batch.date,
+                                    comcode: batch.supplier.comcode,
+                                    barcode: item.barcode,
+                                    qty: item.quantity,
+                                    cost: item.costPrice,
+                                    price: item.sellingPrice,
+                                    item_name: item.name
+                                };
+                                // Execute SQL Insert
+                                await executeUserQuery('입고등록', params, insertQuery.query);
+                            }
+
+                            // 2. If all items in batch succeeded, update status
+                            const updatedBatch = { ...batch, status: 'sent' as 'sent', sentAt: new Date().toISOString() };
+                            
+                            // Update Local
+                            await receiveDb.saveOrUpdateBatch(updatedBatch);
+                            
+                            // Update Firebase (so other devices see it as sent)
+                            await addReceivingBatch(updatedBatch);
+                            
+                            successCount++;
+
+                        } catch (err: any) {
+                            console.error(`Failed to send batch ${batch.id}`, err);
+                            failCount++;
+                            // Don't continue if a batch fails - stopping might be safer, or continue? 
+                            // Let's alert and stop to prevent partial mess.
+                            throw new Error(`'${batch.supplier.name}' 전송 중 오류: ${err.message}`);
+                        }
                     }
-                    showToast(`전송 완료`, 'success');
-                    setSelectedBatches(new Set());
+                    showToast(`${successCount}건 전송 완료`, 'success');
+                    setSelectedBatches(new Set()); // Clear selection
                     await loadBatches();
-                } catch (e) {
-                    showAlert('전송 중 오류가 발생했습니다.');
+                } catch (e: any) {
+                    showAlert(e.message || '전송 중 알 수 없는 오류가 발생했습니다.');
                 } finally {
                     setIsSending(false);
                 }
             },
-            '전송'
+            '전송 (SQL)'
+        );
+    };
+
+    const handleLoadFromCloud = () => {
+        showAlert(
+            "클라우드(Firebase)에서 작성 중인 입고 내역을 불러오겠습니까?\n현재 기기의 로컬 데이터와 병합됩니다.",
+            async () => {
+                setIsCloudLoading(true);
+                try {
+                    // Fetch all batches from Firebase
+                    const remoteBatches = await getStore<ReceivingBatch>('receiving-batches');
+                    
+                    // Filter for 'draft' items to sync back
+                    const remoteDrafts = remoteBatches.filter(b => b.status === 'draft');
+                    
+                    if (remoteDrafts.length === 0) {
+                        showToast("불러올 작성 중인 내역이 없습니다.", 'error');
+                        return;
+                    }
+
+                    // Save to local IndexedDB
+                    for (const batch of remoteDrafts) {
+                        await receiveDb.saveOrUpdateBatch(batch);
+                    }
+                    
+                    await loadBatches();
+                    showToast(`${remoteDrafts.length}건의 데이터를 불러왔습니다.`, 'success');
+                } catch (e) {
+                    console.error(e);
+                    showAlert("데이터를 불러오는 데 실패했습니다.");
+                } finally {
+                    setIsCloudLoading(false);
+                }
+            },
+            "불러오기"
         );
     };
 
@@ -362,6 +444,18 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     if (view === 'list') {
         return (
             <div className="flex flex-col h-full bg-gray-50">
+                <div className="bg-white p-2 border-b flex justify-between items-center shadow-sm z-10">
+                    <h2 className="font-bold text-gray-800 ml-2">입고 목록</h2>
+                    <button 
+                        onClick={handleLoadFromCloud} 
+                        disabled={isCloudLoading}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 disabled:opacity-50"
+                    >
+                        {isCloudLoading ? <SpinnerIcon className="w-3 h-3" /> : <DatabaseIcon className="w-3 h-3" />}
+                        클라우드 불러오기
+                    </button>
+                </div>
+
                 <div className="flex-grow overflow-y-auto p-2 space-y-2">
                     {groupedBatches.length === 0 ? (
                         <div className="text-center text-gray-400 pt-16">
@@ -370,16 +464,24 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     ) : (
                         groupedBatches.map(({ supplier, drafts, sent }) => {
                             const hasDrafts = drafts.length > 0;
-                            const isDraftSelected = drafts.every(d => selectedBatches.has(d.id)) && drafts.length > 0;
+                            const isDraftSelected = drafts.length > 0 && drafts.every(d => selectedBatches.has(d.id));
                             const isExpanded = expandedSuppliers.has(supplier.comcode);
                             
-                            // Calculate draft totals
                             const draftItemCount = drafts.reduce((sum, b) => sum + b.itemCount, 0);
                             const draftTotalAmount = drafts.reduce((sum, b) => sum + b.totalAmount, 0);
 
+                            // Skip rendering if no drafts and not expanded (hide completed unless user digs)
+                            if (!hasDrafts && sent.length > 0 && !isExpanded) {
+                                // Optionally show a summary of sent items or just hide
+                                // Requirement: "전송완료표기되고 검색목록에도 보이지않아야함" -> hide sent by default
+                                return null; 
+                            }
+
+                            if (!hasDrafts && sent.length === 0) return null;
+
                             return (
-                                <div key={supplier.comcode} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                                    {/* Header: Supplier Name & Selection */}
+                                <div key={supplier.comcode} className={`bg-white rounded-lg shadow-sm border overflow-hidden ${hasDrafts ? 'border-orange-200' : 'border-gray-200 opacity-75'}`}>
+                                    {/* Header */}
                                     <div 
                                         onClick={() => toggleSupplierExpand(supplier.comcode)}
                                         className="flex items-center justify-between p-3 bg-white active:bg-gray-50 transition-colors cursor-pointer"
@@ -392,7 +494,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                                     </div>
                                                 </div>
                                             ) : (
-                                                <div className="w-7"></div> // Spacer
+                                                <div className="w-7"></div>
                                             )}
                                             
                                             <div className="flex-grow min-w-0">
@@ -406,14 +508,14 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                                     </p>
                                                 )}
                                                 {!hasDrafts && sent.length > 0 && (
-                                                    <p className="text-xs text-green-600 mt-0.5">전송 완료됨</p>
+                                                    <p className="text-xs text-green-600 mt-0.5">전송 완료됨 ({sent.length}건)</p>
                                                 )}
                                             </div>
                                         </div>
                                         <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                                     </div>
 
-                                    {/* Body: Batches list */}
+                                    {/* Body */}
                                     {isExpanded && (
                                         <div className="border-t border-gray-100 bg-gray-50/50 p-2 space-y-2">
                                             {/* Drafts Section */}
@@ -444,8 +546,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
                                             {/* Sent History Section */}
                                             {sent.length > 0 && (
-                                                <div className="space-y-1">
-                                                    <p className="text-xs font-bold text-gray-500 px-1 mt-2">전송 완료 내역</p>
+                                                <div className="space-y-1 mt-2">
+                                                    <p className="text-xs font-bold text-gray-500 px-1">전송 완료 내역</p>
                                                     {sent.map(batch => (
                                                         <div key={batch.id} className="flex items-center justify-between p-2 bg-white rounded border border-gray-200">
                                                             <div>
@@ -476,8 +578,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             </div>
         );
     }
-
-    // --- Entry View ---
 
     return (
         <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
