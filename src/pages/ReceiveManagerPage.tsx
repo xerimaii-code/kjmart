@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useDataState, useAlert, useMiscUI, useScanner, useModals } from '../context/AppContext';
 import { ReceivingBatch, ReceivingItem, Product, Customer } from '../types';
 import * as receiveDb from '../services/receiveDbService';
-import { addReceivingBatch, getReceivingBatchesByDateRange } from '../services/dbService';
+import { addReceivingBatch, getReceivingBatchesByDateRange, subscribeToReceivingBatches } from '../services/dbService';
 import { executeUserQuery } from '../services/sqlService';
 import { 
     SpinnerIcon, CheckSquareIcon, CancelSquareIcon, TrashIcon, 
@@ -63,25 +63,33 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [showProductDropdown, setShowProductDropdown] = useState(false);
     const productSearchInputRef = useRef<HTMLInputElement>(null);
 
-    // Load batches on mount or active
-    const loadBatches = useCallback(async () => {
-        setLoading(true);
-        try {
-            const data = await receiveDb.getAllBatches();
-            setBatches(data);
-        } catch (e) {
-            console.error(e);
-            showToast('입고 내역을 불러오는데 실패했습니다.', 'error');
-        } finally {
-            setLoading(false);
-        }
-    }, [showToast]);
-
+    // Load batches with Realtime Sync
     useEffect(() => {
-        if (isActive && mode === 'list') {
-            loadBatches();
-        }
-    }, [isActive, mode, loadBatches]);
+        if (!isActive || mode !== 'list') return;
+
+        setLoading(true);
+        
+        // 1. First, load from local storage for instant feedback
+        receiveDb.getAllBatches().then(localBatches => {
+            setBatches(localBatches);
+            setLoading(false);
+        });
+
+        // 2. Subscribe to Firebase Realtime Database
+        // This ensures that changes made on other devices appear here.
+        // It also ensures that if we go offline, we have the latest data locally.
+        const unsubscribe = subscribeToReceivingBatches((remoteBatches) => {
+            // Update UI with the latest data from server
+            setBatches(remoteBatches.sort((a, b) => b.id - a.id));
+            
+            // Sync these changes to local IndexedDB to maintain offline capability
+            remoteBatches.forEach(batch => {
+                receiveDb.saveOrUpdateBatch(batch);
+            });
+        });
+
+        return () => unsubscribe();
+    }, [isActive, mode]);
 
     useEffect(() => {
         searchProduct(debouncedProductSearch);
@@ -95,13 +103,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             if (!silent) setIsBackgroundSyncing(true);
             const localBatches = await receiveDb.getAllBatches();
             
-            // Only sync drafts that haven't been marked as sent (though technically sent ones are deleted)
+            // Only sync drafts that haven't been marked as sent
             const drafts = localBatches.filter(b => b.status === 'draft');
             
             if (drafts.length === 0) return;
 
             // Push all local drafts to Firebase
-            // This ensures that even if a previous save failed due to offline, it gets synced now.
             // addReceivingBatch uses 'set', so it idempotently updates the record.
             const promises = drafts.map(batch => addReceivingBatch(batch));
             await Promise.all(promises);
@@ -207,6 +214,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             }
                             
                             // 2. Delete from Local App Storage upon success (Space Cleanup)
+                            // Note: The real-time listener might re-add it if it's still in the recent list from Firebase,
+                            // but it will come back with 'sent' status, which is fine for history visibility.
                             await receiveDb.deleteBatch(batch.id);
                             
                             successCount++;
@@ -217,9 +226,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             throw new Error(`'${batch.supplier.name}' 전송 중 오류: ${err.message}`);
                         }
                     }
-                    showToast(`${successCount}건 전송 및 기기 삭제 완료`, 'success');
+                    showToast(`${successCount}건 전송 완료`, 'success');
                     setSelectedBatches(new Set());
-                    await loadBatches();
+                    // The useEffect hook will handle reloading data from the listener
                 } catch (e: any) {
                     showAlert(e.message || '전송 중 알 수 없는 오류가 발생했습니다.');
                 } finally {
@@ -261,7 +270,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             }
             showToast(`${toImport.length}건을 기기로 불러왔습니다.`, 'success');
             setIsLoadModalOpen(false);
-            loadBatches();
+            // Re-trigger load handled by useEffect
         } catch (e) {
             showAlert('저장 중 오류가 발생했습니다.');
         }
@@ -293,7 +302,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     }
                     showToast('삭제되었습니다.', 'success');
                     setSelectedBatches(new Set());
-                    loadBatches();
+                    // Local state update handled by useEffect/DB change
+                    const newBatches = batches.filter(b => !selectedBatches.has(b.id));
+                    setBatches(newBatches);
                 } catch(e) {
                     showAlert('삭제 중 오류가 발생했습니다.');
                 }
@@ -427,7 +438,11 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     </div>
                 </div>
                 <div className="flex-grow overflow-y-auto p-2 space-y-2">
-                    {batches.length === 0 ? (
+                    {loading && batches.length === 0 ? (
+                        <div className="flex justify-center items-center h-40">
+                            <SpinnerIcon className="w-8 h-8 text-blue-500" />
+                        </div>
+                    ) : batches.length === 0 ? (
                         <div className="text-center text-gray-400 mt-10">
                             <p>기기에 저장된 입고 내역이 없습니다.</p>
                             <p className="text-xs mt-1">서버에서 불러오거나 신규 등록하세요.</p>

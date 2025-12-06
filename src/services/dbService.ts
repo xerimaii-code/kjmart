@@ -141,6 +141,22 @@ export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[
     });
 };
 
+export const subscribeToReceivingBatches = (callback: (batches: ReceivingBatch[]) => void): (() => void) => {
+    if (!db) {
+        callback([]);
+        return () => {};
+    }
+    // Limit to the last 100 entries to prevent performance issues with large datasets
+    const q = query(ref(db, 'receiving-batches'), limitToLast(100));
+    return onValue(q, (snapshot) => {
+        const data = snapshot.val();
+        const batches = data ? Object.values(data) : [];
+        // Since we query by key (timestamp), Object.values order isn't guaranteed, but usually okay.
+        // We will sort on the client side.
+        callback(batches as ReceivingBatch[]);
+    });
+};
+
 // --- Data Fetching ---
 export const getStore = async <T>(storeName: string): Promise<T[]> => {
     if (!db) return [];
