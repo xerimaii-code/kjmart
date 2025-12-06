@@ -57,6 +57,7 @@ export interface ReceivingItem {
     costPrice: number; // 입고 시점의 매입가
     sellingPrice: number;
     quantity: number;
+    isNew?: boolean; // 새로 추가된 항목인지 여부
 }
 
 export interface ReceivingBatch {

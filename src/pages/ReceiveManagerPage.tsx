@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Customer, Product, ReceivingItem, ReceivingBatch, ReceivingDraft } from '../types';
 import { useDataState, useScanner, useAlert, useModals, useMiscUI } from '../context/AppContext';
-import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon, PencilSquareIcon } from '../components/Icons';
+import { SpinnerIcon, SearchIcon, BarcodeScannerIcon, ChevronDownIcon, TrashIcon, CheckCircleIcon, BriefcaseIcon, PencilSquareIcon, ChevronRightIcon } from '../components/Icons';
 import { useDebounce } from '../hooks/useDebounce';
 import { useProductSearch } from '../hooks/useProductSearch';
 import SearchDropdown from '../components/SearchDropdown';
@@ -16,11 +16,11 @@ type View = 'entry' | 'list';
 const DRAFT_KEY = 'receiving-entry-draft';
 
 const ReceivingItemRow: React.FC<{ item: ReceivingItem, onRemove: () => void }> = ({ item, onRemove }) => (
-    <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-3 items-center p-2 bg-white rounded-lg shadow-sm border text-xs">
+    <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-2 items-center p-2 bg-white rounded-lg shadow-sm border text-xs">
         <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-1">
                 <p className="font-bold text-gray-800 truncate text-sm">{item.name || '(미등록 상품)'}</p>
-                <span className="bg-yellow-100 text-yellow-700 text-[10px] px-1.5 py-0.5 rounded font-bold whitespace-nowrap">신규</span>
+                {item.isNew && <span className="bg-yellow-100 text-yellow-700 text-[10px] px-1.5 py-0.5 rounded font-bold whitespace-nowrap">신규</span>}
             </div>
             <p className="text-gray-400 font-mono">{item.barcode}</p>
         </div>
@@ -61,8 +61,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const productSearchBlurTimeout = useRef<number | null>(null);
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
-    // Safe access to customers - Create a copy before sorting to avoid mutating state
-    // Also handle potential undefined 'name' to prevent crashes during sort
     const sortedCustomers = useMemo(() => {
         return [...(customers || [])].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }, [customers]);
@@ -72,7 +70,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, [debouncedSearchTerm, search]);
 
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
-    const [expandedBatch, setExpandedBatch] = useState<number | null>(null);
     const [isSending, setIsSending] = useState(false);
     
     useEffect(() => {
@@ -133,6 +130,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         const newItem: ReceivingItem = {
             ...itemData,
             uniqueId: Date.now() + Math.random(),
+            // isNew is passed from ReceiveItemModal based on creation logic
         };
         setCurrentItems(prev => [...prev, newItem]);
     };
@@ -154,12 +152,15 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setIsSavingBatch(true);
         try {
             const totalAmount = currentItems.reduce((sum, item) => sum + (item.costPrice || 0) * item.quantity, 0);
+            // 저장 시 모든 isNew 플래그 제거 (DB 저장 시점에는 모두 기존 항목이 됨)
+            const itemsToSave = currentItems.map(item => ({ ...item, isNew: false }));
+            
             const newBatch: ReceivingBatch = {
                 id: Date.now(),
                 date: currentDate,
                 supplier: selectedSupplier,
-                items: currentItems,
-                itemCount: currentItems.length,
+                items: itemsToSave,
+                itemCount: itemsToSave.length,
                 totalAmount,
                 status: 'draft',
             };
@@ -214,8 +215,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             () => {
                 setCurrentDate(batch.date);
                 setSelectedSupplier(batch.supplier);
-                setCurrentItems(batch.items);
-                // Draft status removal is handled when saving the new edits
+                // 불러온 기존 항목은 isNew를 false로 명시
+                const existingItems = batch.items.map(item => ({ ...item, isNew: false }));
+                setCurrentItems(existingItems);
                 setView('entry');
             },
             '불러오기'
@@ -235,7 +237,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }));
     }, [batches]);
     
-    const toggleBatchSelection = (id: number) => {
+    const toggleBatchSelection = (e: React.MouseEvent, id: number) => {
+        e.stopPropagation();
         setSelectedBatches(prev => {
             const newSet = new Set(prev);
             if (newSet.has(id)) newSet.delete(id);
@@ -291,45 +294,39 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     ) : (
                         groupedBatches.map(({ supplier, batches: supplierBatches }) => (
                             <div key={supplier.comcode} className="bg-white rounded-xl shadow-sm border p-3">
-                                <h3 className="font-bold text-lg text-gray-800">{supplier.name}</h3>
-                                <div className="divide-y divide-gray-100 mt-2">
+                                <h3 className="font-bold text-lg text-gray-800 mb-2">{supplier.name}</h3>
+                                <div className="space-y-1">
                                     {supplierBatches.map(batch => (
-                                        <div key={batch.id} className="py-2">
-                                            <div className="flex items-center gap-3">
-                                                {batch.status === 'draft' && (
+                                        <div 
+                                            key={batch.id} 
+                                            onClick={() => handleContinueBatch(batch)}
+                                            className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg border border-gray-100 active:bg-blue-50 transition-colors cursor-pointer"
+                                        >
+                                            <div onClick={(e) => toggleBatchSelection(e, batch.id)} className="flex-shrink-0 p-1">
+                                                {batch.status === 'draft' ? (
                                                     <input 
                                                         type="checkbox" 
                                                         checked={selectedBatches.has(batch.id)} 
-                                                        onChange={() => toggleBatchSelection(batch.id)}
-                                                        className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                        onChange={() => {}} // Handled by onClick wrapper
+                                                        className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 pointer-events-none"
                                                     />
+                                                ) : (
+                                                    <CheckCircleIcon className="w-6 h-6 text-green-500" />
                                                 )}
-                                                {batch.status === 'sent' && <CheckCircleIcon className="w-6 h-6 text-green-500" />}
-
-                                                <div className="flex-grow" onClick={() => setExpandedBatch(b => b === batch.id ? null : batch.id)}>
-                                                    <p className={`font-semibold ${batch.status === 'sent' ? 'text-gray-400' : 'text-gray-700'}`}>
-                                                        {new Date(batch.date).toLocaleDateString()} - {batch.itemCount}개 품목
-                                                    </p>
-                                                    <p className="text-sm text-gray-500">{batch.totalAmount.toLocaleString()}원</p>
-                                                </div>
-                                                <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform ${expandedBatch === batch.id ? 'rotate-180' : ''}`} />
                                             </div>
-                                            {expandedBatch === batch.id && (
-                                                <div className="mt-3 pl-8 space-y-2">
-                                                    {batch.status === 'draft' && (
-                                                        <div className="mb-2">
-                                                            <button 
-                                                                onClick={() => handleContinueBatch(batch)}
-                                                                className="w-full py-2 bg-blue-50 text-blue-600 font-bold rounded-lg text-sm border border-blue-100 hover:bg-blue-100 flex items-center justify-center gap-2"
-                                                            >
-                                                                <PencilSquareIcon className="w-4 h-4" />
-                                                                이어서 등록
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                    {batch.items.map(item => <ReceivingItemRow key={item.uniqueId} item={item} onRemove={() => {}} />)}
+
+                                            <div className="flex-grow min-w-0">
+                                                <div className="flex justify-between items-center">
+                                                    <p className={`font-semibold text-sm ${batch.status === 'sent' ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                        {new Date(batch.date).toLocaleDateString()}
+                                                    </p>
+                                                    <span className="text-xs font-bold text-gray-500 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                                                        {batch.itemCount}건
+                                                    </span>
                                                 </div>
-                                            )}
+                                                <p className="text-sm font-mono text-gray-600 mt-0.5">{batch.totalAmount.toLocaleString()}원</p>
+                                            </div>
+                                            <ChevronRightIcon className="w-4 h-4 text-gray-400" />
                                         </div>
                                     ))}
                                 </div>
@@ -339,8 +336,13 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
                 <div className="flex-shrink-0 p-3 bg-white border-t safe-area-pb grid grid-cols-2 gap-3">
                     <button onClick={() => setView('entry')} className="h-12 bg-gray-200 text-gray-700 font-bold rounded-lg">입고 등록</button>
-                    <button onClick={handleSend} disabled={isSending || selectedBatches.size === 0} className="h-12 bg-blue-600 text-white font-bold rounded-lg disabled:bg-gray-400 flex items-center justify-center gap-2">
+                    <button onClick={handleSend} disabled={isSending || selectedBatches.size === 0} className="relative h-12 bg-blue-600 text-white font-bold rounded-lg disabled:bg-gray-400 flex items-center justify-center gap-2">
                         {isSending ? <SpinnerIcon className="w-5 h-5" /> : '선택 전송'}
+                        {draftCount > 0 && (
+                            <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center border-2 border-white">
+                                {draftCount}
+                            </div>
+                        )}
                     </button>
                 </div>
             </div>
@@ -349,22 +351,39 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     return (
         <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
-            <div className="flex-shrink-0 bg-white p-3 border-b shadow-sm space-y-3">
+            <div className="flex-shrink-0 bg-white p-3 border-b shadow-sm space-y-2">
                 <div className="flex items-center gap-3">
-                    <label htmlFor="receive-date" className="font-bold text-gray-700 whitespace-nowrap">입고일</label>
-                    <input type="date" id="receive-date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="flex-grow p-2 border rounded-lg bg-gray-50" />
+                    <label htmlFor="receive-date" className="font-bold text-gray-700 whitespace-nowrap w-12">입고일</label>
+                    <input type="date" id="receive-date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="flex-grow p-2 border rounded-lg bg-gray-50 text-sm font-semibold" />
                 </div>
-                <select 
-                    value={selectedSupplier?.comcode || ''} 
-                    onChange={e => {
-                        const supplier = (customers || []).find(c => c.comcode === e.target.value);
-                        setSelectedSupplier(supplier || null);
-                    }} 
-                    className="w-full p-2.5 border rounded-lg bg-white font-bold text-base border-gray-300 focus:ring-1 focus:ring-blue-500"
-                >
-                    <option value="">거래처를 선택하세요</option>
-                    {sortedCustomers.map(c => <option key={c.comcode} value={c.comcode}>{c.name}</option>)}
-                </select>
+                <div className="flex items-center gap-3">
+                    <label className="font-bold text-gray-700 whitespace-nowrap w-12">거래처</label>
+                    {selectedSupplier ? (
+                        <div className="flex-grow flex items-center gap-2">
+                            <div className="flex-grow p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 font-bold text-sm truncate">
+                                {selectedSupplier.name}
+                            </div>
+                            <button 
+                                onClick={() => setSelectedSupplier(null)}
+                                className="px-3 py-2.5 bg-gray-200 text-gray-700 font-bold rounded-lg text-xs whitespace-nowrap hover:bg-gray-300"
+                            >
+                                변경
+                            </button>
+                        </div>
+                    ) : (
+                        <select 
+                            value="" 
+                            onChange={e => {
+                                const supplier = (customers || []).find(c => c.comcode === e.target.value);
+                                setSelectedSupplier(supplier || null);
+                            }} 
+                            className="flex-grow p-2.5 border rounded-lg bg-white font-medium text-sm border-gray-300 focus:ring-1 focus:ring-blue-500"
+                        >
+                            <option value="">거래처를 선택하세요</option>
+                            {sortedCustomers.map(c => <option key={c.comcode} value={c.comcode}>{c.name}</option>)}
+                        </select>
+                    )}
+                </div>
             </div>
 
             {selectedSupplier && (
@@ -391,10 +410,10 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
             )}
             
-            <div className="flex-grow overflow-y-auto p-3">
+            <div className="flex-grow overflow-y-auto p-2">
                 {currentItems.length > 0 ? (
-                    <div className="space-y-2">
-                        <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-3 px-2 pb-1 text-[10px] font-bold text-gray-500">
+                    <div className="space-y-1.5">
+                        <div className="grid grid-cols-[1fr_55px_55px_35px_65px_25px] gap-2 px-2 pb-1 text-[10px] font-bold text-gray-500">
                             <span>상품정보</span>
                             <span className="text-right">매입가</span>
                             <span className="text-right">판매가</span>
@@ -402,7 +421,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <span className="text-right">금액</span>
                             <span></span>
                         </div>
-                        {currentItems.map(item => <ReceivingItemRow key={item.uniqueId} item={item} onRemove={() => handleRemoveItem(item.uniqueId)} />)}
+                        {currentItems.slice().reverse().map(item => <ReceivingItemRow key={item.uniqueId} item={item} onRemove={() => handleRemoveItem(item.uniqueId)} />)}
                     </div>
                 ) : (
                     <div className="text-center text-gray-400 pt-16">
@@ -423,7 +442,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     <span className="text-sm">목록</span>
                     <span className="text-[10px]">& 전송</span>
                     {draftCount > 0 && (
-                        <div className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center border-2 border-white">
+                        <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center border-2 border-white">
                             {draftCount}
                         </div>
                     )}
@@ -434,6 +453,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 product={receiveModalProps?.product || null}
                 onClose={() => setReceiveModalProps(null)}
                 onAdd={handleAddItem}
+                onScanNext={handleScan}
                 currentItems={currentItems}
             />
         </div>
