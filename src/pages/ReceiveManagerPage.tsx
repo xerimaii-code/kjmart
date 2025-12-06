@@ -3,12 +3,12 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useDataState, useAlert, useMiscUI, useScanner, useModals } from '../context/AppContext';
 import { ReceivingBatch, ReceivingItem, Product, Customer } from '../types';
 import * as receiveDb from '../services/receiveDbService';
-import { addReceivingBatch, getReceivingBatchesByDateRange, subscribeToReceivingBatches } from '../services/dbService';
+import { addReceivingBatch, getReceivingBatchesByDateRange, subscribeToReceivingBatches, cleanupOldReceivingBatches } from '../services/dbService';
 import { executeUserQuery } from '../services/sqlService';
 import { 
     SpinnerIcon, CheckSquareIcon, CancelSquareIcon, TrashIcon, 
     BarcodeScannerIcon, ChevronLeftIcon, CheckCircleIcon, SearchIcon,
-    CloudArrowDownIcon, SparklesIcon
+    CloudArrowDownIcon, SparklesIcon, UndoIcon
 } from '../components/Icons';
 import ReceiveItemModal from '../components/ReceiveItemModal';
 import ProductSearchResultItem from '../context/ProductSearchResultItem';
@@ -63,33 +63,55 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [showProductDropdown, setShowProductDropdown] = useState(false);
     const productSearchInputRef = useRef<HTMLInputElement>(null);
 
+    // Run cleanup on mount
+    useEffect(() => {
+        // Automatically cleanup old 'sent' batches from Firebase that are older than 2 days
+        cleanupOldReceivingBatches(2);
+    }, []);
+
+    // Function to reload local data manually
+    const refreshLocalBatches = useCallback(async () => {
+        setLoading(true);
+        try {
+            const localBatches = await receiveDb.getAllBatches();
+            setBatches(localBatches);
+        } catch (e) {
+            console.error("Failed to load batches", e);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
     // Load batches with Realtime Sync
     useEffect(() => {
         if (!isActive || mode !== 'list') return;
 
-        setLoading(true);
-        
         // 1. First, load from local storage for instant feedback
-        receiveDb.getAllBatches().then(localBatches => {
-            setBatches(localBatches);
-            setLoading(false);
-        });
+        refreshLocalBatches();
 
         // 2. Subscribe to Firebase Realtime Database
-        // This ensures that changes made on other devices appear here.
-        // It also ensures that if we go offline, we have the latest data locally.
-        const unsubscribe = subscribeToReceivingBatches((remoteBatches) => {
-            // Update UI with the latest data from server
-            setBatches(remoteBatches.sort((a, b) => b.id - a.id));
+        const unsubscribe = subscribeToReceivingBatches(async (remoteBatches) => {
+            const drafts: ReceivingBatch[] = [];
             
-            // Sync these changes to local IndexedDB to maintain offline capability
-            remoteBatches.forEach(batch => {
-                receiveDb.saveOrUpdateBatch(batch);
-            });
+            for (const batch of remoteBatches) {
+                if (batch.status === 'sent') {
+                    // If server says 'sent', it means another device sent it. 
+                    // We must delete it from our local storage to sync the state.
+                    await receiveDb.deleteBatch(batch.id);
+                } else {
+                    // If it's a draft, we sync it to local storage.
+                    await receiveDb.saveOrUpdateBatch(batch);
+                    drafts.push(batch);
+                }
+            }
+
+            // Always reload from local to ensure source of truth is consistent
+            const freshLocalBatches = await receiveDb.getAllBatches();
+            setBatches(freshLocalBatches.sort((a, b) => b.id - a.id));
         });
 
         return () => unsubscribe();
-    }, [isActive, mode]);
+    }, [isActive, mode, refreshLocalBatches]);
 
     useEffect(() => {
         searchProduct(debouncedProductSearch);
@@ -108,8 +130,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             
             if (drafts.length === 0) return;
 
-            // Push all local drafts to Firebase
-            // addReceivingBatch uses 'set', so it idempotently updates the record.
             const promises = drafts.map(batch => addReceivingBatch(batch));
             await Promise.all(promises);
             
@@ -123,10 +143,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     // Monitor Online Status for Auto-Sync
     useEffect(() => {
-        // 1. Try sync on mount (if online) silently
         syncLocalToRemote(true);
 
-        // 2. Listen for online event
         const handleOnline = () => {
             showToast("온라인 상태입니다. 데이터를 동기화합니다.", 'success');
             syncLocalToRemote(false);
@@ -159,7 +177,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 let successCount = 0;
                 let failCount = 0;
 
-                // User-provided SQL for Receiving Registration
                 const safeInsertQuery = `
                     ; INSERT INTO dbo.dt900_ipgo (
                         day1, dtcomcode, comcode, comname, barcode, descr, 
@@ -206,6 +223,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             }
 
                             // 1. Update Firebase first to keep history (mark as sent)
+                            // This triggers the listener on OTHER devices to delete it locally
                             const updatedBatch: ReceivingBatch = { ...batch, status: 'sent', sentAt: new Date().toISOString() };
                             try {
                                 await addReceivingBatch(updatedBatch);
@@ -214,8 +232,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             }
                             
                             // 2. Delete from Local App Storage upon success (Space Cleanup)
-                            // Note: The real-time listener might re-add it if it's still in the recent list from Firebase,
-                            // but it will come back with 'sent' status, which is fine for history visibility.
                             await receiveDb.deleteBatch(batch.id);
                             
                             successCount++;
@@ -228,7 +244,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     }
                     showToast(`${successCount}건 전송 완료`, 'success');
                     setSelectedBatches(new Set());
-                    // The useEffect hook will handle reloading data from the listener
+                    // List refreshes automatically via listener or local state update
+                    setBatches(prev => prev.filter(b => !selectedBatches.has(b.id)));
                 } catch (e: any) {
                     showAlert(e.message || '전송 중 알 수 없는 오류가 발생했습니다.');
                 } finally {
@@ -265,12 +282,11 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         const toImport = remoteBatches.filter(b => selectedRemoteBatches.has(b.id));
         try {
             for (const batch of toImport) {
-                // When importing, we save it as is. If it was sent, it stays sent.
                 await receiveDb.saveOrUpdateBatch(batch);
             }
             showToast(`${toImport.length}건을 기기로 불러왔습니다.`, 'success');
             setIsLoadModalOpen(false);
-            // Re-trigger load handled by useEffect
+            refreshLocalBatches(); // Explicit reload
         } catch (e) {
             showAlert('저장 중 오류가 발생했습니다.');
         }
@@ -302,9 +318,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     }
                     showToast('삭제되었습니다.', 'success');
                     setSelectedBatches(new Set());
-                    // Local state update handled by useEffect/DB change
-                    const newBatches = batches.filter(b => !selectedBatches.has(b.id));
-                    setBatches(newBatches);
+                    // Local state update
+                    setBatches(prev => prev.filter(b => !selectedBatches.has(b.id)));
                 } catch(e) {
                     showAlert('삭제 중 오류가 발생했습니다.');
                 }
@@ -380,11 +395,12 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 await addReceivingBatch(batchToSave);
             } catch (firebaseErr) {
                 console.warn("Failed to backup batch to Firebase (Offline):", firebaseErr);
-                // No error shown to user, will sync later via useEffect
             }
 
             showToast('저장되었습니다.', 'success');
             setMode('list');
+            // Explicitly trigger a refresh when returning to list to ensure the new item is seen immediately
+            setTimeout(refreshLocalBatches, 50);
         } catch (e: any) {
             console.error("Save Error:", e);
             showAlert(`저장에 실패했습니다. (${e.message})`);
@@ -426,6 +442,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 <TrashIcon className="w-5 h-5" /> 삭제({selectedBatches.size})
                             </button>
                         )}
+                        <button onClick={refreshLocalBatches} className="text-sm font-bold text-gray-500 flex items-center gap-1 hover:text-blue-600">
+                            <UndoIcon className="w-4 h-4" /> 새로고침
+                        </button>
                     </div>
                     <div className="flex gap-2">
                         {isBackgroundSyncing && <SpinnerIcon className="w-5 h-5 text-blue-500 animate-spin self-center" />}
@@ -642,8 +661,13 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         {currentItems.slice().reverse().map((item, idx) => (
                             <div key={item.uniqueId} className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm flex justify-between items-center animate-fade-in-up">
                                 <div>
-                                    <p className="font-bold text-gray-800 text-sm">{item.name}</p>
-                                    <div className="text-xs text-gray-500 mt-0.5">
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 rounded border border-gray-200 font-mono">
+                                            #{currentItems.length - idx}
+                                        </span>
+                                        <p className="font-bold text-gray-800 text-sm line-clamp-1">{item.name}</p>
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-0.5 pl-8">
                                         <span>{Number(item.costPrice).toLocaleString()}원</span>
                                         <span className="mx-1">x</span>
                                         <span className="font-bold text-blue-600">{item.quantity}</span>

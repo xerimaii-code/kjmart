@@ -129,16 +129,20 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                         <div className="px-1 pt-1 border-t border-gray-200/50 mt-1">
                             <span className="text-xs font-bold text-gray-400">주요 업무</span>
                         </div>
-                        <MenuButton 
-                            label="신규 발주" 
-                            icon={<PencilSquareIcon className={iconClass} />} 
-                            onClick={() => onNavigate('newOrder')}
-                        />
-                        <MenuButton 
-                            label="발주 내역" 
-                            icon={<HistoryIcon className={iconClass} />} 
-                            onClick={() => onNavigate('orderHistory')}
-                        />
+                        <div className="flex gap-2">
+                            <MenuButton 
+                                className="flex-1"
+                                label="신규 발주" 
+                                icon={<PencilSquareIcon className={iconClass} />} 
+                                onClick={() => onNavigate('newOrder')}
+                            />
+                            <MenuButton 
+                                className="flex-1"
+                                label="발주 내역" 
+                                icon={<HistoryIcon className={iconClass} />} 
+                                onClick={() => onNavigate('orderHistory')}
+                            />
+                        </div>
                          <MenuButton 
                             label="입고 등록" 
                             icon={<BarcodeScannerIcon className={iconClass} />} 

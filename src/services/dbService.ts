@@ -146,15 +146,49 @@ export const subscribeToReceivingBatches = (callback: (batches: ReceivingBatch[]
         callback([]);
         return () => {};
     }
-    // Limit to the last 100 entries to prevent performance issues with large datasets
+    // Limit to the last 100 entries to prevent performance issues
     const q = query(ref(db, 'receiving-batches'), limitToLast(100));
     return onValue(q, (snapshot) => {
         const data = snapshot.val();
         const batches = data ? Object.values(data) : [];
-        // Since we query by key (timestamp), Object.values order isn't guaranteed, but usually okay.
-        // We will sort on the client side.
         callback(batches as ReceivingBatch[]);
     });
+};
+
+// --- Cleanup Function ---
+export const cleanupOldReceivingBatches = async (daysToKeep: number = 2): Promise<void> => {
+    if (!db) return;
+    
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    const cutoffTimestamp = cutoffDate.getTime();
+
+    // Receiving batches ID is essentially a timestamp
+    const batchRef = ref(db, 'receiving-batches');
+    const oldBatchesQuery = query(batchRef, orderByKey(), endAt(String(cutoffTimestamp)));
+
+    try {
+        const snapshot = await get(oldBatchesQuery);
+        if (snapshot.exists()) {
+            const updates: { [key: string]: null } = {};
+            let count = 0;
+            snapshot.forEach((child) => {
+                const batch = child.val() as ReceivingBatch;
+                // Only delete if it's marked as 'sent' OR extremely old (e.g., > 30 days safety net)
+                if (batch.status === 'sent') {
+                    updates[child.key!] = null;
+                    count++;
+                }
+            });
+            
+            if (Object.keys(updates).length > 0) {
+                await update(batchRef, updates);
+                console.log(`Cleaned up ${count} old sent receiving batches.`);
+            }
+        }
+    } catch (e) {
+        console.error("Failed to cleanup old batches:", e);
+    }
 };
 
 // --- Data Fetching ---
