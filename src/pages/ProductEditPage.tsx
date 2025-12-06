@@ -463,7 +463,11 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
             const pGubun1 = lCode || '';
             const pGubun2 = mCode || '';
             const pGubun3 = sCode || '';
-            const pIsPack = bomStatus === '묶음' ? '1' : '0';
+            
+            // Generate current date strings for SQL params
+            const now = new Date();
+            const pCurrentDate = now.toISOString().slice(0, 10); // YYYY-MM-DD
+            const pNow = now.toISOString();
 
             // Comprehensive Context Params mapping
             // Ensure these keys align EXACTLY with what's expected in the user's SQL query.
@@ -484,12 +488,16 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                 ispoint: pIsPoint,     // Required by SQL: @ispoint
                 isuse: pIsUse,         // Required by SQL: @isuse
                 
+                // --- NEW: Automatically injected date variables ---
+                CurrentDate: pCurrentDate, // Required by SQL: @CurrentDate (Must remove DECLARE from SQL)
+                Date: pCurrentDate,        // Alias
+                Now: pNow,                 // Alias
+                
                 // Section 2: Helper/Internal variables provided for flexibility
                 kw: searchInput, 
                 
                 // Lowercase aliases
                 stock_yn: pIsStock,
-                ispack: pIsPack, // Available if user wants to use @ispack instead of '0'
                 
                 // Default flags (Available as variables in case user edits the query to use them)
                 iscashback: '1', 
@@ -499,7 +507,7 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                 weightoff: '1', 
                 autobalju: '0',
                 isprt: '0',
-
+                
                 // Korean aliases
                 바코드: pBarcode,
                 상품명: pProductName,
@@ -518,8 +526,7 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                 대분류: pGubun1,
                 중분류: pGubun2,
                 소분류: pGubun3,
-                묶음여부: pIsPack,
-                비고: '모바일수정'
+                현재날짜: pCurrentDate
             };
 
             const userQueryName = isEditMode ? '상품수정' : '상품등록';
