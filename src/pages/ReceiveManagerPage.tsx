@@ -109,7 +109,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 let failCount = 0;
 
                 // User-provided SQL for Receiving Registration
-                // Uses device inputs for cost/price/dtcomcode and parts table for comcode/lstmoney0vat
+                // Uses device inputs for cost/price/dtcomcode/comcode and parts table for lstmoney0vat
                 const safeInsertQuery = `
                     ; INSERT INTO dbo.dt900_ipgo (
                         day1, dtcomcode, comcode, comname, barcode, descr, 
@@ -118,8 +118,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     SELECT
                         LEFT(@date + ':' + @time, 20),
                         LEFT(@dtcomcode, 10),
-                        LEFT(ISNULL(p.comcode, ''), 10),
-                        LEFT(ISNULL(c.comname, ''), 20),
+                        LEFT(@dtcomcode, 10), -- comcode gets same value as dtcomcode
+                        LEFT(@comname, 20),   -- comname from device selection
                         LEFT(@barcode, 20),
                         LEFT(ISNULL(@item_name, ISNULL(p.descr, '')), 30),
                         @cost, 
@@ -129,7 +129,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         ISNULL(p.money0vat, 0)
                     FROM (SELECT 1 AS dummy) AS t
                     LEFT JOIN dbo.parts AS p WITH (NOLOCK) ON p.barcode = @barcode
-                    LEFT JOIN dbo.comp AS c WITH (NOLOCK) ON c.comcode = p.comcode
                 `;
 
                 try {
@@ -147,6 +146,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                     date: batch.date,
                                     time: unifiedTime,
                                     dtcomcode: batch.supplier.comcode, // dtcomcode (selected supplier)
+                                    comname: batch.supplier.name,      // comname (selected supplier name)
                                     barcode: item.barcode,
                                     qty: item.quantity,
                                     cost: item.costPrice, // Device input cost
