@@ -80,9 +80,10 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
     const [searchResults, setSearchResults] = useState<any[]>([]);
 
-    // Keyboard Adjustment
+    // Keyboard Adjustment: Target the buttons container so info panels can be hidden
     const modalContainerRef = useRef<HTMLDivElement>(null);
-    useAdjustForKeyboard(modalContainerRef, isOpen);
+    const buttonsContainerRef = useRef<HTMLDivElement>(null);
+    useAdjustForKeyboard(modalContainerRef, isOpen, buttonsContainerRef);
 
     // --- Format Helper ---
     const formatBarcodeDisplay = (code: string) => {
@@ -310,7 +311,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             } else {
                 setSearchInput('');
                 resetForm(true);
-                setTimeout(() => searchInputRef.current?.focus(), 150);
+                // No focus on open
             }
         }
     }, [isOpen, initialBarcode, performSearch, resetForm]);
@@ -318,12 +319,14 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         performSearch(searchInput);
+        // No focus after search submit
     };
 
     const handleScan = () => {
         openScanner('modal', (code) => {
             setSearchInput(code);
             performSearch(code);
+            // No focus after scan
         }, false);
     };
 
@@ -385,7 +388,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             if (isCategoryFixed) resetForm(false);
             else resetForm(true);
             
-            setTimeout(() => searchInputRef.current?.focus(), 100);
+            // No focus after save
 
         } catch (e: any) {
             showAlert(`저장 오류: ${e.message}`);
@@ -395,7 +398,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const handleReset = () => {
         setSearchInput('');
         resetForm(true);
-        setTimeout(() => searchInputRef.current?.focus(), 100);
+        // No focus after reset
     };
 
     const handleProductSelect = (product: any) => {
@@ -436,7 +439,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 disableBodyScroll={false}
                 containerRef={modalContainerRef}
             >
-                <div className="p-2 space-y-1 bg-white flex flex-col h-full overflow-y-auto">
+                <div className="px-2 pt-2 pb-0 space-y-1 bg-white flex flex-col h-full overflow-y-auto">
                     {/* 1. Search Bar Row (Compact) */}
                     <form onSubmit={handleSearchSubmit} className="flex gap-1 items-stretch">
                         <input
@@ -587,8 +590,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                         <CustomToggleButton label="재고관리" checked={isStockManaged} onChange={setIsStockManaged} />
                     </div>
 
-                    {/* 7. Action Buttons (Moved Here) */}
-                    <div className="grid grid-cols-[1fr_4fr] gap-2 pt-1 pb-1">
+                    {/* 7. Action Buttons (Ref attached here for keyboard avoidance) */}
+                    <div ref={buttonsContainerRef} className="grid grid-cols-[1fr_4fr] gap-2 pt-1 pb-1">
                         <button 
                             onClick={handleReset} 
                             className="h-12 bg-orange-100 border border-orange-200 text-orange-600 rounded-md flex items-center justify-center hover:bg-orange-200 active:scale-95 transition-transform"
@@ -606,54 +609,52 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     </div>
 
                     {/* 8. Bottom Info Panels */}
-                    <div className="grid grid-cols-2 gap-1 mt-1 mb-2">
+                    <div className="grid grid-cols-2 gap-1 mt-1 mb-0">
                         {/* Discount Info Panel */}
                         <div className="bg-gray-50 border border-gray-200 rounded flex flex-col h-24">
-                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">할인정보</div>
+                            <div className="bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">할인정보</div>
                             <div className="p-1 flex-1 flex flex-col items-center justify-center overflow-hidden">
                                 {saleInfo ? (
                                     <>
                                         <div className="flex-1 flex items-center justify-center w-full">
-                                            <p className="text-xs font-bold text-blue-700 text-center leading-tight line-clamp-2">{saleInfo.name}</p>
+                                            <p className="text-sm font-bold text-blue-700 text-center leading-tight line-clamp-2">{saleInfo.name}</p>
                                         </div>
                                         <div className="flex-shrink-0 text-center w-full">
-                                            <p className="text-sm font-bold text-red-600 leading-none my-0.5">
+                                            <p className="text-base font-bold text-red-600 leading-none my-0.5">
                                                 {Number(saleInfo.cost).toLocaleString()} / {Number(saleInfo.price).toLocaleString()}
                                             </p>
-                                            <p className="text-[10px] text-gray-500 leading-tight">
+                                            <p className="text-xs text-gray-500 leading-tight mt-1">
                                                 {saleInfo.start} ~ {saleInfo.end}
                                             </p>
                                         </div>
                                     </>
                                 ) : (
-                                    <p className="text-xs text-gray-400">할인 정보 없음</p>
+                                    <p className="text-sm text-gray-400">할인 정보 없음</p>
                                 )}
                             </div>
                         </div>
 
                         {/* BOM Info Panel */}
                         <div className="bg-gray-50 border border-gray-200 rounded flex flex-col h-24">
-                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">BOM 정보</div>
+                            <div className="bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">BOM 정보</div>
                             <div className="p-1 flex-1 overflow-y-auto scrollbar-hide">
                                 {bomList.length > 0 ? (
                                     <div className="space-y-1">
                                         {bomList.map((item, idx) => (
-                                            <div key={idx} className="bg-white border border-gray-100 rounded p-1 shadow-sm">
-                                                <p className="text-[9px] font-mono text-gray-400 leading-none">{item.바코드}</p>
-                                                <div className="flex justify-between items-center gap-1">
-                                                    <p className="text-[10px] font-bold text-gray-700 truncate">{item.상품명}</p>
-                                                    <p className="text-[9px] text-gray-500 whitespace-nowrap">{item.규격}</p>
-                                                </div>
-                                                <div className="flex justify-end items-center gap-2">
-                                                    <p className="text-[10px] text-gray-600">{Number(item.매입가).toLocaleString()}원</p>
-                                                    <p className="text-[10px] font-bold text-blue-600">x{item.수량}</p>
+                                            <div key={idx} className="bg-white border border-gray-100 rounded p-1.5 shadow-sm flex flex-col gap-0.5">
+                                                <p className="text-[10px] font-mono text-gray-400 leading-none">{item.바코드}</p>
+                                                <p className="text-xs font-bold text-gray-800 leading-tight">{item.상품명}</p>
+                                                <p className="text-[10px] text-gray-500">{item.규격}</p>
+                                                <div className="flex justify-between items-center mt-0.5 border-t border-gray-50 pt-0.5">
+                                                    <p className="text-xs text-gray-600 font-medium">{Number(item.매입가).toLocaleString()}원</p>
+                                                    <p className="text-xs font-bold text-blue-600">x{item.수량}</p>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
                                     <div className="h-full flex items-center justify-center">
-                                        <p className="text-xs text-gray-400">일반 상품</p>
+                                        <p className="text-sm text-gray-400">일반 상품</p>
                                     </div>
                                 )}
                             </div>
