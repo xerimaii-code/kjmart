@@ -14,7 +14,7 @@ interface ReceiveItemModalProps {
     currentItems: ReceivingItem[];
 }
 
-const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd, currentItems }) => {
+const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd, currentItems = [] }) => {
     const [quantity, setQuantity] = useState<number | string>(1);
     const [isReturn, setIsReturn] = useState(false);
     
@@ -154,8 +154,9 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
 
                     {/* Quantity Input Section */}
                     <div>
-                        <div className="text-center mb-2">
-                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                        {/* Duplicate Quantity Badge */}
+                        <div className="text-center mb-3">
+                            <span className={`text-xs font-bold px-3 py-1.5 rounded-full border shadow-sm transition-colors ${existingQuantity > 0 ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
                                 현재 담긴 수량: {existingQuantity.toLocaleString()}개
                             </span>
                         </div>

@@ -267,8 +267,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     // --- Render Logic ---
 
-    // removed blocking loading logic to prevent blank screen
-
     if (view === 'list') {
         return (
             <div className="flex flex-col h-full bg-gray-50">
