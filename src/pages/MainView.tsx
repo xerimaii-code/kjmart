@@ -26,9 +26,14 @@ type ActiveModal = 'none' | 'customer' | 'productInquiry' | 'newOrder' | 'orderH
 
 const MainView: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [activeModal, setActiveModal] = useState<ActiveModal>('none');
+    // State to keep ReceiveManagerPage mounted after first load to allow exit animations
+    const [receiveGoodsMounted, setReceiveGoodsMounted] = useState(false);
 
     const handleNavigate = (feature: string) => {
         setActiveModal(feature as ActiveModal);
+        if (feature === 'receiveGoods') {
+            setReceiveGoodsMounted(true);
+        }
     };
 
     const handleClose = () => {
@@ -87,11 +92,11 @@ const MainView: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 onClose={handleClose} 
             />
             
-            {/* ReceiveManagerPage now handles its own ActionModal to customize the header */}
-            {activeModal === 'receiveGoods' && (
+            {/* ReceiveManagerPage needs to remain mounted for internal ActionModal exit animation */}
+            {receiveGoodsMounted && (
                 <Suspense fallback={<LoadingFallback />}>
                     <ReceiveManagerPage 
-                        isActive={true} 
+                        isActive={activeModal === 'receiveGoods'} 
                         onClose={handleClose} 
                     />
                 </Suspense>

@@ -24,18 +24,18 @@ const MenuButton = memo(({ label, icon, onClick, subText, className }: MenuButto
     return (
         <button 
             onClick={onClick} 
-            className={`w-full px-3 py-2.5 rounded-xl shadow-sm border border-gray-200 bg-white flex items-center justify-between active:scale-[0.98] transition-all group ${className || ''}`}
+            className={`w-full px-2.5 py-3 rounded-xl shadow-sm border border-gray-200 bg-white flex items-center justify-between active:scale-[0.98] transition-all group ${className || ''}`}
         >
-            <div className="flex items-center gap-3 overflow-hidden flex-grow">
+            <div className="flex items-center gap-2 overflow-hidden flex-grow min-w-0">
                 <div className="text-blue-600 flex-shrink-0 bg-blue-50 p-1.5 rounded-lg">
                     {icon}
                 </div>
-                <div className="text-left overflow-hidden flex flex-col justify-center">
-                    <span className="text-base font-bold text-gray-800 leading-none mb-0.5">{label}</span>
-                    {subText && <span className="text-[11px] text-gray-400 leading-none">{subText}</span>}
+                <div className="text-left overflow-hidden flex flex-col justify-center min-w-0">
+                    <span className="text-[15px] font-bold text-gray-800 leading-none mb-0.5 whitespace-nowrap truncate">{label}</span>
+                    {subText && <span className="text-[11px] text-gray-400 leading-none truncate">{subText}</span>}
                 </div>
             </div>
-            <ChevronRightIcon className="w-4 h-4 flex-shrink-0 text-gray-300" />
+            <ChevronRightIcon className="w-4 h-4 flex-shrink-0 text-gray-300 ml-1" />
         </button>
     );
 });

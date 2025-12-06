@@ -10,6 +10,7 @@ interface ActionModalProps {
     children: React.ReactNode;
     footer?: React.ReactNode;
     headerActions?: React.ReactNode;
+    headerLeft?: React.ReactNode; // New prop for left-side custom actions
     containerRef?: React.Ref<HTMLDivElement>;
     heightClass?: string;
     disableBodyScroll?: boolean;
@@ -17,7 +18,7 @@ interface ActionModalProps {
     onBack?: () => void;
 }
 
-const ActionModal: React.FC<ActionModalProps> = ({ isOpen, onClose, title, children, footer, headerActions, containerRef, heightClass, disableBodyScroll, zIndexClass = 'z-30', onBack }) => {
+const ActionModal: React.FC<ActionModalProps> = ({ isOpen, onClose, title, children, footer, headerActions, headerLeft, containerRef, heightClass, disableBodyScroll, zIndexClass = 'z-30', onBack }) => {
     const [isMounted, setIsMounted] = useState(isOpen);
     const [isRendered, setIsRendered] = useState(isOpen);
     const animationDuration = 300; // Match close animation duration
@@ -59,14 +60,17 @@ const ActionModal: React.FC<ActionModalProps> = ({ isOpen, onClose, title, child
                 onClick={e => e.stopPropagation()}
             >
                 <header className="relative bg-white px-3 py-2 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center min-h-[44px]">
-                    {onBack && (
-                        <div className="absolute top-1/2 left-2 -translate-y-1/2">
+                    <div className="absolute top-1/2 left-2 -translate-y-1/2 flex items-center gap-1">
+                        {onBack && (
                             <button onClick={onBack} className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="뒤로가기">
                                 <ChevronLeftIcon className="w-6 h-6"/>
                             </button>
-                        </div>
-                    )}
+                        )}
+                        {headerLeft}
+                    </div>
+                    
                     <h2 className="text-lg font-bold text-gray-800 truncate px-12 text-center">{title}</h2>
+                    
                     <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center gap-1">
                         {headerActions}
                         <button onClick={onClose} className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="닫기">

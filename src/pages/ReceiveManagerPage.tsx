@@ -451,14 +451,14 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             disableBodyScroll={true}
             zIndexClass="z-30"
             onBack={handleBack}
-            headerActions={
+            headerLeft={
                 mode === 'list' && (
                     <button 
                         onClick={() => setIsLoadModalOpen(true)} 
-                        className="p-1.5 text-gray-500 hover:text-blue-600 rounded-full transition-colors active:scale-95"
-                        title="서버에서 불러오기"
+                        className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors active:scale-95 border border-blue-100"
+                        title="서버 데이터 불러오기"
                     >
-                        <CloudArrowDownIcon className="w-6 h-6" />
+                        <CloudArrowDownIcon className="w-5 h-5" />
                     </button>
                 )
             }
