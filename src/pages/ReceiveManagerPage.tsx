@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useDataState, useAlert, useMiscUI, useScanner, useModals } from '../context/AppContext';
+import { useDataState, useAlert, useMiscUI, useScanner } from '../context/AppContext';
 import { ReceivingBatch, ReceivingItem, Product, Customer } from '../types';
 import * as receiveDb from '../services/receiveDbService';
 import { addReceivingBatch, getReceivingBatchesByDateRange, subscribeToReceivingBatches, cleanupOldReceivingBatches, deleteReceivingBatch } from '../services/dbService';
@@ -29,8 +29,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const { sqlStatus } = useMiscUI();
     const { openScanner } = useScanner();
 
-    // Mode: 'list' | 'edit'
-    const [mode, setMode] = useState<'list' | 'edit'>('list');
+    // Editor Modal State (Replaces 'mode' state)
+    const [isEditorOpen, setIsEditorOpen] = useState(false);
     
     // List Mode State
     const [batches, setBatches] = useState<ReceivingBatch[]>([]);
@@ -89,7 +89,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
 
     // Load batches with Realtime Sync
     useEffect(() => {
-        if (!isActive || mode !== 'list') return;
+        if (!isActive) return;
 
         // 1. First, load from local storage for instant feedback
         refreshLocalBatches();
@@ -116,7 +116,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         });
 
         return () => unsubscribe();
-    }, [isActive, mode, refreshLocalBatches]);
+    }, [isActive, refreshLocalBatches]);
 
     useEffect(() => {
         searchProduct(debouncedProductSearch);
@@ -342,13 +342,14 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         );
     };
 
+    // Prepare state for creating/editing
     const startNewBatch = () => {
         setEditingBatch(null);
         setSelectedSupplier(null);
         setSupplierSearch('');
         setBatchDate(new Date().toISOString().slice(0, 10));
         setCurrentItems([]);
-        setMode('edit');
+        setIsEditorOpen(true); // Open Editor Modal
     };
 
     const editBatch = (batch: ReceivingBatch) => {
@@ -357,7 +358,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         setSupplierSearch(batch.supplier.name);
         setBatchDate(batch.date);
         setCurrentItems(batch.items || []);
-        setMode('edit');
+        setIsEditorOpen(true); // Open Editor Modal
     };
 
     // Edit Mode Logic
@@ -411,8 +412,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             }
 
             showToast('저장되었습니다.', 'success');
-            setMode('list');
-            // Explicitly trigger a refresh when returning to list to ensure the new item is seen immediately
+            setIsEditorOpen(false); // Close Editor Modal
+            // Explicitly trigger a refresh when returning to list
             setTimeout(refreshLocalBatches, 50);
         } catch (e: any) {
             console.error("Save Error:", e);
@@ -435,176 +436,166 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         setCurrentItems(prev => prev.filter(i => i.uniqueId !== uniqueId));
     };
 
-    // Determine modal title based on mode
-    const modalTitle = mode === 'list' 
-        ? "입고 등록" 
-        : editingBatch ? "입고 수정" : "신규 입고";
-
-    // Determine back button action
-    const handleBack = mode === 'edit' ? () => setMode('list') : undefined;
+    const modalTitle = editingBatch ? "입고 수정" : "신규 입고";
 
     return (
-        <ActionModal
-            isOpen={isActive}
-            onClose={onClose}
-            title={modalTitle}
-            disableBodyScroll={true}
-            zIndexClass="z-30"
-            onBack={handleBack}
-            headerLeft={
-                mode === 'list' && (
-                    <button 
-                        onClick={() => setIsLoadModalOpen(true)} 
-                        className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors active:scale-95 border border-blue-100"
-                        title="서버 데이터 불러오기"
-                    >
-                        <CloudArrowDownIcon className="w-5 h-5" />
-                    </button>
-                )
-            }
-        >
-            {/* List Mode Content */}
-            {mode === 'list' && (
-                <div className="flex flex-col h-full bg-gray-50">
-                    <div className="bg-white p-3 border-b flex justify-between items-center">
-                        <div className="flex gap-2">
-                            <button 
-                                onClick={() => {
-                                    if (selectedBatches.size === batches.length) setSelectedBatches(new Set());
-                                    else setSelectedBatches(new Set(batches.map(b => b.id)));
-                                }}
-                                className="text-sm font-bold text-gray-600 flex items-center gap-1"
-                            >
-                                <CheckSquareIcon className="w-5 h-5" /> 전체
+        // The main ActionModal acts as the "List View" container.
+        // It's already open via `isActive` from MainView.
+        <>
+            <div className="flex flex-col h-full bg-gray-50">
+                <div className="bg-white p-3 border-b flex justify-between items-center">
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => {
+                                if (selectedBatches.size === batches.length) setSelectedBatches(new Set());
+                                else setSelectedBatches(new Set(batches.map(b => b.id)));
+                            }}
+                            className="text-sm font-bold text-gray-600 flex items-center gap-1"
+                        >
+                            <CheckSquareIcon className="w-5 h-5" /> 전체
+                        </button>
+                        {selectedBatches.size > 0 && (
+                            <button onClick={handleDeleteSelected} className="text-sm font-bold text-red-600 flex items-center gap-1">
+                                <TrashIcon className="w-5 h-5" /> 삭제({selectedBatches.size})
                             </button>
-                            {selectedBatches.size > 0 && (
-                                <button onClick={handleDeleteSelected} className="text-sm font-bold text-red-600 flex items-center gap-1">
-                                    <TrashIcon className="w-5 h-5" /> 삭제({selectedBatches.size})
-                                </button>
-                            )}
-                            <button onClick={refreshLocalBatches} className="text-sm font-bold text-gray-500 flex items-center gap-1 hover:text-blue-600">
-                                <UndoIcon className="w-4 h-4" /> 새로고침
-                            </button>
-                        </div>
-                        <div className="flex gap-2">
-                            {isBackgroundSyncing && <SpinnerIcon className="w-5 h-5 text-blue-500 animate-spin self-center" />}
-                            <button onClick={startNewBatch} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm active:scale-95">
-                                + 신규 등록
-                            </button>
-                        </div>
+                        )}
+                        <button onClick={refreshLocalBatches} className="text-sm font-bold text-gray-500 flex items-center gap-1 hover:text-blue-600">
+                            <UndoIcon className="w-4 h-4" /> 새로고침
+                        </button>
                     </div>
-                    <div className="flex-grow overflow-y-auto p-2 space-y-2">
-                        {loading && batches.length === 0 ? (
-                            <div className="flex justify-center items-center h-40">
-                                <SpinnerIcon className="w-8 h-8 text-blue-500" />
-                            </div>
-                        ) : batches.length === 0 ? (
-                            <div className="text-center text-gray-400 mt-10">
-                                <p>기기에 저장된 입고 내역이 없습니다.</p>
-                                <p className="text-xs mt-1">신규 등록하거나 서버에서 불러오세요.</p>
-                            </div>
-                        ) : (
-                            batches.map(batch => (
-                                <div key={batch.id} className={`bg-white p-3 rounded-xl border shadow-sm flex items-center gap-3 ${selectedBatches.has(batch.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}>
-                                    <button onClick={() => toggleSelectBatch(batch.id)} className="text-gray-400 focus:outline-none">
-                                        {selectedBatches.has(batch.id) ? <CheckSquareIcon className="w-6 h-6 text-blue-600" /> : <CancelSquareIcon className="w-6 h-6" />}
-                                    </button>
-                                    <div className="flex-grow min-w-0" onClick={() => editBatch(batch)}>
-                                        <div className="flex justify-between items-start">
-                                            <h3 className="font-bold text-gray-800 truncate">{batch.supplier.name}</h3>
-                                            <div className="flex items-center gap-1">
-                                                {batch.status === 'draft' && !isBackgroundSyncing && <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded">미전송</span>}
-                                                <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${batch.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                                    {batch.status === 'sent' ? '전송됨' : '작성중'}
-                                                </span>
-                                            </div>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => setIsLoadModalOpen(true)} 
+                            className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors active:scale-95 border border-blue-100"
+                            title="서버 데이터 불러오기"
+                        >
+                            <CloudArrowDownIcon className="w-5 h-5" />
+                        </button>
+                        {isBackgroundSyncing && <SpinnerIcon className="w-5 h-5 text-blue-500 animate-spin self-center" />}
+                        <button onClick={startNewBatch} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm active:scale-95">
+                            + 신규 등록
+                        </button>
+                    </div>
+                </div>
+                <div className="flex-grow overflow-y-auto p-2 space-y-2">
+                    {loading && batches.length === 0 ? (
+                        <div className="flex justify-center items-center h-40">
+                            <SpinnerIcon className="w-8 h-8 text-blue-500" />
+                        </div>
+                    ) : batches.length === 0 ? (
+                        <div className="text-center text-gray-400 mt-10">
+                            <p>기기에 저장된 입고 내역이 없습니다.</p>
+                            <p className="text-xs mt-1">신규 등록하거나 서버에서 불러오세요.</p>
+                        </div>
+                    ) : (
+                        batches.map(batch => (
+                            <div key={batch.id} className={`bg-white p-3 rounded-xl border shadow-sm flex items-center gap-3 ${selectedBatches.has(batch.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}>
+                                <button onClick={() => toggleSelectBatch(batch.id)} className="text-gray-400 focus:outline-none">
+                                    {selectedBatches.has(batch.id) ? <CheckSquareIcon className="w-6 h-6 text-blue-600" /> : <CancelSquareIcon className="w-6 h-6" />}
+                                </button>
+                                <div className="flex-grow min-w-0" onClick={() => editBatch(batch)}>
+                                    <div className="flex justify-between items-start">
+                                        <h3 className="font-bold text-gray-800 truncate">{batch.supplier.name}</h3>
+                                        <div className="flex items-center gap-1">
+                                            {batch.status === 'draft' && !isBackgroundSyncing && <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded">미전송</span>}
+                                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${batch.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                {batch.status === 'sent' ? '전송됨' : '작성중'}
+                                            </span>
                                         </div>
-                                        <div className="text-xs text-gray-500 mt-1 flex gap-2">
-                                            <span>{batch.date}</span>
-                                            <span>Items: {batch.itemCount}</span>
-                                            <span>{batch.totalAmount.toLocaleString()}원</span>
-                                        </div>
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1 flex gap-2">
+                                        <span>{batch.date}</span>
+                                        <span>Items: {batch.itemCount}</span>
+                                        <span>{batch.totalAmount.toLocaleString()}원</span>
                                     </div>
                                 </div>
-                            ))
-                        )}
+                            </div>
+                        ))
+                    )}
+                </div>
+                {selectedBatches.size > 0 && (
+                    <div className="p-3 bg-white border-t safe-area-pb">
+                        <button 
+                            onClick={handleSend}
+                            disabled={isSending}
+                            className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 disabled:bg-gray-400 flex items-center justify-center gap-2"
+                        >
+                            {isSending ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}
+                            {selectedBatches.size}건 전송하기
+                        </button>
                     </div>
-                    {selectedBatches.size > 0 && (
-                        <div className="p-3 bg-white border-t safe-area-pb">
-                            <button 
-                                onClick={handleSend}
-                                disabled={isSending}
-                                className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 disabled:bg-gray-400 flex items-center justify-center gap-2"
-                            >
-                                {isSending ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}
-                                {selectedBatches.size}건 전송하기
+                )}
+
+                {/* Firebase Load Modal */}
+                <ActionModal
+                    isOpen={isLoadModalOpen}
+                    onClose={() => setIsLoadModalOpen(false)}
+                    title="서버 데이터 불러오기"
+                    disableBodyScroll
+                    zIndexClass="z-[60]" // Higher than ReceiveManagerPage
+                >
+                    <div className="flex flex-col h-full bg-gray-50">
+                        <div className="p-3 bg-white border-b flex gap-2 items-center">
+                            <input 
+                                type="date" 
+                                value={loadDate} 
+                                onChange={e => setLoadDate(e.target.value)} 
+                                className="flex-grow border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-700"
+                            />
+                            <button onClick={handleFetchRemoteBatches} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm shadow active:scale-95 whitespace-nowrap">
+                                조회
                             </button>
                         </div>
-                    )}
-
-                    {/* Firebase Load Modal (Nested) */}
-                    <ActionModal
-                        isOpen={isLoadModalOpen}
-                        onClose={() => setIsLoadModalOpen(false)}
-                        title="서버 데이터 불러오기"
-                        disableBodyScroll
-                    >
-                        <div className="flex flex-col h-full bg-gray-50">
-                            <div className="p-3 bg-white border-b flex gap-2 items-center">
-                                <input 
-                                    type="date" 
-                                    value={loadDate} 
-                                    onChange={e => setLoadDate(e.target.value)} 
-                                    className="flex-grow border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-700"
-                                />
-                                <button onClick={handleFetchRemoteBatches} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm shadow active:scale-95 whitespace-nowrap">
-                                    조회
-                                </button>
-                            </div>
-                            <div className="flex-grow overflow-y-auto p-2">
-                                {isLoadingRemote ? (
-                                    <div className="flex justify-center items-center h-40"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>
-                                ) : remoteBatches.length === 0 ? (
-                                    <div className="text-center text-gray-400 mt-10">조회된 데이터가 없습니다.</div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {remoteBatches.map(batch => (
-                                            <div key={batch.id} className={`bg-white p-3 rounded-xl border shadow-sm flex items-center gap-3 cursor-pointer ${selectedRemoteBatches.has(batch.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`} onClick={() => toggleRemoteSelect(batch.id)}>
-                                                <div className="text-gray-400">
-                                                    {selectedRemoteBatches.has(batch.id) ? <CheckSquareIcon className="w-6 h-6 text-blue-600" /> : <CancelSquareIcon className="w-6 h-6" />}
+                        <div className="flex-grow overflow-y-auto p-2">
+                            {isLoadingRemote ? (
+                                <div className="flex justify-center items-center h-40"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>
+                            ) : remoteBatches.length === 0 ? (
+                                <div className="text-center text-gray-400 mt-10">조회된 데이터가 없습니다.</div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {remoteBatches.map(batch => (
+                                        <div key={batch.id} className={`bg-white p-3 rounded-xl border shadow-sm flex items-center gap-3 cursor-pointer ${selectedRemoteBatches.has(batch.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`} onClick={() => toggleRemoteSelect(batch.id)}>
+                                            <div className="text-gray-400">
+                                                {selectedRemoteBatches.has(batch.id) ? <CheckSquareIcon className="w-6 h-6 text-blue-600" /> : <CancelSquareIcon className="w-6 h-6" />}
+                                            </div>
+                                            <div className="flex-grow">
+                                                <div className="flex justify-between">
+                                                    <h3 className="font-bold text-gray-800">{batch.supplier.name}</h3>
+                                                    <span className={`text-xs px-1.5 py-0.5 rounded ${batch.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                        {batch.status === 'sent' ? '전송됨' : '작성중'}
+                                                    </span>
                                                 </div>
-                                                <div className="flex-grow">
-                                                    <div className="flex justify-between">
-                                                        <h3 className="font-bold text-gray-800">{batch.supplier.name}</h3>
-                                                        <span className={`text-xs px-1.5 py-0.5 rounded ${batch.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                                            {batch.status === 'sent' ? '전송됨' : '작성중'}
-                                                        </span>
-                                                    </div>
-                                                    <div className="text-xs text-gray-500 mt-1">
-                                                        {batch.itemCount}품목 / {batch.totalAmount.toLocaleString()}원
-                                                    </div>
+                                                <div className="text-xs text-gray-500 mt-1">
+                                                    {batch.itemCount}품목 / {batch.totalAmount.toLocaleString()}원
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="p-3 bg-white border-t">
-                                <button 
-                                    onClick={handleImportBatches} 
-                                    disabled={selectedRemoteBatches.size === 0}
-                                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg shadow-md active:scale-95 disabled:bg-gray-400"
-                                >
-                                    {selectedRemoteBatches.size}건 기기로 가져오기
-                                </button>
-                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
-                    </ActionModal>
-                </div>
-            )}
+                        <div className="p-3 bg-white border-t">
+                            <button 
+                                onClick={handleImportBatches} 
+                                disabled={selectedRemoteBatches.size === 0}
+                                className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg shadow-md active:scale-95 disabled:bg-gray-400"
+                            >
+                                {selectedRemoteBatches.size}건 기기로 가져오기
+                            </button>
+                        </div>
+                    </div>
+                </ActionModal>
+            </div>
 
-            {/* Edit Mode Content */}
-            {mode === 'edit' && (
+            {/* Nested Editor Modal (The "Edit/New" View) */}
+            <ActionModal
+                isOpen={isEditorOpen}
+                onClose={() => setIsEditorOpen(false)}
+                title={modalTitle}
+                disableBodyScroll
+                zIndexClass="z-[50]" // Higher than base modal
+                slideDirection="right" // Slide in from right as requested
+            >
                 <div className="flex flex-col h-full bg-white">
                     <div className="p-3 space-y-3 flex-shrink-0 bg-white shadow-sm z-10">
                         {/* Date & Supplier */}
@@ -724,8 +715,9 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                         </button>
                     </div>
                 </div>
-            )}
+            </ActionModal>
 
+            {/* Item Add Modal */}
             {addItemModalProps.isOpen && (
                 <ReceiveItemModal
                     isOpen={addItemModalProps.isOpen}
@@ -740,7 +732,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                     }
                 />
             )}
-        </ActionModal>
+        </>
     );
 };
 

@@ -10,18 +10,33 @@ interface ActionModalProps {
     children: React.ReactNode;
     footer?: React.ReactNode;
     headerActions?: React.ReactNode;
-    headerLeft?: React.ReactNode; // New prop for left-side custom actions
+    headerLeft?: React.ReactNode;
     containerRef?: React.Ref<HTMLDivElement>;
     heightClass?: string;
     disableBodyScroll?: boolean;
     zIndexClass?: string;
     onBack?: () => void;
+    slideDirection?: 'bottom' | 'right'; // Added prop
 }
 
-const ActionModal: React.FC<ActionModalProps> = ({ isOpen, onClose, title, children, footer, headerActions, headerLeft, containerRef, heightClass, disableBodyScroll, zIndexClass = 'z-30', onBack }) => {
+const ActionModal: React.FC<ActionModalProps> = ({ 
+    isOpen, 
+    onClose, 
+    title, 
+    children, 
+    footer, 
+    headerActions, 
+    headerLeft, 
+    containerRef, 
+    heightClass, 
+    disableBodyScroll, 
+    zIndexClass = 'z-30', 
+    onBack,
+    slideDirection = 'bottom' // Default to bottom
+}) => {
     const [isMounted, setIsMounted] = useState(isOpen);
     const [isRendered, setIsRendered] = useState(isOpen);
-    const animationDuration = 300; // Match close animation duration
+    const animationDuration = 300;
 
     useEffect(() => {
         if (isOpen) {
@@ -38,9 +53,20 @@ const ActionModal: React.FC<ActionModalProps> = ({ isOpen, onClose, title, child
     if (!isMounted) return null;
 
     const style = heightClass ? {} : { top: 'calc(3.5rem + env(safe-area-inset-top))' };
+    
+    // Determine translation classes based on direction
+    const translateClosed = slideDirection === 'right' ? 'translate-x-full' : 'translate-y-full';
+    const translateOpen = slideDirection === 'right' ? 'translate-x-0' : 'translate-y-0';
+    
     const baseClasses = heightClass 
         ? `absolute bottom-0 left-0 right-0 flex flex-col bg-gray-50 shadow-2xl rounded-t-2xl will-change-[transform,opacity] ${heightClass}`
-        : `absolute bottom-0 left-0 right-0 flex flex-col bg-gray-50 shadow-lg rounded-t-2xl will-change-[transform,opacity]`;
+        : `absolute bottom-0 left-0 right-0 flex flex-col bg-gray-50 shadow-lg ${slideDirection === 'bottom' ? 'rounded-t-2xl' : ''} will-change-[transform,opacity]`;
+
+    // For right slide, we usually want full height and square corners on the left (or all corners if it covers full screen)
+    // Adjusting base classes slightly if direction is right to look more like a page push
+    const directionClasses = slideDirection === 'right' 
+        ? 'top-0 rounded-none h-full' 
+        : 'rounded-t-2xl';
 
     return createPortal(
         <div 
@@ -51,15 +77,15 @@ const ActionModal: React.FC<ActionModalProps> = ({ isOpen, onClose, title, child
         >
             <div 
                 ref={containerRef}
-                style={style}
-                className={`${baseClasses} transition-transform ${
+                style={slideDirection === 'right' ? { top: 0, bottom: 0, height: '100%' } : style}
+                className={`${baseClasses} ${directionClasses} transition-transform ${
                     isRendered
-                        ? 'ease-[cubic-bezier(0.32,1.25,0.37,1.02)] duration-500' // Bouncy ease-out for opening
-                        : 'ease-[cubic-bezier(0.36,0,0.66,-0.56)] duration-300' // Ease-in-back for closing
-                } ${isRendered ? 'translate-y-0' : 'translate-y-full'}`}
+                        ? 'ease-[cubic-bezier(0.32,1.25,0.37,1.02)] duration-500' 
+                        : 'ease-[cubic-bezier(0.36,0,0.66,-0.56)] duration-300'
+                } ${isRendered ? translateOpen : translateClosed}`}
                 onClick={e => e.stopPropagation()}
             >
-                <header className="relative bg-white px-3 py-2 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-2xl flex items-center justify-center min-h-[44px]">
+                <header className="relative bg-white px-3 py-2 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-inherit flex items-center justify-center min-h-[44px]">
                     <div className="absolute top-1/2 left-2 -translate-y-1/2 flex items-center gap-1">
                         {onBack && (
                             <button onClick={onBack} className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors" aria-label="뒤로가기">
