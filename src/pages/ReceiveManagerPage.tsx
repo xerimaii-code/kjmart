@@ -96,6 +96,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 let failCount = 0;
 
                 // Safe Insert Query with Semicolon to prevent 'Incorrect syntax near with' error
+                // This ensures the statement is properly terminated before the WITH clause if concatenated.
                 const safeInsertQuery = `
                     ; INSERT INTO dbo.dt900_ipgo (
                         day1, dtcomcode, comcode, comname, barcode, descr, 
@@ -114,8 +115,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         CASE WHEN CAST(@qty AS INT) >= 0 THEN 'I' ELSE 'B' END,
                         ISNULL(p.money0vat, 0)
                     FROM (SELECT 1 AS dummy) AS t
-                    LEFT JOIN dbo.parts AS p WITH(NOLOCK) ON p.barcode = @barcode
-                    LEFT JOIN dbo.comp AS c WITH(NOLOCK) ON c.comcode = p.comcode
+                    LEFT JOIN dbo.parts AS p WITH (NOLOCK) ON p.barcode = @barcode
+                    LEFT JOIN dbo.comp AS c WITH (NOLOCK) ON c.comcode = p.comcode
                 `;
 
                 try {
