@@ -444,6 +444,17 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
             showAlert("바코드와 상품명은 필수 항목입니다.");
             return;
         }
+        
+        // [New] Validation: Check for required fields to prevent clcode/search errors in PC app
+        if (!lCode) {
+            showAlert("대분류를 선택해주세요.\n(PC 앱 검색을 위해 필수입니다)");
+            return;
+        }
+        if (!comcode) {
+            showAlert("거래처를 선택해주세요.\n(PC 앱 검색을 위해 필수입니다)");
+            return;
+        }
+
         setIsSaving(true);
         try {
             const safeCost = Number(String(costPrice).replace(/,/g, ''));
