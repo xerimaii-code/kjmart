@@ -466,32 +466,32 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
             const pIsPack = bomStatus === '묶음' ? '1' : '0';
 
             // Comprehensive Context Params mapping
+            // Ensure these keys align EXACTLY with what's expected in the user's SQL query.
             const contextParams = {
-                // Section 1: Explicit inputs from Prompt
-                kw: searchInput, // Generally for search, but provided here
-                barcode: pBarcode,
-                Descr: pProductName,
-                spec: pSpec,
-                money0vat: pMoney0vat,
-                money1: pMoney1,
-                comcode: pComcode,
-                isvat: pIsVat,
-                isjago: pIsStock,
-                ispoint: pIsPoint,
-                isuse: pIsUse,
-                gubun1: pGubun1,
-                gubun2: pGubun2,
-                gubun3: pGubun3,
-                remark: '모바일수정',
-
-                // Section 2: Helper/Internal variables that might be useful
-                CurrentDate: new Date().toISOString().slice(0, 10),
-
-                // Lowercase aliases and existing mappings
-                descr: pProductName,
-                stock_yn: pIsStock,
-                ispack: pIsPack,
+                // Section 1: Explicit inputs from Prompt & Specific SQL Requirements
+                money0vat: pMoney0vat, // Required by SQL: @money0vat
+                money1: pMoney1,       // Required by SQL: @money1
+                Descr: pProductName,   // Required by SQL: @Descr (case sensitive)
+                descr: pProductName,   // Fallback: @descr
+                isvat: pIsVat,         // Required by SQL: @isvat
+                gubun1: pGubun1,       // Required by SQL: @gubun1
+                gubun2: pGubun2,       // Required by SQL: @gubun2
+                gubun3: pGubun3,       // Required by SQL: @gubun3
+                barcode: pBarcode,     // Required by SQL: @barcode
+                spec: pSpec,           // Required by SQL: @spec
+                comcode: pComcode,     // Required by SQL: @comcode
+                isjago: pIsStock,      // Required by SQL: @isjago
+                ispoint: pIsPoint,     // Required by SQL: @ispoint
+                isuse: pIsUse,         // Required by SQL: @isuse
                 
+                // Section 2: Helper/Internal variables provided for flexibility
+                kw: searchInput, 
+                
+                // Lowercase aliases
+                stock_yn: pIsStock,
+                ispack: pIsPack, // Available if user wants to use @ispack instead of '0'
+                
+                // Default flags (Available as variables in case user edits the query to use them)
                 iscashback: '1', 
                 pangacho: '0', 
                 isinclude: '1', 
@@ -519,13 +519,6 @@ const ProductEditPage: React.FC<ProductEditPageProps> = ({ isOpen, onClose, init
                 중분류: pGubun2,
                 소분류: pGubun3,
                 묶음여부: pIsPack,
-                캐시백여부: '1',
-                판매구분: '0',
-                부가세포함: '1',
-                연동여부: '0',
-                무게할인: '1',
-                자동발주: '0',
-                인쇄여부: '0',
                 비고: '모바일수정'
             };
 
