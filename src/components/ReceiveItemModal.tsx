@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Product, ReceivingItem } from '../types';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
@@ -11,9 +11,10 @@ interface ReceiveItemModalProps {
     product: Product | null;
     onClose: () => void;
     onAdd: (item: Omit<ReceivingItem, 'uniqueId'>) => void;
+    currentItems: ReceivingItem[];
 }
 
-const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd }) => {
+const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd, currentItems }) => {
     const [quantity, setQuantity] = useState<number | string>(1);
     const [isReturn, setIsReturn] = useState(false);
     
@@ -22,6 +23,14 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const [isRendered, setIsRendered] = useState(false);
 
     useAdjustForKeyboard(modalContentRef, isOpen);
+
+    // Calculate existing quantity for this product in the current batch
+    const existingQuantity = useMemo(() => {
+        if (!product || !currentItems) return 0;
+        return currentItems
+            .filter(item => item.barcode === product.barcode)
+            .reduce((sum, item) => sum + item.quantity, 0);
+    }, [product, currentItems]);
 
     useEffect(() => {
         if (isOpen) {
@@ -51,10 +60,6 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
         const itemData: Omit<ReceivingItem, 'uniqueId'> = {
             barcode: product.barcode,
             name: product.name,
-            // 입고 시점의 가격을 기록 (행사 매입가가 있으면 그것을, 아니면 일반 매입가를 사용)
-            // 단, 사용자가 행사 매입가를 입고가로 쓸지 여부는 정책에 따라 다를 수 있으나, 
-            // 여기서는 상품 정보에 있는 기본 CostPrice를 사용하되, 행사 정보는 참고용으로 보여줌.
-            // (필요 시 로직 변경 가능)
             costPrice: product.costPrice, 
             sellingPrice: product.sellingPrice,
             quantity: isReturn ? -finalQuantity : finalQuantity,
@@ -149,6 +154,12 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
 
                     {/* Quantity Input Section */}
                     <div>
+                        <div className="text-center mb-2">
+                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                                현재 담긴 수량: {existingQuantity.toLocaleString()}개
+                            </span>
+                        </div>
+
                         <label className="block text-sm font-bold text-gray-700 mb-2 text-center">
                             {isReturn ? '반품 수량' : '입고 수량'}
                         </label>

@@ -60,7 +60,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [currentItems, setCurrentItems] = useState<ReceivingItem[]>([]);
     const [isSavingBatch, setIsSavingBatch] = useState(false);
     const [receiveModalProps, setReceiveModalProps] = useState<{ product: Product } | null>(null);
-    const [isReady, setIsReady] = useState(false); // New state to force render after timeout
     
     // Draft Hook
     const { draft, isLoading: isDraftLoading, save: saveDraft, remove: removeDraft } = useDraft<ReceivingDraft>(DRAFT_KEY);
@@ -78,20 +77,6 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     useEffect(() => {
         search(debouncedSearchTerm);
     }, [debouncedSearchTerm, search]);
-
-    // Force ready state after timeout to prevent blank screen if draft loading hangs
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setIsReady(true);
-        }, 1000);
-        return () => clearTimeout(timer);
-    }, []);
-
-    useEffect(() => {
-        if (!isDraftLoading) {
-            setIsReady(true);
-        }
-    }, [isDraftLoading]);
 
     // --- List View State ---
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
@@ -282,10 +267,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     // --- Render Logic ---
 
-    // Show loading only if not forced ready and draft is loading
-    if (isDraftLoading && !isReady) {
-        return <div className="flex items-center justify-center h-full"><SpinnerIcon className="w-8 h-8 text-blue-500" /></div>;
-    }
+    // removed blocking loading logic to prevent blank screen
 
     if (view === 'list') {
         return (
@@ -432,6 +414,7 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 product={receiveModalProps?.product || null}
                 onClose={() => setReceiveModalProps(null)}
                 onAdd={handleAddItem}
+                currentItems={currentItems}
             />
         </div>
     );
