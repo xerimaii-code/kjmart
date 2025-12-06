@@ -7,6 +7,7 @@ import { extractParamsForQuery } from '../hooks/useProductSearch';
 import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon } from '../components/Icons';
 import { Customer, Category } from '../types';
 import { getCachedData } from '../services/cacheDbService';
+import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 
 interface ProductEditPageProps {
     isOpen: boolean;
@@ -65,6 +66,10 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     
     const [searchInput, setSearchInput] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
+    
+    // Keyboard Adjustment Ref
+    const modalContainerRef = useRef<HTMLDivElement>(null);
+    useAdjustForKeyboard(modalContainerRef, isOpen);
 
     // --- Data Fetching Logic ---
 
@@ -347,6 +352,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 CurrentDate: new Date().toISOString().slice(0, 10),
                 kw: searchInput, 
                 stock_yn: isStockManaged ? '1' : '0',
+                RemarkParam: spec || '', // Added @RemarkParam mapped to spec
             };
 
             const userQueryName = isEditMode ? '상품수정' : '상품등록';
@@ -404,6 +410,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             onClose={onClose}
             title={isEditMode ? "상품 수정" : "상품 등록/수정"} 
             disableBodyScroll={false}
+            containerRef={modalContainerRef}
         >
             <div className="p-3 space-y-3 bg-white min-h-full">
                 {/* 1. Search Bar */}
@@ -415,7 +422,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
                             placeholder="바코드 또는 상품명 (길게 눌러 초기화)"
-                            className="w-full h-10 pl-3 pr-10 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm"
+                            className="w-full h-10 pl-3 pr-10 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-lg font-bold"
                         />
                         <button type="submit" className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-white bg-blue-600 rounded-r-md hover:bg-blue-700">
                             <SearchIcon className="w-5 h-5" />
@@ -458,7 +465,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 </div>
 
                 {/* 3. Row: Prices, Margin, Tax */}
-                <div className="flex gap-2 items-end">
+                <div className="flex gap-1 items-end">
                     <div className="flex-1 flex flex-col gap-1">
                         <label className="text-xs font-bold text-gray-700">매입가</label>
                         <input
@@ -477,7 +484,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             className="w-full h-10 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-bold text-blue-600"
                         />
                     </div>
-                    <div className="w-16 flex flex-col gap-1 items-center justify-center pb-2">
+                    <div className="w-12 flex flex-col gap-1 items-center justify-center pb-2">
                         <label className="text-[10px] text-gray-500">이익률</label>
                         <span className={`text-xs font-bold ${marginRate >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
                             {marginRate.toFixed(2)}%
@@ -486,7 +493,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     <div className="pb-1">
                         <button 
                             onClick={() => setIsTaxable(!isTaxable)}
-                            className={`flex items-center gap-1 px-2 py-2 rounded border ${isTaxable ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600'}`}
+                            className={`flex items-center gap-1 px-1 py-2 rounded border ${isTaxable ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600'}`}
                         >
                             <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${isTaxable ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
                                 {isTaxable && <CheckCircleIcon className="w-3 h-3 text-white" />}
