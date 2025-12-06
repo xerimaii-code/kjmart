@@ -370,11 +370,20 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         populateProductData(product);
     };
 
+    const handleToggleWithConfirm = (label: string, currentValue: boolean, setter: (val: boolean) => void) => {
+        showAlert(
+            `'${label}' 설정을 ${currentValue ? '해제' : '설정'}하시겠습니까?`,
+            () => setter(!currentValue),
+            '확인',
+            'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+        );
+    };
+
     if (!isOpen) return null;
 
     const CustomToggleButton = ({ label, checked, onChange }: { label: string, checked: boolean, onChange: (v: boolean) => void }) => (
         <button 
-            onClick={() => onChange(!checked)}
+            onClick={() => handleToggleWithConfirm(label, checked, onChange)}
             className={`flex items-center justify-center gap-1 px-1 py-1.5 rounded border transition-all ${checked ? 'bg-white border-blue-500 text-blue-700' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
         >
             <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${checked ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>
@@ -402,14 +411,14 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
                             placeholder="바코드/명칭 (길게 눌러 초기화)"
-                            className="flex-1 h-10 pl-2 pr-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-base" 
+                            className="flex-1 h-9 pl-2 pr-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm" 
                         />
                         {/* 검색 버튼 (작게) */}
-                        <button type="submit" className="w-10 h-10 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm">
+                        <button type="submit" className="w-9 h-9 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm">
                             <SearchIcon className="w-5 h-5" />
                         </button>
-                        {/* 스캔 버튼 (크게 - 2.5배 느낌) */}
-                        <button type="button" onClick={handleScan} className="flex-[2] h-10 bg-gray-700 text-white rounded-md flex items-center justify-center gap-1 active:scale-95 shadow-sm hover:bg-gray-800">
+                        {/* 스캔 버튼 (크게 - 1.5배 느낌) */}
+                        <button type="button" onClick={handleScan} className="w-32 h-9 bg-gray-700 text-white rounded-md flex items-center justify-center gap-1 active:scale-95 shadow-sm hover:bg-gray-800">
                             <BarcodeScannerIcon className="w-6 h-6" />
                             <span className="text-xs font-bold">스캔</span>
                         </button>
@@ -541,24 +550,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                         <CustomToggleButton label="재고관리" checked={isStockManaged} onChange={setIsStockManaged} />
                     </div>
 
-                    {/* 7. Bottom Info Panels */}
-                    <div className="grid grid-cols-2 gap-1 mt-1 mb-2">
-                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
-                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">할인정보</div>
-                            <div className="p-1 flex items-center justify-center text-center h-10">
-                                <p className="text-[10px] text-gray-500 whitespace-pre-line leading-tight">{saleInfoText}</p>
-                            </div>
-                        </div>
-                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
-                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">BOM 정보</div>
-                            <div className="p-1 flex items-center justify-center text-center h-10">
-                                <p className="text-[10px] text-gray-500">{bomInfoText}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* 8. Action Buttons (Pushed to bottom) */}
-                    <div className="mt-auto grid grid-cols-[1fr_4fr] gap-2 pt-2 pb-1">
+                    {/* 7. Action Buttons (Moved Here) */}
+                    <div className="grid grid-cols-[1fr_4fr] gap-2 pt-1 pb-1">
                         <button 
                             onClick={handleReset} 
                             className="h-12 bg-orange-100 border border-orange-200 text-orange-600 rounded-md flex items-center justify-center hover:bg-orange-200 active:scale-95 transition-transform"
@@ -573,6 +566,22 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             {isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}
                             저장
                         </button>
+                    </div>
+
+                    {/* 8. Bottom Info Panels */}
+                    <div className="grid grid-cols-2 gap-1 mt-1 mb-2">
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
+                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">할인정보</div>
+                            <div className="p-1 flex items-center justify-center text-center h-10">
+                                <p className="text-[10px] text-gray-500 whitespace-pre-line leading-tight">{saleInfoText}</p>
+                            </div>
+                        </div>
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col">
+                            <div className="bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 border-b border-gray-200 text-center">BOM 정보</div>
+                            <div className="p-1 flex items-center justify-center text-center h-10">
+                                <p className="text-[10px] text-gray-500">{bomInfoText}</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </ActionModal>
