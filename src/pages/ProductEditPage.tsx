@@ -55,6 +55,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [supplierList, setSupplierList] = useState<Customer[]>([]);
     
     const [stockQty, setStockQty] = useState<number>(0);
+    const [isBundle, setIsBundle] = useState(false);
 
     // Flags
     const [isUse, setIsUse] = useState(true);
@@ -192,6 +193,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             setCostPrice(0); setSellingPrice(0);
             setComcode(''); setLCode(''); setMCode(''); setSCode('');
             setStockQty(0);
+            setIsBundle(false);
             setIsUse(true); setIsTaxable(true); setIsPoint(true); setIsStockManaged(true);
             setSaleInfo(null);
             setBomList([]);
@@ -200,6 +202,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         } else {
             setBarcode(''); setProductName(''); setSpec('');
             setCostPrice(0); setSellingPrice(0); setStockQty(0);
+            setIsBundle(false);
             setSaleInfo(null);
             setIsEditMode(false);
         }
@@ -251,7 +254,10 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
 
         // BOM Info Logic
-        if (String(p.ispack) === '1' || p.BOM여부 === '묶음') {
+        const isPack = String(p.ispack) === '1' || p.BOM여부 === '묶음';
+        setIsBundle(isPack);
+
+        if (isPack) {
             // Fetch BOM components
             executeUserQuery('getBomComponents', { barcode: p.바코드 || p.barcode })
                 .then(res => setBomList(res))
@@ -561,7 +567,10 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             </select>
                         </div>
                         <div className="w-1/3 flex flex-col gap-0.5">
-                            <label className="text-xs font-bold text-gray-700">재고수량</label>
+                            <div className="flex justify-between items-center">
+                                <label className="text-xs font-bold text-gray-700">재고수량</label>
+                                {isBundle && <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 rounded border border-purple-200 leading-none">묶음</span>}
+                            </div>
                             <input
                                 type="text"
                                 value={stockQty.toLocaleString()}
