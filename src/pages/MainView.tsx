@@ -87,18 +87,15 @@ const MainView: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 onClose={handleClose} 
             />
             
-            <ActionModal
-                isOpen={activeModal === 'receiveGoods'}
-                onClose={handleClose}
-                title="입고 등록"
-                disableBodyScroll={true}
-                zIndexClass="z-30"
-            >
+            {/* ReceiveManagerPage now handles its own ActionModal to customize the header */}
+            {activeModal === 'receiveGoods' && (
                 <Suspense fallback={<LoadingFallback />}>
-                    <ReceiveManagerPage isActive={activeModal === 'receiveGoods'} />
+                    <ReceiveManagerPage 
+                        isActive={true} 
+                        onClose={handleClose} 
+                    />
                 </Suspense>
-            </ActionModal>
-
+            )}
 
             <ActionModal
                 isOpen={activeModal === 'sqlRunner' || activeModal === 'report'}
