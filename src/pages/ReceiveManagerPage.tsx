@@ -591,16 +591,16 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             return;
         }
 
-        // Check if required query exists
-        const insertQuery = userQueries.find(q => q.name === '입고등록');
-        if (!insertQuery) {
-            showAlert("SQL Runner에 '입고등록' 쿼리가 등록되어 있지 않습니다.\n설정 > SQL Runner에서 쿼리를 추가해주세요.\n예: INSERT INTO 입고테이블 (날짜, 코드, 수량...) VALUES (@date, @barcode, @qty...)");
-            return;
-        }
-        
         const batchesToSend = batches.filter(b => selectedBatches.has(b.id));
         const totalItems = batchesToSend.reduce((acc, b) => acc + b.itemCount, 0);
         const uniqueSuppliers = new Set(batchesToSend.map(b => b.supplier.name)).size;
+
+        // Use a dynamic User Query named '입고등록'
+        const insertQueryDef = userQueries.find(q => q.name === '입고등록');
+        if (!insertQueryDef) {
+            showAlert("설정 > SQL Runner에서 '입고등록' 쿼리를 추가해주세요.");
+            return;
+        }
 
         showAlert(
             `${uniqueSuppliers}개 거래처, 총 ${totalItems}개 품목을 서버(POS)로 전송하시겠습니까?`,
@@ -623,8 +623,8 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                     price: item.sellingPrice,
                                     item_name: item.name
                                 };
-                                // Execute SQL Insert
-                                const result = await executeUserQuery('입고등록', params, insertQuery.query);
+                                // Execute SQL Insert with the Safe Query via User Query mechanism
+                                const result = await executeUserQuery('입고등록', params, insertQueryDef.query);
                                 
                                 // DEBUG: Show result for 'Kwangdong Pharm' if requested by user
                                 if (batch.supplier.name.includes("광동")) {
