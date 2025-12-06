@@ -58,9 +58,9 @@ const ReceiveManagerPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const productSearchBlurTimeout = useRef<number | null>(null);
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
-    // Safe access to customers
+    // Safe access to customers - Create a copy before sorting to avoid mutating state
     const sortedCustomers = useMemo(() => {
-        return (customers || []).sort((a, b) => a.name.localeCompare(b.name));
+        return [...(customers || [])].sort((a, b) => a.name.localeCompare(b.name));
     }, [customers]);
 
     useEffect(() => {

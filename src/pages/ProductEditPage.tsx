@@ -63,8 +63,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [isPoint, setIsPoint] = useState(true);
     const [isStockManaged, setIsStockManaged] = useState(true);
     
-    // UI Logic
-    const [isCategoryFixed, setIsCategoryFixed] = useState(false);
+    // UI Logic (Default checked as requested)
+    const [isCategoryFixed, setIsCategoryFixed] = useState(true);
 
     // Info Panels Data
     const [saleInfo, setSaleInfo] = useState<SaleInfo | null>(null);
@@ -75,6 +75,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     
     const [searchInput, setSearchInput] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const productNameRef = useRef<HTMLInputElement>(null);
     
     // Selection Modal
     const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
@@ -293,6 +294,11 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     setBarcode(code);
                     setIsEditMode(false);
                     showToast('등록되지 않은 바코드입니다. 신규 등록합니다.', 'success');
+                    
+                    // Focus on Product Name for new item registration
+                    setTimeout(() => {
+                        productNameRef.current?.focus();
+                    }, 150);
                 } else {
                     showToast('검색 결과가 없습니다.', 'error');
                 }
@@ -385,6 +391,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             showToast(isEditMode ? "상품 정보가 수정되었습니다." : "신규 상품이 등록되었습니다.", "success");
             setSearchInput('');
             
+            // Logic: If Fixed, Partial Reset (Keep Cats). Else Full Reset (Clear Cats).
             if (isCategoryFixed) resetForm(false);
             else resetForm(true);
             
@@ -450,8 +457,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                             placeholder="바코드/명칭 (길게 눌러 초기화)"
                             className="flex-1 h-9 pl-2 pr-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm" 
                         />
-                        {/* 검색 버튼 (작게) */}
-                        <button type="submit" className="w-9 h-9 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm">
+                        {/* 검색 버튼 (확대) */}
+                        <button type="submit" className="w-14 h-9 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm">
                             <SearchIcon className="w-5 h-5" />
                         </button>
                         {/* 스캔 버튼 (크게 - 1.5배 느낌) */}
@@ -462,17 +469,18 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     </form>
                     
                     {/* 2. Product Name & Barcode Display & Spec */}
-                    <div className="flex gap-1 pt-1">
-                        <div className="flex-grow flex flex-col gap-0.5">
+                    <div className="flex gap-1 pt-1 min-w-0">
+                        <div className="flex-grow flex flex-col gap-0.5 min-w-0">
                             <div className="flex items-baseline gap-2">
-                                <label className="text-xs font-bold text-gray-700">상품명</label>
+                                <label className="text-xs font-bold text-gray-700 whitespace-nowrap">상품명</label>
                                 {barcode && (
-                                    <span className="text-sm font-bold text-blue-600 font-mono tracking-tight">
+                                    <span className="text-sm font-bold text-gray-900 font-mono tracking-tight truncate">
                                         [{formatBarcodeDisplay(barcode)}]
                                     </span>
                                 )}
                             </div>
                             <input
+                                ref={productNameRef}
                                 type="text"
                                 value={productName}
                                 onChange={(e) => setProductName(e.target.value)}
@@ -480,7 +488,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                 placeholder="상품명 입력"
                             />
                         </div>
-                        <div className="w-1/3 flex flex-col gap-0.5">
+                        <div className="w-1/3 flex flex-col gap-0.5 flex-shrink-0">
                             <label className="text-xs font-bold text-gray-700">규격</label>
                             <input
                                 type="text"
@@ -535,19 +543,19 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     <div className="flex flex-col gap-0.5 pt-1">
                         <label className="text-xs font-bold text-gray-700">상품 분류</label>
                         <div className="flex gap-1 items-center">
-                            <select value={lCode} onChange={handleLargeChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate">
+                            <select value={lCode} onChange={handleLargeChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0">
                                 <option value="">대분류</option>
                                 {lCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                             </select>
-                            <select value={mCode} onChange={handleMediumChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate">
+                            <select value={mCode} onChange={handleMediumChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0">
                                 <option value="">중분류</option>
                                 {mCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                             </select>
-                            <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate">
+                            <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0">
                                 <option value="">소분류</option>
                                 {sCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                             </select>
-                            <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap px-1 ml-1 bg-gray-50 rounded border border-gray-200 h-9">
+                            <label className="flex-shrink-0 flex items-center gap-1 cursor-pointer whitespace-nowrap px-1 ml-1 bg-gray-50 rounded border border-gray-200 h-9">
                                 <input type="checkbox" checked={isCategoryFixed} onChange={(e) => setIsCategoryFixed(e.target.checked)} className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
                                 <span className="text-[11px] font-bold text-gray-700">고정</span>
                             </label>
@@ -611,9 +619,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     {/* 8. Bottom Info Panels */}
                     <div className="grid grid-cols-2 gap-1 mt-1 mb-0">
                         {/* Discount Info Panel */}
-                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col h-24">
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col min-h-[5rem]">
                             <div className="bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">할인정보</div>
-                            <div className="p-1 flex-1 flex flex-col items-center justify-center overflow-hidden">
+                            <div className="p-1 flex-1 flex flex-col items-center justify-center">
                                 {saleInfo ? (
                                     <>
                                         <div className="flex-1 flex items-center justify-center w-full">
@@ -635,9 +643,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                         </div>
 
                         {/* BOM Info Panel */}
-                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col h-24">
+                        <div className="bg-gray-50 border border-gray-200 rounded flex flex-col min-h-[5rem]">
                             <div className="bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600 border-b border-gray-200 text-center flex-shrink-0">BOM 정보</div>
-                            <div className="p-1 flex-1 overflow-y-auto scrollbar-hide">
+                            <div className="p-1 flex-1">
                                 {bomList.length > 0 ? (
                                     <div className="space-y-1">
                                         {bomList.map((item, idx) => (
