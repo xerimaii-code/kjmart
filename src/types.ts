@@ -1,0 +1,164 @@
+
+export interface Customer {
+    comcode: string;
+    name: string;
+    lastModified?: string;
+}
+
+export interface Product {
+    barcode: string;
+    name: string;
+    spec?: string; // Added spec field
+    costPrice: number;
+    sellingPrice: number;
+    eventCostPrice?: number;
+    salePrice?: number;
+    saleName?: string; // Added saleName field
+    saleStartDate?: string;
+    saleEndDate?: string;
+    supplierName?: string;
+    lastModified?: string;
+    stockQuantity?: number;
+    bomStatus?: string;
+    comcode?: string; // Added for full sync
+    gubun1?: string;  // Added for full sync
+    gubun2?: string;  // Added for full sync
+    gubun3?: string;  // Added for full sync
+}
+
+export interface OrderItem {
+    barcode: string;
+    name: string;
+    price: number;
+    quantity: number;
+    unit: '개' | '박스';
+    memo?: string;
+}
+
+export interface Order {
+    id: number;
+    date: string;
+    createdAt: string;
+    updatedAt: string;
+    customer: Customer;
+    itemCount: number;
+    total: number;
+    completedAt?: string | null;
+    completionDetails?: {
+        type: 'sms' | 'xls' | 'return';
+        timestamp: string;
+    } | null;
+    items?: OrderItem[];
+}
+
+export interface ReceivingItem {
+    uniqueId: number;
+    barcode: string;
+    name: string;
+    costPrice: number; // 입고 시점의 매입가
+    sellingPrice: number;
+    quantity: number;
+    isNew?: boolean; // 새로 추가된 항목인지 여부
+}
+
+export interface ReceivingBatch {
+    id: number; // Timestamp-based ID
+    date: string; // YYYY-MM-DD
+    supplier: Customer;
+    items: ReceivingItem[];
+    itemCount: number;
+    totalAmount: number;
+    status: 'draft' | 'sent';
+    sentAt?: string;
+}
+
+
+export type ScannerContext = 'new-order' | 'modal' | 'product-inquiry' | null;
+
+// New interface for Scanner Options
+export interface ScannerOptions {
+    continuous: boolean;
+    useHighPrecision?: boolean;
+}
+
+export interface NewOrderDraft {
+    selectedCustomer: Customer | null;
+    items: OrderItem[];
+    isBoxUnitDefault: boolean;
+}
+
+export interface EditedOrderDraft {
+    items: OrderItem[];
+}
+
+export interface ReceivingDraft {
+    currentDate: string;
+    selectedSupplier: Customer | null;
+    items: ReceivingItem[];
+}
+
+export interface SyncSettings {
+    fileId: string;
+    fileName: string;
+    lastSyncTime: string | null;
+    autoSync: boolean;
+}
+
+export interface DeviceSettings {
+    selectedCameraId: string | null;
+    scanSettings: {
+        vibrateOnScan: boolean;
+        soundOnScan: boolean;
+        useScannerButton: boolean; // Added: Manual scan button toggle
+    };
+    logRetentionDays: number;
+    googleDriveSyncSettings: {
+        customers: SyncSettings | null;
+        products: SyncSettings | null;
+    };
+    dataSourceSettings: {
+        newOrder: 'offline' | 'online';
+        productInquiry: 'offline' | 'online';
+        autoSwitch: boolean;
+    };
+    allowDestructiveQueries: boolean; // SQL Runner Safety Setting
+    uiFeedback: {
+        vibrateOnPress: boolean;
+    };
+}
+
+export interface SyncLog {
+    _key: string;
+    timestamp: number;
+    user?: string;
+    name?: string;
+    barcode?: string;
+    comcode?: string;
+    _deleted?: boolean;
+}
+
+export interface BOM {
+    pcode: string;
+    ccode: string;
+    qty: number;
+    id?: string; // Composite key helper for IndexedDB
+}
+
+export interface Category {
+    id: string; // Unique key (e.g., "1-01", "2-01-02")
+    level: 1 | 2 | 3;
+    code1: string;
+    code2?: string;
+    code3?: string;
+    name: string;
+}
+
+export interface UserQuery {
+    id: string;
+    name: string;
+    query: string;
+    type: 'sql' | 'natural';
+    isQuickRun?: boolean;
+    isImportant?: boolean;
+    order?: number;
+}
