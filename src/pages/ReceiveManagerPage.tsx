@@ -647,7 +647,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                                 // FORCE SAVE on date change
                                 if(!editingBatchRef.current) saveDraft({ currentDate: e.target.value, selectedSupplier, items: currentItems }); 
                             }} 
-                            className="bg-transparent text-sm font-bold text-gray-600 border-none p-0 focus:ring-0 w-28 cursor-pointer"
+                            className="bg-transparent text-sm font-bold text-gray-600 border-none p-0 focus:ring-0 cursor-pointer"
                         />
                     </div>
                 }

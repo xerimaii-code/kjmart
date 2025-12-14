@@ -165,6 +165,17 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                         />
                     </div>
 
+                    <div className="mb-2.5">
+                        <MenuButton 
+                            className={`${hasLocalReceivingDraft ? "border-orange-200 bg-orange-50/30" : ""}`}
+                            label={hasLocalReceivingDraft ? "입고 (이어서)" : "입고 등록"} 
+                            icon={<BarcodeScannerIcon className={iconClass} />} 
+                            onClick={() => onNavigate('receiveGoods')}
+                            badge={receivingDraftCount}
+                            subText={receivingDraftCount > 0 ? `미전송 ${receivingDraftCount}건` : "스캔으로 입고 등록 및 관리"}
+                        />
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {/* 2. Order & Receiving Management */}
                         <div className="flex flex-col gap-1.5">
@@ -181,22 +192,12 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                                     onClick={() => onNavigate('orderHistory')}
                                 />
                             </div>
-                            <div className="grid grid-cols-2 gap-1.5">
-                                 <MenuButton 
-                                    className={`${hasLocalReceivingDraft ? "border-orange-200 bg-orange-50/30" : ""}`}
-                                    label={hasLocalReceivingDraft ? "입고 (이어서)" : "입고 등록"} 
-                                    icon={<BarcodeScannerIcon className={iconClass} />} 
-                                    onClick={() => onNavigate('receiveGoods')}
-                                    badge={receivingDraftCount}
-                                    subText={receivingDraftCount > 0 ? `${receivingDraftCount}건 미전송` : undefined}
-                                />
-                                <MenuButton 
-                                    label="매입 내역" 
-                                    icon={<TableCellsIcon className={iconClass} />} 
-                                    onClick={() => handleNotImplemented('매입 내역')}
-                                    subText="기간별 입고 조회"
-                                />
-                            </div>
+                            <MenuButton 
+                                label="매입 내역" 
+                                icon={<TableCellsIcon className={iconClass} />} 
+                                onClick={() => handleNotImplemented('매입 내역')}
+                                subText="기간별 입고 조회"
+                            />
                             <MenuButton 
                                 label="행사 관리" 
                                 icon={<StarIcon className={iconClass} />} 

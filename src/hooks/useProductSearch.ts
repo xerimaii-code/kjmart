@@ -62,7 +62,6 @@ export function useProductSearch(
         }
 
         const preferredSource = dataSourceSettings[sourceSettingKey];
-        // Ensure strictly connected state for online search
         const canGoOnline = sqlStatus === 'connected';
         const useOnline = preferredSource === 'online' && canGoOnline;
 
@@ -71,27 +70,37 @@ export function useProductSearch(
 
         if (useOnline) {
             try {
-                // Priority: 1. Specific Query (if provided) 2. '상품조회' (default) 3. Built-in
-                let targetQueryName = specificQueryName || '상품조회';
-                const userSearchQuery = userQueries.find(q => q.name === targetQueryName);
-                
-                let onlineData;
-
-                if (userSearchQuery) {
-                    const params = { kw: term, keyword: term, search: term, limit: maxResults, barcode: term };
-                    const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
-                    onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
-                } else if (specificQueryName) {
-                    console.warn(`Requested query '${specificQueryName}' not found. Falling back to default.`);
-                    onlineData = await searchProductsOnline(term, maxResults);
+                if (specificQueryName) {
+                    const userSearchQuery = userQueries.find(q => q.name === specificQueryName);
+                    
+                    if (userSearchQuery) {
+                        const params = { kw: term, keyword: term, search: term, limit: maxResults, barcode: term };
+                        const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
+                        const onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
+                        setResults(onlineData.map(mapSqlResultToProduct));
+                    } else {
+                        // The required user query was not found. FALLBACK to default search instead of aborting.
+                        console.warn(`User query '${specificQueryName}' not found for '${sourceSettingKey}'. Falling back to default online search.`);
+                        const onlineData = await searchProductsOnline(term, maxResults);
+                        setResults(onlineData.map(mapSqlResultToProduct));
+                    }
                 } else {
-                    onlineData = await searchProductsOnline(term, maxResults);
+                    // Original logic for pages that don't specify a query name.
+                    const targetQueryName = '상품조회';
+                    const userSearchQuery = userQueries.find(q => q.name === targetQueryName);
+                    
+                    let onlineData;
+                    if (userSearchQuery) {
+                        const params = { kw: term, keyword: term, search: term, limit: maxResults, barcode: term };
+                        const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
+                        onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
+                    } else {
+                        onlineData = await searchProductsOnline(term, maxResults);
+                    }
+                    setResults(onlineData.map(mapSqlResultToProduct));
                 }
-                
-                setResults(onlineData.map(mapSqlResultToProduct));
             } catch (e) {
                 console.error("Online search failed:", e);
-                // Fallback to offline if autoSwitch is enabled
                 if (dataSourceSettings.autoSwitch) {
                     setSearchSource('offline');
                     const lowercasedFilter = term.toLowerCase();
@@ -120,38 +129,57 @@ export function useProductSearch(
         }
     }, [searchTerm, products, userQueries, dataSourceSettings, sourceSettingKey, sqlStatus, maxResults, specificQueryName]);
 
-    // Independent function to search a single barcode online (used for scan fallback)
     const searchByBarcode = useCallback(async (barcode: string): Promise<Product | null> => {
         if (!sqlStatus || sqlStatus !== 'connected') return null;
         
         try {
-            let targetQueryName = specificQueryName || '상품조회';
-            const userSearchQuery = userQueries.find(q => q.name === targetQueryName);
-            
-            let onlineData: any[] = [];
+            if (specificQueryName) {
+                const userSearchQuery = userQueries.find(q => q.name === specificQueryName);
+                if (userSearchQuery) {
+                    const params = { kw: barcode, keyword: barcode, search: barcode, limit: 1, barcode: barcode };
+                    const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
+                    const onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
 
-            if (userSearchQuery) {
-                // Pass barcode as exact match keyword if possible
-                const params = { kw: barcode, keyword: barcode, search: barcode, limit: 1, barcode: barcode };
-                const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
-                onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
+                    if (onlineData && onlineData.length > 0) {
+                        const exactMatch = onlineData.find(p => String(p.바코드 || p.barcode) === barcode);
+                        return exactMatch ? mapSqlResultToProduct(exactMatch) : mapSqlResultToProduct(onlineData[0]);
+                    }
+                    return null;
+                } else {
+                    console.warn(`Barcode search needs user query '${specificQueryName}', not found. Falling back to default search.`);
+                    const onlineData = await searchProductsOnline(barcode, 1);
+                    if (onlineData && onlineData.length > 0) {
+                        const exactMatch = onlineData.find(p => String(p.바코드 || p.barcode) === barcode);
+                        return exactMatch ? mapSqlResultToProduct(exactMatch) : mapSqlResultToProduct(onlineData[0]);
+                    }
+                    return null;
+                }
             } else {
-                onlineData = await searchProductsOnline(barcode, 1);
-            }
+                // Original logic for pages without a specific query.
+                let targetQueryName = '상품조회';
+                const userSearchQuery = userQueries.find(q => q.name === targetQueryName);
+                
+                let onlineData: any[] = [];
 
-            if (onlineData && onlineData.length > 0) {
-                // Find exact match if multiple returned
-                const exactMatch = onlineData.find(p => 
-                    String(p.바코드 || p.barcode) === barcode
-                );
-                return exactMatch ? mapSqlResultToProduct(exactMatch) : mapSqlResultToProduct(onlineData[0]);
+                if (userSearchQuery) {
+                    const params = { kw: barcode, keyword: barcode, search: barcode, limit: 1, barcode: barcode };
+                    const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
+                    onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
+                } else {
+                    onlineData = await searchProductsOnline(barcode, 1);
+                }
+
+                if (onlineData && onlineData.length > 0) {
+                    const exactMatch = onlineData.find(p => String(p.바코드 || p.barcode) === barcode);
+                    return exactMatch ? mapSqlResultToProduct(exactMatch) : mapSqlResultToProduct(onlineData[0]);
+                }
+                return null;
             }
-            return null;
         } catch (e) {
             console.error("Online barcode search failed:", e);
             return null;
         }
-    }, [userQueries, sqlStatus, specificQueryName]);
+    }, [userQueries, sqlStatus, specificQueryName, sourceSettingKey]);
 
     const clear = useCallback(() => {
         setSearchTerm('');
