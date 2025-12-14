@@ -252,11 +252,15 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     
         const timer = setTimeout(() => setIsLoading(false), 2000); // Failsafe to hide spinner if no data arrives
     
-        getAllDraftKeys().then(keys => setDraftKeys(new Set(keys)));
+        // Draft key polling
+        const fetchKeys = () => getAllDraftKeys().then(keys => setDraftKeys(new Set(keys)));
+        fetchKeys();
+        const keyInterval = setInterval(fetchKeys, 2000); // Poll every 2 seconds to update badge
     
         return () => {
             unsubscribe();
             clearTimeout(timer);
+            clearInterval(keyInterval);
         };
     }, [isActive, customStartDate, customEndDate, setActiveMenuOrderId]);
 

@@ -1,11 +1,11 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { OrderItem } from '../types';
 import { useDataState } from '../context/AppContext';
 import { isSaleActive } from '../hooks/useOrderManager';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { UndoIcon, XCircleIcon, SaveIcon, ChatBubbleLeftIcon } from './Icons';
+import { XCircleIcon, SaveIcon, ChatBubbleLeftIcon } from './Icons';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
 
 interface EditItemModalProps {
@@ -15,7 +15,7 @@ interface EditItemModalProps {
     onSave: (details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => void;
 }
 
-export default function EditItemModal({ isOpen, item, onSave, onClose }: EditItemModalProps) {
+const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onClose }) => {
     const [activeItem, setActiveItem] = useState<OrderItem | null>(item);
     const [isMounted, setIsMounted] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
@@ -82,7 +82,7 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
 
     const updateValue = (prev: number | string, val: string, isFirst: boolean) => {
         if (val === 'C') return 0;
-        if (val === '-') return Number(prev) * -1; // Changed from BS logic to minus logic as per request for consistency
+        if (val === '-') return Number(prev) * -1;
         
         if (isFirst) return Number(val);
         const newVal = Number(String(prev) + val);
@@ -141,7 +141,7 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
                 </ButtonBase>
             </div>
 
-            {/* Numeric Keypad - Replaced BS with - */}
+            {/* Numeric Keypad */}
             <div className="grid grid-cols-3 gap-1 flex-grow min-h-0">
                 {[7, 8, 9, 4, 5, 6, 1, 2, 3].map(num => (
                     <ButtonBase key={num} onClick={(e:any) => handleKeypadInput(String(num), e)} className="bg-white text-gray-800 text-xl hover:bg-gray-50 border border-gray-200 font-bold shadow-sm">{num}</ButtonBase>
@@ -176,7 +176,7 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
                 </div>
             </div>
 
-            {/* Price Info (Simplified: Only Cost & Selling - Stock Removed) */}
+            {/* Price Info */}
             {product && (
                 <div className="flex items-center justify-between bg-gray-50 px-2 py-1.5 rounded text-xs text-gray-600 mb-2 flex-shrink-0 border border-gray-100">
                     <div className="flex gap-3 w-full justify-around">
@@ -199,7 +199,7 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
 
             {/* Quantity Input Area */}
             <div className="flex-grow flex flex-col min-h-0 mb-1">
-                {/* Main Input (Compact Height h-12) */}
+                {/* Main Input */}
                 <div 
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={() => setIsFirstInput(true)}
@@ -266,4 +266,24 @@ export default function EditItemModal({ isOpen, item, onSave, onClose }: EditIte
             </div>
         </div>
     );
-}
+
+    return createPortal(
+        <div 
+            className={`fixed inset-0 z-[100] flex items-center justify-center transition-colors duration-200 ${isVisible ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} 
+            onClick={handleClose} 
+            role="dialog" 
+            aria-modal="true"
+        >
+            <KeypadLayout
+                layoutId="edit_item_modal_layout"
+                isLeftHanded={!!isLeftHanded}
+                onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)}
+                leftContent={InfoSection}
+                rightContent={ControllerSection}
+            />
+        </div>,
+        document.body
+    );
+};
+
+export default EditItemModal;

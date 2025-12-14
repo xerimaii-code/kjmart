@@ -127,6 +127,7 @@ const AppContent: React.FC = () => {
             )}
             {editItemModalProps && (
                 <EditItemModal
+                    key={editItemModalProps.item.barcode} // FORCE REMOUNT ON ITEM CHANGE
                     isOpen={true}
                     item={editItemModalProps.item}
                     onClose={closeEditItemModal}

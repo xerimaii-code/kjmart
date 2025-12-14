@@ -99,6 +99,9 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [customerSearch, setCustomerSearch] = useState('');
     const [debouncedCustomerSearch, setDebouncedCustomerSearch] = useState('');
     
+    // Critical: Use refs to hold the *latest* state for save operations, preventing stale closures.
+    const selectedCustomerRef = useRef(selectedCustomer);
+    
     useEffect(() => {
         const handler = setTimeout(() => setDebouncedCustomerSearch(customerSearch), 200);
         return () => clearTimeout(handler);
@@ -151,7 +154,8 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const itemsRef = useRef(items);
     useEffect(() => {
         itemsRef.current = items;
-    }, [items]);
+        selectedCustomerRef.current = selectedCustomer;
+    }, [items, selectedCustomer]);
 
     // --- Auto Search Effect ---
     useEffect(() => {
@@ -174,8 +178,9 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [draft, resetItems]);
 
+    // Save draft only if NOT currently saving the order to prevent race conditions
     useEffect(() => {
-        if (isDraftLoading) return;
+        if (isDraftLoading || isSaving) return;
         const hasContent = selectedCustomer || (items && items.length > 0);
         if (hasContent) {
             saveDraftData({
@@ -184,7 +189,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isBoxUnitDefault,
             });
         }
-    }, [selectedCustomer, items, isBoxUnitDefault, isDraftLoading, saveDraftData]);
+    }, [selectedCustomer, items, isBoxUnitDefault, isDraftLoading, saveDraftData, isSaving]);
 
     useEffect(() => {
         if (scrollableContainerRef.current) {
@@ -273,7 +278,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         setSelectedCustomer(null);
         setCustomerSearch('');
         setProductSearch('');
-        resetItems();
+        resetItems([]);
         setIsBoxUnitDefault(false);
 
         if (options?.preventFocus) {
@@ -298,35 +303,48 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, [showAlert, resetOrder, removeDraftData]);
     
     const handleSaveOrder = useCallback(async () => {
-        if (!selectedCustomer) {
+        // Use refs for safe access to latest state during async operation
+        const currentCustomer = selectedCustomerRef.current;
+        const currentItemsList = itemsRef.current;
+
+        if (!currentCustomer) {
             showAlert("거래처를 선택해주세요.");
             return;
         }
-        if (items.length === 0) {
+        if (currentItemsList.length === 0) {
             showAlert("발주할 품목이 없습니다.");
             return;
         }
 
         setIsSaving(true);
         try {
+            // Calculate total again to be sure
+            const currentTotal = Math.floor(currentItemsList.reduce((sum, item) => sum + (item.price * item.quantity), 0));
+
             const newOrderId = await addOrder({
-                customer: selectedCustomer,
-                items,
-                total: totalAmount,
+                customer: currentCustomer,
+                items: currentItemsList,
+                total: currentTotal,
             });
+            
             setLastModifiedOrderId(newOrderId);
+            
+            // Explicitly clear draft from DB first
             removeDraftData();
+            
+            // Reset local state without focusing to avoid keyboard pop-up
             resetOrder({ preventFocus: true });
+            
         } catch (error) {
             console.error("Failed to save order:", error);
             showAlert("발주 저장에 실패했습니다. 작성 중인 내용은 임시 저장되어 다음에 다시 시도할 수 있습니다.");
         } finally {
             setIsSaving(false);
         }
-    }, [selectedCustomer, items, totalAmount, addOrder, setLastModifiedOrderId, resetOrder, showAlert, removeDraftData]);
+    }, [addOrder, setLastModifiedOrderId, resetOrder, showAlert, removeDraftData]);
 
     const handleAddProductFromSearch = useCallback((product: Product) => {
-        const existingItem = items.find(item => item.barcode === product.barcode);
+        const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
         openAddItemModal({
             product,
             existingItem: existingItem || null,
@@ -335,10 +353,10 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             initialSettings: { unit: existingItem ? existingItem.unit : (isBoxUnitDefault ? '박스' : '개') }
         });
         setProductSearch('');
-    }, [items, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, setProductSearch]);
+    }, [openAddItemModal, addOrUpdateItem, isBoxUnitDefault, setProductSearch]);
 
     const handleOpenScanner: () => void = useCallback(() => {
-        if (!isCustomerSelected) {
+        if (!selectedCustomerRef.current) {
             showAlert("먼저 거래처를 선택해주세요.");
             return;
         }
@@ -367,7 +385,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         };
         
         openScanner('new-order', onScan, { continuous: true });
-    }, [isCustomerSelected, showAlert, openScanner, products, itemsRef, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, searchByBarcode, showToast]);
+    }, [showAlert, openScanner, products, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, searchByBarcode, showToast]);
 
 
     const handleRemoveItem = useCallback((item: OrderItem) => {
@@ -534,7 +552,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         <div className="flex justify-between items-center font-bold mb-3 px-2">
                              <div className="flex items-center gap-2">
                                 <span className="text-sm text-gray-500">총 합계:</span>
-                                {draftStatus === 'saving' && (
+                                {draftStatus === 'saving' && !isSaving && (
                                     <span className="text-xs font-semibold text-gray-400 animate-pulse flex items-center gap-1">
                                         <SpinnerIcon className="w-3 h-3"/> 저장 중...
                                     </span>
