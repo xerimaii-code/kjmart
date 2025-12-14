@@ -42,9 +42,13 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: O
                     )}
                 </div>
 
-                {/* Row 2: Order Price vs Current Price */}
+                {/* Row 2: Order Price vs Current Price & Total */}
                 <div className="flex flex-wrap items-center gap-x-2 text-xs">
-                    <span className="font-bold text-indigo-600">발주단가: {item.price.toLocaleString()}</span>
+                    <div className="flex items-center gap-1">
+                        <span className="font-bold text-indigo-600">{item.price.toLocaleString()}</span>
+                        <span className="text-gray-400">× {item.quantity} =</span>
+                        <span className="font-extrabold text-gray-800">{(item.price * item.quantity).toLocaleString()}</span>
+                    </div>
                     {product && (
                         <>
                             <span className="text-gray-300">|</span>

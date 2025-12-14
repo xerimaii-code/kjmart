@@ -15,6 +15,7 @@ import SearchDropdown from '../components/SearchDropdown';
 import { useProductSearch } from '../hooks/useProductSearch';
 import { useDebounce } from '../hooks/useDebounce';
 import { useSortedCustomers } from '../hooks/useSortedCustomers';
+import { isSaleActive } from '../hooks/useOrderManager';
 import ActionModal from '../components/ActionModal';
 import { useDraft } from '../hooks/useDraft';
 import ProductSearchBar from '../components/ProductSearchBar';
@@ -26,14 +27,21 @@ interface ReceiveManagerPageProps {
 
 const DRAFT_KEY = 'receiving-new-draft';
 
-const ReceiveListItem = memo(({ item, index, onRemove }: { item: ReceivingItem, index: number, onRemove: (id: number) => void }) => {
+const ReceiveListItem = memo(({ item, index, onRemove, product }: { item: ReceivingItem, index: number, onRemove: (id: number) => void, product?: Product }) => {
+    const saleIsActive = product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false;
+
     return (
         <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center animate-fade-in-up">
             <div className="flex-grow min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-200">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-200 flex-shrink-0">
                         #{index}
                     </span>
+                    {saleIsActive && (
+                        <span className="bg-rose-100 text-rose-600 text-[10px] font-extrabold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap border border-rose-200">
+                            행사중
+                        </span>
+                    )}
                     <p className="font-bold text-gray-800 text-base truncate">{item.name}</p>
                 </div>
                 <div className="text-sm text-gray-600 pl-1 flex items-center gap-2">
@@ -44,7 +52,7 @@ const ReceiveListItem = memo(({ item, index, onRemove }: { item: ReceivingItem, 
                     <span className={`font-bold ${item.quantity < 0 ? 'text-rose-600' : 'text-gray-800'}`}>{(item.costPrice * item.quantity).toLocaleString()}원</span>
                 </div>
             </div>
-            <button onClick={() => onRemove(item.uniqueId)} className="text-gray-400 hover:text-rose-500 p-2.5 rounded-full hover:bg-rose-50 transition-colors ml-1">
+            <button onClick={() => onRemove(item.uniqueId)} className="text-gray-400 hover:text-rose-500 p-2.5 rounded-full hover:bg-rose-50 transition-colors ml-1 flex-shrink-0">
                 <TrashIcon className="w-5 h-5" />
             </button>
         </div>
@@ -361,9 +369,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
 
     const filteredSuppliers = useMemo(() => {
         const term = supplierSearch.toLowerCase();
-        // If searching or input is not matching selected, filter
-        // If selected and search matches name, don't filter (to show list if clicked again) 
-        // Logic: Always show sorted customers, filtered if term exists.
         
         if (!term) return sortedCustomers.slice(0, 50); // Show top 50 frequent when empty
         
@@ -388,10 +393,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         }
 
         // **UX Improvement**: Automatically focus on Product Search
-        // We use a slight timeout to allow the UI to update (modal to potentially re-render)
         setTimeout(() => {
-            // Find the product search input using a selector if ref isn't directly available or reliable across components
-            // Assuming ProductSearchBar is present and has an input
             const productInput = document.querySelector('input[placeholder*="품목명"]') as HTMLInputElement;
             if (productInput) {
                 productInput.focus();
@@ -691,7 +693,10 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                             </div>
                         ) : (
                             <div className="space-y-3 pb-20">
-                                {reversedItems.map((item, idx) => <ReceiveListItem key={item.uniqueId} item={item} index={currentItems.length - idx} onRemove={handleRemoveItem} />)}
+                                {reversedItems.map((item, idx) => {
+                                    const product = products.find(p => p.barcode === item.barcode);
+                                    return <ReceiveListItem key={item.uniqueId} item={item} index={currentItems.length - idx} onRemove={handleRemoveItem} product={product} />;
+                                })}
                             </div>
                         )}
                     </div>

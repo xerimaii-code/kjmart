@@ -65,9 +65,14 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, {
                     )}
                 </div>
 
-                {/* Row 2: Price Info (Order vs Current) */}
+                {/* Row 2: Price Info (Order vs Current) & Total */}
                 <div className="flex flex-wrap items-center gap-x-2 text-xs">
-                    <span className="font-bold text-blue-600">발주단가: {item.price.toLocaleString()}</span>
+                    <div className="flex items-center gap-1">
+                        <span className="font-bold text-blue-600">{item.price.toLocaleString()}</span>
+                        <span className="text-gray-400">× {item.quantity} =</span>
+                        <span className="font-extrabold text-gray-800">{(item.price * item.quantity).toLocaleString()}</span>
+                    </div>
+                    
                     {!isCompleted && product && (
                         <>
                             <span className="text-gray-300">|</span>
