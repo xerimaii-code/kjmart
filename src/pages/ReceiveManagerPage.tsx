@@ -95,6 +95,9 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const latestDateRef = useRef(batchDate);
     const editingBatchRef = useRef(editingBatch);
 
+    // To auto-focus product search after supplier selection
+    const productSearchInputRef = useRef<HTMLInputElement>(null);
+
     // Sync Refs with State
     useEffect(() => {
         latestItemsRef.current = currentItems;
@@ -114,6 +117,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     
     const debouncedProductSearch = useDebounce(productSearch, 300);
     const supplierSearchInputRef = useRef<HTMLInputElement>(null);
+    const supplierSearchBlurTimeout = useRef<number | null>(null); // To handle blur delay
     const { sortedCustomers, recordUsage } = useSortedCustomers(customers);
 
     useEffect(() => {
@@ -173,11 +177,10 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         }
     };
 
-    // --- Strict Draft Saving: Save on any relevant state change, but also relying on explicit action saves ---
+    // --- Strict Draft Saving: Save on any relevant state change ---
+    // Note: We use manual saving in handlers for immediate effect, this is a fallback.
     useEffect(() => {
         if (isEditorOpen && !isDraftLoading && !editingBatch) {
-            // This effect handles "idle" saving (debounce from hook), 
-            // but we also force save in handlers for safety.
             const hasData = selectedSupplier || (currentItems && currentItems.length > 0);
             if (hasData) {
                 saveDraft({
@@ -357,24 +360,25 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     };
 
     const filteredSuppliers = useMemo(() => {
-        // If supplier is already selected, don't show list to avoid confusion, unless actively searching
-        if (selectedSupplier && supplierSearch === selectedSupplier.name) return [];
-        
         const term = supplierSearch.toLowerCase();
-        let result = sortedCustomers;
+        // If searching or input is not matching selected, filter
+        // If selected and search matches name, don't filter (to show list if clicked again) 
+        // Logic: Always show sorted customers, filtered if term exists.
         
-        // Filter if search term exists
-        if (term) {
-            result = sortedCustomers.filter(c => c.name.toLowerCase().includes(term) || c.comcode.includes(term));
-        }
-        // Always limit to 20 for performance
-        return result.slice(0, 20);
-    }, [sortedCustomers, supplierSearch, selectedSupplier]);
+        if (!term) return sortedCustomers.slice(0, 50); // Show top 50 frequent when empty
+        
+        return sortedCustomers.filter(c => 
+            c.name.toLowerCase().includes(term) || c.comcode.includes(term)
+        ).slice(0, 50);
+    }, [sortedCustomers, supplierSearch]);
 
     const handleSelectSupplier = (customer: Customer) => {
-        setSelectedSupplier(customer); setSupplierSearch(customer.name); setShowSupplierDropdown(false); recordUsage(customer.comcode);
+        setSelectedSupplier(customer); 
+        setSupplierSearch(customer.name); 
+        setShowSupplierDropdown(false); 
+        recordUsage(customer.comcode);
         
-        // Immediate Draft Save
+        // **CRITICAL**: Save draft IMMEDIATELY upon selection to prevent data loss
         if (!editingBatch) {
             saveDraft({
                 currentDate: batchDate,
@@ -382,10 +386,24 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                 items: currentItems
             });
         }
+
+        // **UX Improvement**: Automatically focus on Product Search
+        // We use a slight timeout to allow the UI to update (modal to potentially re-render)
+        setTimeout(() => {
+            // Find the product search input using a selector if ref isn't directly available or reliable across components
+            // Assuming ProductSearchBar is present and has an input
+            const productInput = document.querySelector('input[placeholder*="품목명"]') as HTMLInputElement;
+            if (productInput) {
+                productInput.focus();
+            }
+        }, 150);
     };
 
     const handleClearSupplier = () => {
-        setSelectedSupplier(null); setSupplierSearch(''); requestAnimationFrame(() => supplierSearchInputRef.current?.focus());
+        setSelectedSupplier(null); 
+        setSupplierSearch(''); 
+        requestAnimationFrame(() => supplierSearchInputRef.current?.focus());
+        
         // Immediate Draft Save
         if (!editingBatch) {
             saveDraft({
@@ -402,7 +420,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         
         setCurrentItems(prev => {
             const updatedItems = [...prev, newItem];
-            // Force Save if not in edit mode (using refs to prevent stale data)
+            // **CRITICAL**: Force Save immediately using current refs
             if (!editingBatchRef.current) {
                 saveDraft({
                     currentDate: latestDateRef.current,
@@ -413,13 +431,13 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             return updatedItems;
         });
         setProductSearch('');
-    }, [saveDraft]); // Removed 'editingBatch' from deps, used Ref instead
+    }, [saveDraft]); 
 
     // Robust Remove Item with Immediate Draft Save
     const handleRemoveItem = useCallback((uniqueId: number) => {
         setCurrentItems(prev => {
             const updatedItems = prev.filter(i => i.uniqueId !== uniqueId);
-            // Force Save if not in edit mode
+            // **CRITICAL**: Force Save immediately
             if (!editingBatchRef.current) {
                 saveDraft({
                     currentDate: latestDateRef.current,
@@ -459,7 +477,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     };
 
     // --- CONTINUOUS SCAN LOGIC (USING GLOBAL SCANNER) ---
-    // Callback when barcode is detected by Global ScannerModal
     const onScanDetected = async (code: string) => {
         try {
             let product = products.find(p => p.barcode === code);
@@ -492,10 +509,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const isInitialMount = useRef(true);
     useEffect(() => {
         if (isInitialMount.current) { isInitialMount.current = false; return; }
-        // Redundant draft save removal: handleAddItem/RemoveItem/SelectSupplier now handle immediate saves.
-        // Keeping this as a fallback for date changes or other indirect updates is fine, 
-        // but strict saving is handled by event handlers.
-    }, [currentItems, batchDate, selectedSupplier, isEditorOpen, editingBatch, saveDraft]);
+    }, []);
 
     const totalAmount = currentItems.reduce((sum, i) => sum + (i.costPrice * i.quantity), 0);
     const isUnregisteredBarcode = productSearchResults.length === 0 && /^\d{7,}$/.test(debouncedProductSearch);
@@ -628,6 +642,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                             value={batchDate} 
                             onChange={e => { 
                                 setBatchDate(e.target.value); 
+                                // FORCE SAVE on date change
                                 if(!editingBatchRef.current) saveDraft({ currentDate: e.target.value, selectedSupplier, items: currentItems }); 
                             }} 
                             className="bg-transparent text-sm font-bold text-gray-600 border-none p-0 focus:ring-0 w-28 cursor-pointer"
@@ -646,8 +661,13 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                                     type="text" 
                                     value={supplierSearch} 
                                     onChange={e => { setSupplierSearch(e.target.value); setShowSupplierDropdown(true); }} 
-                                    onFocus={() => setShowSupplierDropdown(true)} 
-                                    onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 200)} 
+                                    onFocus={() => {
+                                        if(supplierSearchBlurTimeout.current) clearTimeout(supplierSearchBlurTimeout.current);
+                                        setShowSupplierDropdown(true);
+                                    }} 
+                                    onBlur={() => {
+                                        supplierSearchBlurTimeout.current = window.setTimeout(() => setShowSupplierDropdown(false), 200);
+                                    }}
                                     placeholder="거래처 검색 (선택)" 
                                     readOnly={!!selectedSupplier} 
                                     className={`w-full h-11 px-4 border rounded-xl text-base transition-all shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${selectedSupplier ? 'bg-indigo-50 border-indigo-500 text-indigo-800 font-bold pr-20' : 'border-gray-300 bg-white font-medium'}`} 

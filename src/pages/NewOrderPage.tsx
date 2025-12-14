@@ -210,11 +210,15 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const filteredCustomers = useMemo(() => {
         const searchTerm = debouncedCustomerSearch.trim().toLowerCase();
         if (isCustomerSelected) return [];
-        let result = sortedCustomers;
-        if (searchTerm) {
-            result = sortedCustomers.filter(c => c.name.toLowerCase().includes(searchTerm) || c.comcode.includes(searchTerm));
+        
+        // Use sorted list. If no search term, show all (limited for performance if huge)
+        if (!searchTerm) {
+            return sortedCustomers.slice(0, 50); 
         }
-        return result;
+        
+        return sortedCustomers.filter(c => 
+            c.name.toLowerCase().includes(searchTerm) || c.comcode.includes(searchTerm)
+        ).slice(0, 50);
     }, [sortedCustomers, debouncedCustomerSearch, isCustomerSelected]);
 
     // --- Drag and Drop State and Handlers ---
