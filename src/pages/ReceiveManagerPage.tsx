@@ -655,9 +655,9 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             >
                 <div className="flex flex-col h-full bg-white">
                     {isSearchingProducts && <div className="absolute top-0 left-0 w-full h-1 bg-indigo-100 z-[60] overflow-hidden"><div className="h-full bg-indigo-600 animate-[indeterminate_1.5s_infinite_linear] origin-left"></div></div>}
-                    <div className="p-3 space-y-3 flex-shrink-0 bg-white shadow-sm z-10 border-b border-gray-100 relative">
-                        <div className="flex gap-2">
-                            <div className="relative flex-grow z-50">
+                    <div className="p-3 flex-shrink-0 bg-white shadow-sm z-10 border-b border-gray-100 relative flex flex-col">
+                        <div className="flex gap-2 z-50">
+                            <div className="relative flex-grow">
                                 <input 
                                     ref={supplierSearchInputRef} 
                                     type="text" 
@@ -678,10 +678,13 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                                 <SearchDropdown<Customer> items={filteredSuppliers} show={showSupplierDropdown && !selectedSupplier} renderItem={c => <div onMouseDown={() => handleSelectSupplier(c)} className="p-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0"><p className="font-bold text-gray-800">{c.name}</p><p className="text-xs text-gray-500 mt-0.5">{c.comcode}</p></div>} />
                             </div>
                         </div>
-                        <div className="flex gap-2">
-                            <div className="relative flex-grow z-40">
-                                <ProductSearchBar searchTerm={productSearch} onSearchTermChange={setProductSearch} isSearching={isSearchingProducts} results={productSearchResults} onSelectProduct={(p) => { openItemModal({ isOpen: true, product: p, source: 'search' }); }} onScan={handleScanButtonClick} isBoxUnit={false} onBoxUnitChange={() => {}} placeholder="품목명/바코드 검색" showBoxToggle={false} />
-                                {isUnregisteredBarcode && <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-rose-200 rounded-lg shadow-lg z-50"><div onMouseDown={(e) => { e.preventDefault(); const unregisteredProduct: Product = { barcode: debouncedProductSearch, name: '', costPrice: 0, sellingPrice: 0, spec: '', }; openItemModal({ isOpen: true, product: unregisteredProduct, source: 'search' }); }} className="p-4 hover:bg-rose-50 cursor-pointer flex items-center justify-center gap-2 group"><div className="bg-rose-100 p-1.5 rounded-full"><BarcodeScannerIcon className="w-5 h-5 text-rose-600" /></div><div className="text-left"><p className="text-sm font-bold text-rose-600">'{debouncedProductSearch}' 미등록 입고</p><p className="text-xs text-rose-400">터치하여 상품 정보 입력 후 입고</p></div></div></div>}
+                        
+                        <div className={`transition-all duration-300 ease-in-out overflow-hidden ${selectedSupplier ? 'max-h-24 opacity-100 mt-3' : 'max-h-0 opacity-0 mt-0'}`}>
+                            <div className="flex gap-2">
+                                <div className="relative flex-grow z-40">
+                                    <ProductSearchBar searchTerm={productSearch} onSearchTermChange={setProductSearch} isSearching={isSearchingProducts} results={productSearchResults} onSelectProduct={(p) => { openItemModal({ isOpen: true, product: p, source: 'search' }); }} onScan={handleScanButtonClick} isBoxUnit={false} onBoxUnitChange={() => {}} placeholder="품목명/바코드 검색" showBoxToggle={false} />
+                                    {isUnregisteredBarcode && <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-rose-200 rounded-lg shadow-lg z-50"><div onMouseDown={(e) => { e.preventDefault(); const unregisteredProduct: Product = { barcode: debouncedProductSearch, name: '', costPrice: 0, sellingPrice: 0, spec: '', }; openItemModal({ isOpen: true, product: unregisteredProduct, source: 'search' }); }} className="p-4 hover:bg-rose-50 cursor-pointer flex items-center justify-center gap-2 group"><div className="bg-rose-100 p-1.5 rounded-full"><BarcodeScannerIcon className="w-5 h-5 text-rose-600" /></div><div className="text-left"><p className="text-sm font-bold text-rose-600">'{debouncedProductSearch}' 미등록 입고</p><p className="text-xs text-rose-400">터치하여 상품 정보 입력 후 입고</p></div></div></div>}
+                                </div>
                             </div>
                         </div>
                     </div>

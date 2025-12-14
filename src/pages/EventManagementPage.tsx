@@ -288,11 +288,10 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                             <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap align-middle">
                                                 {evt.salename}
                                             </td>
-                                            <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap align-middle">
-                                                <div className="flex flex-col">
-                                                    <span>{formatDate(evt.startday)}</span>
-                                                    <span className="text-[10px] text-gray-400">~ {formatDate(evt.endday)}</span>
-                                                </div>
+                                            <td className="px-3 py-2 text-center text-xs whitespace-nowrap align-middle">
+                                                <span className="text-gray-800 font-normal">
+                                                    {formatDate(evt.startday)} ~ {formatDate(evt.endday)}
+                                                </span>
                                             </td>
                                             <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap align-middle">
                                                 {evt.saletype}
