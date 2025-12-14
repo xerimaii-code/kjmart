@@ -19,7 +19,17 @@ const normalizeItemsForComparison = (items: OrderItem[]): Omit<OrderItem, 'price
     })).sort((a, b) => a.barcode.localeCompare(b.barcode));
 };
 
-const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; product?: Product; isCompleted: boolean; onEdit: (item: OrderItem) => void; onRemove: (e: React.MouseEvent, item: OrderItem) => void; }>(({ item, product, isCompleted, onEdit, onRemove }, ref) => {
+// Item Status Type
+type ItemStatus = 'new' | 'modified' | 'none';
+
+const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { 
+    item: OrderItem; 
+    product?: Product; 
+    isCompleted: boolean; 
+    status: ItemStatus; // Added status prop
+    onEdit: (item: OrderItem) => void; 
+    onRemove: (e: React.MouseEvent, item: OrderItem) => void; 
+}>(({ item, product, isCompleted, status, onEdit, onRemove }, ref) => {
     const saleIsActive = product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false;
     const hasSalePrice = product ? (product.salePrice !== undefined && product.salePrice !== null) : false;
 
@@ -32,9 +42,22 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
             <div className="flex-grow min-w-0 pr-1 space-y-1">
                 {/* Row 1: Name and Badge */}
                 <div className="flex justify-between items-start gap-2">
-                    <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap text-sm leading-snug">
-                        {item.name}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1 flex-grow">
+                        {/* Status Badges */}
+                        {status === 'new' && (
+                            <span className="bg-teal-100 text-teal-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-teal-200 whitespace-nowrap">
+                                신규
+                            </span>
+                        )}
+                        {status === 'modified' && (
+                            <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-200 whitespace-nowrap">
+                                수정
+                            </span>
+                        )}
+                        <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap text-sm leading-snug">
+                            {item.name}
+                        </p>
+                    </div>
                     {!isCompleted && saleIsActive && hasSalePrice && (
                         <span className="bg-red-100 text-red-600 text-[10px] font-extrabold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap border border-red-200">
                             행사중
@@ -81,7 +104,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, { item: OrderItem; p
             {/* Quantity and Actions */}
             <div className="flex items-center space-x-2 flex-shrink-0">
                 <div className="flex flex-col items-end">
-                    <span className="text-gray-800 font-bold text-lg select-none leading-none">{item.quantity}</span>
+                    <span className={`font-bold text-lg select-none leading-none ${status !== 'none' ? 'text-blue-600' : 'text-gray-800'}`}>{item.quantity}</span>
                     <span className="text-gray-500 font-medium select-none text-[10px]">{item.unit}</span>
                 </div>
                  {!isCompleted && (
@@ -152,6 +175,30 @@ const OrderDetailModal: React.FC = () => {
         return new Date(originalOrder.updatedAt).getTime() > new Date(originalOrder.createdAt).getTime() + 1000;
     }, [originalOrder]);
     
+    // Create a Map of original items for fast comparison to detect changes per item
+    const originalItemsMap = useMemo(() => {
+        const map = new Map<string, OrderItem>();
+        if (originalOrder?.items) {
+            originalOrder.items.forEach(item => map.set(item.barcode, item));
+        }
+        return map;
+    }, [originalOrder]);
+
+    const getItemStatus = useCallback((item: OrderItem): ItemStatus => {
+        const original = originalItemsMap.get(item.barcode);
+        if (!original) return 'new';
+        
+        // Check for modifications (quantity, unit, memo)
+        const isQuantityChanged = original.quantity !== item.quantity;
+        const isUnitChanged = original.unit !== item.unit;
+        const isMemoChanged = (original.memo || '') !== (item.memo || '');
+        
+        if (isQuantityChanged || isUnitChanged || isMemoChanged) {
+            return 'modified';
+        }
+        return 'none';
+    }, [originalItemsMap]);
+
     useEffect(() => {
         // Only run draft check if we have an active order context (i.e. just opened)
         if (!activeOrderFromContext) return;
@@ -494,6 +541,8 @@ const OrderDetailModal: React.FC = () => {
                             {items.map((item, index) => {
                                 const ref = index === items.length - 1 ? lastItemRef : null;
                                 const product = products.find(p => p.barcode === item.barcode);
+                                const status = getItemStatus(item); // Get status for badge
+
                                 return (
                                     <React.Fragment key={item.barcode}>
                                         {dropIndex === index && <div className="h-1 bg-blue-500" />}
@@ -508,6 +557,7 @@ const OrderDetailModal: React.FC = () => {
                                                 item={item}
                                                 product={product}
                                                 isCompleted={isCompleted}
+                                                status={status} // Pass status prop
                                                 onEdit={handleEditItem}
                                                 onRemove={handleRemoveItem}
                                             />
