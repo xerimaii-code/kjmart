@@ -25,7 +25,7 @@ const ProductSearchResultItem: React.FC<ProductSearchResultItemProps> = ({ produ
                 {/* Row 1: Name & Sale Badge */}
                 <div className="flex items-start justify-between w-full gap-2">
                     <p className="font-semibold text-gray-800 whitespace-pre-wrap break-all">{product.name}</p>
-                    {saleIsActive && hasAnySalePrice && (
+                    {saleIsActive && (
                         <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 whitespace-nowrap mt-0.5">행사중</span>
                     )}
                 </div>

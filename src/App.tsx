@@ -1,4 +1,5 @@
 
+
 import React, { useState, lazy, Suspense, useMemo, useEffect } from 'react';
 import { AppProvider, useModals, useScanner, useSyncState, useDataActions, useAlert, useMiscUI } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -12,7 +13,8 @@ import { IS_DEVELOPER_MODE } from './config';
 
 // Lazy load pages and heavy modals
 const MainView = lazy(() => import('./pages/MainView')); 
-const OrderDetailModal = lazy(() => import('./components/OrderDetailModal'));
+// FIX: Add type assertion to resolve incorrect type inference for the lazy-loaded module.
+const OrderDetailModal = lazy(() => import('./components/OrderDetailModal') as Promise<{ default: React.ComponentType<any> }>);
 const ScannerModal = lazy(() => import('./components/ScannerModal'));
 const ClearHistoryModal = lazy(() => import('./components/ClearHistoryModal'));
 

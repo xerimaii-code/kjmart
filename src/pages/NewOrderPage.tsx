@@ -14,7 +14,6 @@ const DRAFT_KEY = 'new-order-draft';
 
 const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: OrderItem; product: Product | undefined; onEdit: (item: OrderItem) => void; onRemove: (item: OrderItem) => void; index: number; }) => {
     const saleIsActive = product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false;
-    const hasSalePrice = product ? (product.salePrice !== undefined && product.salePrice !== null) : false;
 
     return (
         <div
@@ -35,7 +34,7 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: O
                             {item.name}
                         </p>
                     </div>
-                    {saleIsActive && hasSalePrice && (
+                    {saleIsActive && (
                         <span className="bg-rose-100 text-rose-600 text-[10px] font-extrabold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap border border-rose-200">
                             행사중
                         </span>

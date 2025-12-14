@@ -31,7 +31,6 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, {
     onRemove: (e: React.MouseEvent, item: OrderItem) => void; 
 }>(({ item, product, isCompleted, status, onEdit, onRemove }, ref) => {
     const saleIsActive = product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false;
-    const hasSalePrice = product ? (product.salePrice !== undefined && product.salePrice !== null) : false;
 
     return (
         <div
@@ -58,7 +57,7 @@ const EditedItemRow = memo(React.forwardRef<HTMLDivElement, {
                             {item.name}
                         </p>
                     </div>
-                    {!isCompleted && saleIsActive && hasSalePrice && (
+                    {!isCompleted && saleIsActive && (
                         <span className="bg-red-100 text-red-600 text-[10px] font-extrabold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap border border-red-200">
                             행사중
                         </span>
@@ -516,72 +515,3 @@ const OrderDetailModal: React.FC = () => {
                                         productSearchBlurTimeout.current = window.setTimeout(() => setShowProductDropdown(false), 200);
                                     }}
                                     placeholder="품목명 또는 바코드 검색"
-                                    className="w-full px-3 h-11 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400 transition-colors duration-200 text-base pr-28"
-                                    autoComplete="off"
-                                />
-                                <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center">
-                                    {isSearchingProducts && <SpinnerIcon className="w-5 h-5 text-blue-500 mr-2" />}
-                                    <ToggleSwitch id="edit-order-box-unit" label="박스" checked={isBoxUnitDefault} onChange={setIsBoxUnitDefault} color="blue" />
-                                </div>
-                                <SearchDropdown<Product>
-                                    items={productSearchResults}
-                                    renderItem={(p) => <ProductSearchResultItem product={p} onClick={handleAddProductFromSearch} />}
-                                    show={showProductDropdown && !!debouncedProductSearch}
-                                />
-                            </div>
-                            <button onClick={handleOpenScanner} className="w-11 h-11 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold hover:bg-blue-700 transition active:scale-95 shadow shadow-blue-500/30 flex-shrink-0">
-                                <BarcodeScannerIcon className="w-6 h-6" />
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                <div 
-                    className="flex-grow overflow-y-auto min-h-0 bg-white p-0" // Changed background to white
-                    onDragOver={handleDragOver} 
-                    onDrop={handleDrop}
-                >
-                    {items.length > 0 ? (
-                        <div className="divide-y divide-gray-100">
-                            {items.map((item, index) => {
-                                const ref = index === items.length - 1 ? lastItemRef : null;
-                                const product = products.find(p => p.barcode === item.barcode);
-                                const status = getItemStatus(item); // Get status for badge
-
-                                return (
-                                    <React.Fragment key={item.barcode}>
-                                        {dropIndex === index && <div className="h-1 bg-blue-500" />}
-                                        <div
-                                            ref={ref}
-                                            draggable={!isCompleted}
-                                            onDragStart={(e) => handleDragStart(e, index)}
-                                            onDragEnter={(e) => handleDragEnter(e, index)}
-                                            onDragEnd={handleDragEnd}
-                                        >
-                                            <EditedItemRow
-                                                item={item}
-                                                product={product}
-                                                isCompleted={isCompleted}
-                                                status={status} // Pass status prop
-                                                onEdit={handleEditItem}
-                                                onRemove={handleRemoveItem}
-                                            />
-                                        </div>
-                                    </React.Fragment>
-                                );
-                            })}
-                            {dropIndex === items.length && <div className="h-1 bg-blue-500" />}
-                        </div>
-                    ) : (
-                        <div className="text-center p-8 text-gray-500">
-                            <p className="font-semibold">품목이 없습니다.</p>
-                            {!isCompleted && <p className="text-sm mt-1">품목을 추가하여 발주를 시작하세요.</p>}
-                        </div>
-                    )}
-                </div>
-            </div>
-        </ActionModal>
-    );
-};
-
-export default OrderDetailModal;

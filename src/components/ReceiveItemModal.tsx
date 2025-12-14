@@ -309,9 +309,16 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
                         onMouseDown={(e) => e.stopPropagation()}
                     />
                 ) : (
-                    <h3 className="text-sm font-extrabold text-gray-900 leading-tight break-keep line-clamp-2">
-                        {displayName}
-                    </h3>
+                    <div className="flex items-start gap-2">
+                        {saleActive && (
+                            <span className="bg-rose-100 text-rose-600 text-[10px] font-extrabold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap border border-rose-200 mt-0.5">
+                                행사중
+                            </span>
+                        )}
+                        <h3 className="text-sm font-extrabold text-gray-900 leading-tight break-keep line-clamp-2">
+                            {displayName}
+                        </h3>
+                    </div>
                 )}
                 {product.spec && <p className="text-[10px] text-gray-500 mt-0.5 truncate">{product.spec}</p>}
             </div>

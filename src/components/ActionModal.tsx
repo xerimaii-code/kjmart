@@ -87,7 +87,7 @@ const ActionModal: React.FC<ActionModalProps> = ({
                 <header className="relative bg-white px-3 py-2 flex-shrink-0 border-b border-gray-200 z-20 rounded-t-inherit flex items-center justify-center min-h-[44px]">
                     <div className="absolute top-1/2 left-2 -translate-y-1/2 flex items-center gap-1">
                         {onBack && (
-                            <button onClick={onBack} className="p-3 text-gray-500 hover:bg-gray-100 rounded-full transition-colors -ml-2" aria-label="뒤로가기">
+                            <button onClick={(e) => { e.stopPropagation(); onBack(); }} className="p-3 text-gray-500 hover:bg-gray-100 rounded-full transition-colors -ml-2" aria-label="뒤로가기">
                                 <ChevronLeftIcon className="w-6 h-6"/>
                             </button>
                         )}
@@ -105,7 +105,7 @@ const ActionModal: React.FC<ActionModalProps> = ({
                     <div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center gap-1">
                         {headerActions}
                         {/* Increased hit area: p-3 and -mr-2 negative margin to keep visual alignment but expand touch target */}
-                        <button onClick={onClose} className="p-3 text-gray-500 hover:bg-gray-100 rounded-full transition-colors -mr-2" aria-label="닫기">
+                        <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-3 text-gray-500 hover:bg-gray-100 rounded-full transition-colors -mr-2" aria-label="닫기">
                             <RemoveIcon className="w-6 h-6"/>
                         </button>
                     </div>
