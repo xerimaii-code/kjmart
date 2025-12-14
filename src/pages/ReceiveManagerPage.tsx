@@ -357,10 +357,17 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     };
 
     const filteredSuppliers = useMemo(() => {
-        if (selectedSupplier) return [];
+        // If supplier is already selected, don't show list to avoid confusion, unless actively searching
+        if (selectedSupplier && supplierSearch === selectedSupplier.name) return [];
+        
         const term = supplierSearch.toLowerCase();
         let result = sortedCustomers;
-        if (term) result = sortedCustomers.filter(c => c.name.toLowerCase().includes(term) || c.comcode.includes(term));
+        
+        // Filter if search term exists
+        if (term) {
+            result = sortedCustomers.filter(c => c.name.toLowerCase().includes(term) || c.comcode.includes(term));
+        }
+        // Always limit to 20 for performance
         return result.slice(0, 20);
     }, [sortedCustomers, supplierSearch, selectedSupplier]);
 
@@ -614,17 +621,37 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                 title={editingBatch ? "입고 수정" : "신규 입고"}
                 disableBodyScroll
                 zIndexClass="z-[50]"
+                headerLeft={
+                    <div className="relative">
+                        <input 
+                            type="date" 
+                            value={batchDate} 
+                            onChange={e => { 
+                                setBatchDate(e.target.value); 
+                                if(!editingBatchRef.current) saveDraft({ currentDate: e.target.value, selectedSupplier, items: currentItems }); 
+                            }} 
+                            className="bg-transparent text-sm font-bold text-gray-600 border-none p-0 focus:ring-0 w-28 cursor-pointer"
+                        />
+                    </div>
+                }
                 headerActions={(!editingBatch && (currentItems.length > 0 || selectedSupplier)) ? <button onClick={handleClearForm} className="text-xs text-rose-500 font-bold px-2 py-1 bg-rose-50 rounded hover:bg-rose-100">초기화</button> : undefined}
             >
                 <div className="flex flex-col h-full bg-white">
                     {isSearchingProducts && <div className="absolute top-0 left-0 w-full h-1 bg-indigo-100 z-[60] overflow-hidden"><div className="h-full bg-indigo-600 animate-[indeterminate_1.5s_infinite_linear] origin-left"></div></div>}
                     <div className="p-3 space-y-3 flex-shrink-0 bg-white shadow-sm z-10 border-b border-gray-100 relative">
                         <div className="flex gap-2">
-                            <div className="relative w-36 flex-shrink-0">
-                                <input type="date" value={batchDate} onChange={e => { setBatchDate(e.target.value); if(!editingBatchRef.current) saveDraft({ currentDate: e.target.value, selectedSupplier, items: currentItems }); }} className="w-full h-11 border border-gray-300 rounded-xl px-2 text-sm font-bold text-gray-700 bg-white shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all" />
-                            </div>
                             <div className="relative flex-grow z-50">
-                                <input ref={supplierSearchInputRef} type="text" value={supplierSearch} onChange={e => { setSupplierSearch(e.target.value); setShowSupplierDropdown(true); }} onFocus={() => setShowSupplierDropdown(true)} onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 200)} placeholder="거래처 검색" readOnly={!!selectedSupplier} className={`w-full h-11 px-4 border rounded-xl text-base transition-all shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${selectedSupplier ? 'bg-indigo-50 border-indigo-500 text-indigo-800 font-bold pr-20' : 'border-gray-300 bg-white font-medium'}`} />
+                                <input 
+                                    ref={supplierSearchInputRef} 
+                                    type="text" 
+                                    value={supplierSearch} 
+                                    onChange={e => { setSupplierSearch(e.target.value); setShowSupplierDropdown(true); }} 
+                                    onFocus={() => setShowSupplierDropdown(true)} 
+                                    onBlur={() => setTimeout(() => setShowSupplierDropdown(false), 200)} 
+                                    placeholder="거래처 검색 (선택)" 
+                                    readOnly={!!selectedSupplier} 
+                                    className={`w-full h-11 px-4 border rounded-xl text-base transition-all shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${selectedSupplier ? 'bg-indigo-50 border-indigo-500 text-indigo-800 font-bold pr-20' : 'border-gray-300 bg-white font-medium'}`} 
+                                />
                                 {selectedSupplier && <button onClick={handleClearSupplier} className="absolute top-1/2 right-2 -translate-y-1/2 h-7 px-2.5 rounded-md flex items-center justify-center gap-1 font-semibold transition bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 active:scale-95 text-xs">변경</button>}
                                 <SearchDropdown<Customer> items={filteredSuppliers} show={showSupplierDropdown && !selectedSupplier} renderItem={c => <div onMouseDown={() => handleSelectSupplier(c)} className="p-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0"><p className="font-bold text-gray-800">{c.name}</p><p className="text-xs text-gray-500 mt-0.5">{c.comcode}</p></div>} />
                             </div>

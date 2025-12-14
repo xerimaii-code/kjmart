@@ -33,6 +33,7 @@ export interface OrderItem {
     quantity: number;
     unit: '개' | '박스';
     memo?: string;
+    isModified?: boolean; // Added to track modification status in New Order
 }
 
 export interface Order {

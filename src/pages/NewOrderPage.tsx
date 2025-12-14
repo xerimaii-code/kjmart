@@ -25,9 +25,16 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index }: { item: O
             <div className="flex-grow min-w-0 pr-1 space-y-1">
                 {/* Row 1: Name and Badge */}
                 <div className="flex justify-between items-start gap-2">
-                    <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap flex-grow text-sm leading-snug">
-                        {item.name}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1 flex-grow">
+                        {item.isModified && (
+                            <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-200 whitespace-nowrap">
+                                수정
+                            </span>
+                        )}
+                        <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap text-sm leading-snug">
+                            {item.name}
+                        </p>
+                    </div>
                     {saleIsActive && hasSalePrice && (
                         <span className="bg-rose-100 text-rose-600 text-[10px] font-extrabold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap border border-rose-200">
                             행사중
@@ -400,7 +407,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const handleEditItem = useCallback((item: OrderItem) => {
         openEditItemModal({
             item: item,
-            onSave: (updatedDetails) => updateItem(item.barcode, updatedDetails)
+            onSave: (updatedDetails) => updateItem(item.barcode, { ...updatedDetails, isModified: true }) // Mark as modified
         });
     }, [openEditItemModal, updateItem]);
 
