@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useScanner, useAlert } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
-import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon } from './Icons';
+import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon, StopCircleIcon } from './Icons';
 import './ScannerModal.css';
 
 // Assuming ZXing is loaded from a CDN and available on the window object
@@ -45,6 +45,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const detectorRef = useRef<any>(null); 
     const isClosingRef = useRef(false); 
     const isMountedRef = useRef(false);
+    const longPressTimer = useRef<any>(null);
 
     const { selectedCameraId, scanSettings } = useScanner();
     const { showAlert } = useAlert();
@@ -161,12 +162,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }
     }, [selectedCameraId, stopCamera, showAlert, onClose]);
 
-    // 포그라운드/백그라운드 전환 처리 로직 개선
     useEffect(() => {
         const restartCameraIfNeeded = () => {
             if (isOpen && isMountedRef.current && !isClosingRef.current) {
-                console.log("[Scanner] App became visible, restarting camera.");
-                // A short delay helps browsers re-acquire camera access after resume.
                 setTimeout(() => {
                     if (isMountedRef.current && !isClosingRef.current) {
                         startCamera();
@@ -179,7 +177,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             if (document.visibilityState === 'visible') {
                 restartCameraIfNeeded();
             } else {
-                console.log("[Scanner] App hidden, stopping camera.");
                 stopDetection();
                 stopCamera();
                 if (isMountedRef.current) {
@@ -189,9 +186,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         };
 
         const handlePageShow = (event: PageTransitionEvent) => {
-            // This is crucial for pages restored from back-forward cache (bfcache) on mobile browsers.
             if (event.persisted) {
-                 console.log("[Scanner] Page restored from bfcache, restarting camera.");
                  restartCameraIfNeeded();
             }
         };
@@ -359,13 +354,41 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }, 200);
     };
 
-    const handleScanButtonClick = (e: React.SyntheticEvent) => {
-        e.preventDefault(); e.stopPropagation(); unlockAudio(); 
+    // 수동 스캔 버튼 제어 로직 개선 (터치 시 재탐색, 길게 누름 시 중지)
+    const handleScanButtonPress = (e: React.SyntheticEvent | React.PointerEvent) => {
+        e.preventDefault(); e.stopPropagation(); unlockAudio();
+        
+        // 길게 누르기 타이머 시작
+        longPressTimer.current = setTimeout(() => {
+            if (isScanningActive) {
+                setIsScanningActive(false);
+                stopDetection();
+                showToast("스캔 중지됨", "success");
+            }
+            longPressTimer.current = null;
+        }, 600); // 0.6초 이상 누르면 중지
+
         if (isScanningActive) {
-            stopDetection(); setIsScanningActive(false);
-            setTimeout(() => { if(isMountedRef.current && !isClosingRef.current) setIsScanningActive(true); }, 100);
-        } else setIsScanningActive(true);
+            // 이미 활성 상태인 경우: 인터벌 재설정 (초점 재조정 효과)
+            stopDetection();
+            setTimeout(() => {
+                if (isMountedRef.current && !isPaused && !isHandlingResult.current) {
+                    startDetection();
+                }
+            }, 50);
+        } else {
+            setIsScanningActive(true);
+        }
     };
+
+    const handleScanButtonRelease = (e: React.SyntheticEvent) => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    };
+
+    const { showToast } = useAlert();
 
     if (!isOpen) return null;
 
@@ -378,15 +401,38 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 {(isLibraryLoading && !isNativeSupported) && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 z-20"><SpinnerIcon className="w-10 h-10 text-white mb-3" /><p className="text-white font-bold text-shadow">스캐너 준비 중...</p></div>
                 )}
-                <div className={`mb-6 text-center px-4 transition-opacity duration-300 ${isPaused ? 'opacity-0' : 'opacity-100'}`}><p className="text-white text-sm font-bold text-shadow bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm">{isScanningActive ? "가이드라인 안에 바코드를 맞추세요" : (scanSettings.useScannerButton ? "버튼을 눌러 스캔하세요" : "스캔 준비 중...")}</p></div>
+                <div className={`mb-6 text-center px-4 transition-opacity duration-300 ${isPaused ? 'opacity-0' : 'opacity-100'}`}><p className="text-white text-sm font-bold text-shadow bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm">{isScanningActive ? "가이드라인 안에 바코드를 맞추세요" : (scanSettings.useScannerButton ? "버튼을 눌러 스캔을 시작하세요" : "스캔 준비 중...")}</p></div>
                 <div className="w-[80%] max-w-[24rem] flex flex-col items-center">
-                    <div ref={guideBoxRef} className={`relative h-[45px] w-full rounded-xl transition-all duration-300 ${isPaused ? 'border-2 border-white/10' : (isScanningActive ? 'scanner-box-active' : 'scanner-box-idle')}`} />
+                    <div ref={guideBoxRef} className={`relative h-[45px] w-full rounded-t-xl transition-all duration-300 ${isPaused ? 'border-2 border-white/10' : (isScanningActive ? 'scanner-box-active' : 'scanner-box-idle')}`} />
                     {scanSettings.useScannerButton && !isPaused && (
-                        <div className="mt-12 pointer-events-auto flex flex-col items-center">
-                            <button onClick={handleScanButtonClick} onTouchStart={handleScanButtonClick} className="w-20 h-20 bg-white/90 rounded-full flex items-center justify-center backdrop-blur-md shadow-2xl active:scale-95 transition-transform border border-white/20">
-                                {isScanningActive ? <div className="w-8 h-8 bg-red-500 rounded-md animate-pulse"></div> : <BarcodeScannerIcon className="w-10 h-10 text-gray-700" />}
+                        <div className="w-full pointer-events-auto flex flex-col items-center">
+                            <button 
+                                onPointerDown={handleScanButtonPress}
+                                onPointerUp={handleScanButtonRelease}
+                                onPointerLeave={handleScanButtonRelease}
+                                onContextMenu={(e) => e.preventDefault()}
+                                className={`w-full h-[68px] mt-1 rounded-b-xl flex items-center justify-center backdrop-blur-md shadow-2xl active:scale-[0.98] transition-all border border-white/20 ${isScanningActive ? 'bg-indigo-600/90 text-white' : 'bg-white/90 text-gray-700'}`}
+                            >
+                                <div className="flex items-center gap-3">
+                                    {isScanningActive ? (
+                                        <>
+                                            <div className="w-6 h-6 bg-red-500 rounded-md animate-pulse"></div>
+                                            <span className="font-black text-xl tracking-tight uppercase">Scanning...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <BarcodeScannerIcon className="w-8 h-8" />
+                                            <span className="font-black text-xl tracking-tight uppercase">Touch to Scan</span>
+                                        </>
+                                    )}
+                                </div>
                             </button>
-                            <p className="text-white text-[10px] font-black mt-2 text-shadow opacity-60 uppercase tracking-tighter">Manual Scan</p>
+                            <div className="mt-4 flex flex-col items-center gap-1 opacity-80">
+                                <p className="text-white text-[11px] font-black text-shadow uppercase tracking-widest bg-black/30 px-3 py-1 rounded-full border border-white/10 flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-ping"></span>
+                                    Tip: Touch to Focus / Long Press to Stop
+                                </p>
+                            </div>
                         </div>
                     )}
                 </div>
