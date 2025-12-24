@@ -1,0 +1,822 @@
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { executeUserQuery } from '../services/sqlService';
+import { useAlert, useDataState } from '../context/AppContext';
+import { SpinnerIcon, SearchIcon, PencilSquareIcon, TrashIcon, CalendarIcon, SaveIcon, ArchiveBoxIcon, ChartBarIcon } from '../components/Icons';
+import ActionModal from '../components/ActionModal';
+import AddEventProductModal from '../components/AddEventProductModal';
+import EditEventProductModal from '../components/EditEventProductModal';
+import EventActionSelectModal from '../components/EventActionSelectModal';
+import StopEventModal from '../components/StopEventModal';
+import { EventItem } from '../types';
+
+const UPSERT_ITEM_SQL = `
+-- 쿼리 이름: 행사상품_저장_통합 (SQL 2005) - 이전 행사가격 자동 조회 기능 추가
+-- 파라미터: @Junno, @Barcode, @SaleCost, @SalePrice, @IsAppl
+
+DECLARE @TargetStart VARCHAR(10)
+DECLARE @TargetEnd VARCHAR(10)
+DECLARE @SaleName VARCHAR(30)
+DECLARE @ComCode VARCHAR(5)
+DECLARE @MarginRate DECIMAL(18,2)
+DECLARE @NextSerial VARCHAR(5)
+DECLARE @JunnoSerial VARCHAR(25)
+DECLARE @Today VARCHAR(10)
+DECLARE @OrgPriceToUse DECIMAL(18,0)
+
+SET @Today = CONVERT(VARCHAR(10), GETDATE(), 120)
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+        -- [1] 행사 헤더 정보 조회
+        SELECT @SaleName = salename, 
+               @TargetStart = startday, 
+               @TargetEnd = endday
+        FROM sale_mast WITH(UPDLOCK, ROWLOCK) 
+        WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+
+        IF ISNULL(@SaleName, '') = ''
+        BEGIN
+            RAISERROR('존재하지 않는 행사 전표이거나 행사명이 없습니다.', 16, 1)
+        END
+
+        -- [2] 상품 기본 정보 조회
+        SELECT @ComCode = comcode
+        FROM parts WITH(NOLOCK)
+        WHERE barcode = @Barcode
+
+        IF @ComCode IS NULL
+        BEGIN
+            RAISERROR('상품 마스터에 없는 바코드입니다.', 16, 1)
+        END
+        
+        -- [3] 이전 행사가격 또는 정상가 조회 (orgmoney1 설정용)
+        SET @OrgPriceToUse = ISNULL(
+            (SELECT TOP 1 r.salemoney1 
+             FROM sale_ready r JOIN sale_mast m ON r.junno = m.junno
+             WHERE r.barcode = @Barcode AND LTRIM(RTRIM(m.junno)) <> LTRIM(RTRIM(@Junno))
+             ORDER BY m.endday DESC, m.startday DESC),
+            (SELECT money1 FROM parts WHERE barcode = @Barcode)
+        );
+
+        -- [4] 마진율 계산
+        IF CAST(@SalePrice AS DECIMAL) = 0
+            SET @MarginRate = 0
+        ELSE
+            SET @MarginRate = FLOOR(((CAST(@SalePrice AS DECIMAL) - CAST(@SaleCost AS DECIMAL)) / CAST(@SalePrice AS DECIMAL)) * 100)
+
+        -- [5] 데이터 저장 (UPSERT)
+        IF EXISTS (SELECT 1 FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode)
+        BEGIN
+            UPDATE sale_ready
+            SET salemoney0 = @SaleCost,
+                salemoney1 = @SalePrice,
+                salecount  = @MarginRate,
+                isappl     = @IsAppl,
+                edtday     = GETDATE()
+            WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode
+        END
+        ELSE
+        BEGIN
+            SELECT @NextSerial = RIGHT('00000' + CAST(ISNULL(COUNT(*), 0) + 1 AS VARCHAR), 5)
+            FROM sale_ready 
+            WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+
+            SET @JunnoSerial = @Junno + '_' + @NextSerial
+
+            INSERT INTO sale_ready (
+                junno_serial, junno, salename, barcode, comcode, 
+                salemoney0, salemoney1, orgmoney1, salecount, 
+                startday, endday, isappl, inpday, 
+                islink, isautoappl, isautoback
+            )
+            VALUES (
+                @JunnoSerial, @Junno, @SaleName, @Barcode, @ComCode,
+                @SaleCost, @SalePrice, @OrgPriceToUse, @MarginRate,
+                @TargetStart, @TargetEnd, @IsAppl, @Today,
+                '1', '1', '1'
+            )
+        END
+        
+        -- [6] 마스터 요약 정보 업데이트
+        UPDATE sale_mast 
+        SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))),
+            avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)))
+        WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+        
+        -- [7] [추가] 행사 마스터가 '진행중'이고, 현재 품목도 '적용'으로 저장될 때만 parts 즉시 업데이트
+        IF @IsAppl = '1' AND EXISTS(SELECT 1 FROM sale_mast WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl = '1')
+        BEGIN
+            UPDATE parts
+            SET money1comp = @SalePrice,
+                salemoney0 = @SaleCost,
+                salestartday = @TargetStart,
+                saleendday = @TargetEnd
+            WHERE barcode = @Barcode
+        END
+
+    COMMIT TRANSACTION;
+    SELECT 'SUCCESS' AS RESULT, '저장되었습니다.' AS MSG
+
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    SELECT 'FAIL' AS RESULT, ERROR_MESSAGE() AS MSG
+END CATCH
+`;
+
+const UPDATE_PERIOD_AND_STATUS_SQL = `
+-- [행사 기간 변경 및 상태 자동 조정]
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @JunnoToUpdate VARCHAR(20) = @Junno;
+DECLARE @NewStartDay VARCHAR(10) = @StartDay;
+DECLARE @NewEndDay VARCHAR(10) = @EndDay;
+DECLARE @Today VARCHAR(10) = CONVERT(VARCHAR(10), GETDATE(), 120);
+
+DECLARE @OldStatus VARCHAR(1);
+DECLARE @NewStatus VARCHAR(1);
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+        -- 1. 현재 상태와 새로운 상태 결정
+        SELECT @OldStatus = isappl FROM sale_mast WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate));
+
+        SET @NewStatus = CASE 
+                            WHEN @NewStartDay > @Today THEN '0' -- 미래: 대기
+                            WHEN @NewEndDay < @Today THEN '2'   -- 과거: 종료
+                            ELSE '1'                           -- 현재: 진행
+                         END;
+
+        -- 2. 날짜 및 상태 업데이트
+        UPDATE sale_mast SET startday = @NewStartDay, endday = @NewEndDay, isappl = @NewStatus WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate));
+        UPDATE sale_ready SET startday = @NewStartDay, endday = @NewEndDay WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate));
+        
+        -- 3. 상태 변경에 따른 소속 상품(sale_ready) 상태 업데이트 ('D' 상태는 제외)
+        IF @NewStatus = '0' -- 대기 상태로 변경 시
+        BEGIN
+            UPDATE sale_ready SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
+        END
+        ELSE IF @NewStatus = '1' -- 진행 상태로 변경 시
+        BEGIN
+            UPDATE sale_ready SET isappl = '1' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
+        END
+        ELSE IF @NewStatus = '2' -- 종료 상태로 변경 시
+        BEGIN
+            UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
+        END
+
+        -- 4. 상태 변경에 따른 Parts 테이블 업데이트
+        IF @OldStatus = '1' AND @NewStatus <> '1'
+        BEGIN
+            -- [행사 중지 로직]
+            UPDATE p
+            SET p.money1comp = ISNULL(ne.salemoney1, p.money1),
+                p.salemoney0 = ISNULL(ne.salemoney0, p.money0vat),
+                p.salestartday = ne.startday,
+                p.saleendday = ne.endday
+            FROM parts p JOIN sale_ready r ON p.barcode = r.barcode
+            OUTER APPLY (
+                SELECT TOP 1 r2.salemoney1, r2.salemoney0, m2.startday, m2.endday
+                FROM sale_ready r2 JOIN sale_mast m2 ON r2.junno = m2.junno
+                WHERE r2.barcode = p.barcode AND m2.isappl = '1' AND LTRIM(RTRIM(m2.junno)) <> LTRIM(RTRIM(@JunnoToUpdate))
+                ORDER BY m2.startday DESC
+            ) AS ne
+            WHERE LTRIM(RTRIM(r.junno)) = LTRIM(RTRIM(@JunnoToUpdate));
+        END
+        else if @OldStatus <> '1' AND @NewStatus = '1'
+        BEGIN
+            -- [행사 적용 로직]
+            UPDATE p
+            SET p.money1comp = r.salemoney1,
+                p.salemoney0 = r.salemoney0,
+                p.salestartday = @NewStartDay,
+                p.saleendday = @NewEndDay
+            FROM parts p JOIN sale_ready r ON p.barcode = r.barcode
+            WHERE LTRIM(RTRIM(r.junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND r.isappl = '1';
+        END
+
+    COMMIT TRANSACTION;
+    SELECT 'SUCCESS' AS RESULT, '기간 및 상태가 업데이트되었습니다.' AS MSG;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    SELECT 'FAIL' AS RESULT, ERROR_MESSAGE() AS MSG;
+END CATCH
+`;
+
+const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
+    const { showToast, showAlert } = useAlert();
+    const { userQueries } = useDataState();
+
+    const [startDate, setStartDate] = useState(() => {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 1);
+        return d.toISOString().slice(0, 10);
+    });
+    const [endDate, setEndDate] = useState(() => {
+        const d = new Date();
+        d.setMonth(d.getMonth() + 1);
+        return d.toISOString().slice(0, 10);
+    });
+    
+    const [statusFilter, setStatusFilter] = useState<'all' | '0' | '1' | '2'>('1');
+    const [events, setEvents] = useState<EventItem[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false); 
+    const [error, setError] = useState<string | null>(null);
+    
+    const [isActionSelectModalOpen, setIsActionSelectModalOpen] = useState(false);
+    const [detailModalOpen, setDetailModalOpen] = useState(false);
+    const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
+    const [isStopChoiceModalOpen, setIsStopChoiceModalOpen] = useState(false);
+    
+    const [editableStartDate, setEditableStartDate] = useState('');
+    const [editableEndDate, setEditableEndDate] = useState('');
+    
+    const [draftItems, setDraftItems] = useState<any[]>([]);
+    const [isDetailLoading, setIsDetailLoading] = useState(false);
+    const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+    const [editingProduct, setEditingProduct] = useState<any | null>(null);
+
+    useEffect(() => {
+        if (selectedEvent) {
+            setEditableStartDate(selectedEvent.startday);
+            setEditableEndDate(selectedEvent.endday);
+        }
+    }, [selectedEvent]);
+
+    const handleSearch = useCallback(async (silent = false) => {
+        if (!silent) setIsLoading(true);
+        setError(null);
+
+        const query = userQueries.find(q => q.name === '행사목록');
+        if (!query) {
+            const msg = "'행사목록' 쿼리가 없습니다. [설정 > SQL Runner]에서 쿼리를 추가해주세요.";
+            setError(msg);
+            if (!silent) showAlert(msg);
+            setIsLoading(false);
+            return;
+        }
+
+        try {
+            const params = {
+                startDate,
+                endDate,
+                status: statusFilter === 'all' ? '' : statusFilter
+            };
+            const result = await executeUserQuery(query.name, params, query.query);
+            
+            const mappedResult = (result || []).map((r: any): EventItem => ({
+                ...r,
+                salename: r.salename || r.행사명 || '이름 없음',
+                junno: r.junno || r.전표번호 || 'N/A',
+                startday: r.startday || r.시작일 || '',
+                endday: r.endday || r.종료일 || '',
+                itemcount: r.itemcount || r.행사품목수 || 0,
+                isappl: String(r.isappl ?? r.상태 ?? '0'),
+                avgmgrate: r.avgmgrate || r.평균마진율 || 0,
+            }))
+            setEvents(mappedResult);
+
+        } catch (e: any) {
+            const errorMessage = e.message || '행사 목록을 가져오는데 실패했습니다.';
+            setError(errorMessage);
+            if (!silent) showAlert(errorMessage);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [startDate, endDate, statusFilter, showAlert, userQueries]);
+
+    useEffect(() => {
+        if (isActive) handleSearch(true);
+    }, [isActive, handleSearch]);
+
+    const fetchEventDetails = useCallback(async (junno: string) => {
+        setIsDetailLoading(true);
+        try {
+            const query = userQueries.find(q => q.name === '행사상세');
+            if (!query || !query.query) {
+                throw new Error("'행사상세' 쿼리를 찾을 수 없거나 비어있습니다.");
+            }
+            const result = await executeUserQuery('행사상세', { junno: junno.trim() }, query.query);
+            
+            const mappedResult = (result || []).map((item: any) => {
+                const rawStatus = item.isappl ?? item.상태;
+                const normalizedStatus = String(rawStatus || '0').trim().toUpperCase();
+                const finalStatus = (normalizedStatus === '1' || normalizedStatus === 'D') ? normalizedStatus : '0';
+
+                return {
+                    ...item,
+                    barcode: item.barcode || item['바코드'],
+                    descr: item.descr || item['상품명'],
+                    spec: item.spec || item['규격'],
+                    salemoney0: item.salemoney0 ?? item['행사매입가'],
+                    salemoney1: item.salemoney1 ?? item['행사판매가'],
+                    orgmoney1: item.orgmoney1 ?? item['이전판매가'],
+                    isappl: finalStatus,
+                    salecount: item.salecount ?? item.마진율 ?? 0,
+                };
+            });
+
+            setDraftItems(mappedResult);
+        } catch (e: any) {
+            showAlert('상세 내역 로드 실패: ' + e.message);
+        } finally {
+            setIsDetailLoading(false);
+        }
+    }, [userQueries, showAlert]);
+    
+    const handleAddProductSuccess = async (newItem: any) => {
+        if (!selectedEvent) return;
+        try {
+            const params = {
+                Junno: selectedEvent.junno.trim(),
+                Barcode: newItem['바코드'],
+                SaleCost: newItem['행사매입가'],
+                SalePrice: newItem['행사판매가'],
+                IsAppl: newItem['isappl'] || '0'
+            };
+            const result = await executeUserQuery('행사상품_추가저장', params, UPSERT_ITEM_SQL);
+            if (result && result.length > 0 && result[0].RESULT === 'FAIL') {
+                throw new Error(result[0].MSG || '상품 추가에 실패했습니다.');
+            }
+            showToast(result[0]?.MSG || '상품이 추가되었습니다.', 'success');
+            
+            await Promise.all([
+                fetchEventDetails(selectedEvent.junno),
+                handleSearch(true)
+            ]);
+        } catch (e: any) {
+            showAlert('저장 실패: ' + e.message);
+            throw e; 
+        }
+    };
+
+    const handleEventAction = (event: EventItem) => {
+        if (!event || !event.junno) {
+            showAlert('선택한 행사에 유효한 전표번호가 없어 작업을 계속할 수 없습니다.');
+            return;
+        }
+        setSelectedEvent(event);
+        setIsActionSelectModalOpen(true);
+    };
+
+    const handleApplyEvent = async (event: EventItem) => {
+        showAlert(`'${event.salename}' 행사를 전체 적용하시겠습니까?\n즉시 매장의 판매가가 변경됩니다.`, async () => {
+            setIsProcessing(true);
+            try {
+                const applySql = `
+                    SET NOCOUNT ON; SET XACT_ABORT ON;
+                    BEGIN TRY
+                        BEGIN TRANSACTION;
+                        UPDATE sale_mast SET isappl = '1' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
+                        UPDATE sale_ready SET isappl = '1' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';
+
+                        UPDATE p SET p.money1comp = r.salemoney1, p.salemoney0 = r.salemoney0, p.salestartday = m.startday, p.saleendday = m.endday 
+                        FROM parts p JOIN sale_ready r ON p.barcode = r.barcode JOIN sale_mast m ON r.junno = m.junno 
+                        WHERE LTRIM(RTRIM(m.junno)) = LTRIM(RTRIM(@Junno)) AND r.isappl = '1';
+                        COMMIT TRANSACTION;
+                    END TRY
+                    BEGIN CATCH
+                        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                        DECLARE @err_msg_apply NVARCHAR(MAX) = ERROR_MESSAGE();
+                        RAISERROR(@err_msg_apply, 16, 1);
+                    END CATCH`;
+                await executeUserQuery('행사_적용_및_Parts업데이트', { Junno: event.junno.trim() }, applySql);
+                showToast('행사가 전체 적용되었습니다.', 'success');
+            } catch (e: any) {
+                showAlert('적용 실패: ' + e.message);
+            } finally {
+                setIsProcessing(false);
+                handleSearch(true);
+            }
+        });
+    };
+
+    const executeStopEvent = async (targetStatus: '0' | '2') => {
+        if (!selectedEvent) return;
+    
+        const actionText = targetStatus === '0' ? '미적용' : '종료';
+        const confirmText = targetStatus === '0' ? '미적용으로 변경' : '완전 종료';
+        
+        setIsStopChoiceModalOpen(false);
+    
+        showAlert(
+            `'${selectedEvent.salename}' 행사를 '${actionText}' 상태로 변경하시겠습니까?\n${targetStatus === '0' ? '가격이 원복되고, 나중에 다시 적용할 수 있습니다.' : '행사가 영구적으로 종료됩니다.'}`, 
+            async () => {
+                setIsProcessing(true);
+                try {
+                    const finalSql = `
+                        SET NOCOUNT ON; SET XACT_ABORT ON;
+                        BEGIN TRY
+                            BEGIN TRANSACTION;
+                                ${targetStatus === '0' ? 
+                                    `UPDATE sale_mast SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
+                                     UPDATE sale_ready SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';` 
+                                    : 
+                                    `UPDATE sale_mast SET isappl = '2' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
+                                     UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';`
+                                }
+    
+                                UPDATE p
+                                SET 
+                                    p.money1comp = ISNULL(next_event.salemoney1, p.money1),
+                                    p.salemoney0 = ISNULL(next_event.salemoney0, p.money0vat),
+                                    p.salestartday = next_event.startday,
+                                    p.saleendday = next_event.endday
+                                FROM parts p JOIN sale_ready r_stopped ON p.barcode = r_stopped.barcode
+                                OUTER APPLY (
+                                    SELECT TOP 1 r_other.salemoney1, r_other.salemoney0, m_other.startday, m_other.endday
+                                    FROM sale_ready r_other WITH(NOLOCK) JOIN sale_mast m_other WITH(NOLOCK) ON r_other.junno = m_other.junno
+                                    WHERE r_other.barcode = p.barcode AND m_other.isappl = '1' AND LTRIM(RTRIM(m_other.junno)) <> LTRIM(RTRIM(@Junno))
+                                    ORDER BY m_other.startday DESC
+                                ) AS next_event
+                                WHERE LTRIM(RTRIM(r_stopped.junno)) = LTRIM(RTRIM(@Junno));
+                            COMMIT TRANSACTION;
+                        END TRY
+                        BEGIN CATCH
+                            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                            DECLARE @err_msg_stop NVARCHAR(MAX) = ERROR_MESSAGE();
+                            RAISERROR(@err_msg_stop, 16, 1);
+                        END CATCH
+                    `;
+                    
+                    await executeUserQuery('행사_상태변경', { Junno: selectedEvent.junno.trim() }, finalSql);
+                    showToast(`행사가 ${actionText} 처리되었습니다.`, 'success');
+                    handleSearch(true);
+                } catch (e: any) {
+                    showAlert(`${actionText} 처리 실패: ${e.message}`);
+                } finally {
+                    setIsProcessing(false);
+                }
+            }, 
+            confirmText, 
+            targetStatus === '0' ? 'bg-orange-500' : 'bg-rose-500'
+        );
+    };
+
+    const handleDeleteEvent = async (event: EventItem) => {
+        const isProgressing = event.isappl === '1';
+
+        if (isProgressing) {
+            showAlert("진행 중인 행사는 먼저 종료해야 삭제할 수 있습니다.\n[전체 종료] 기능을 이용해 행사를 종료해주세요.");
+            return;
+        }
+
+        showAlert(`'${event.salename}' 행사를 완전히 삭제하시겠습니까?`, async () => {
+            setIsProcessing(true);
+            try {
+                const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)); DELETE FROM sale_mast WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
+                await executeUserQuery('행사_삭제', { Junno: event.junno.trim() }, deleteSql);
+                showToast('행사가 삭제되었습니다.', 'success');
+                handleSearch(true);
+            } catch (e: any) {
+                showAlert('삭제 실패: ' + e.message);
+            } finally {
+                setIsProcessing(false);
+            }
+        }, '삭제', 'bg-rose-600');
+    };
+
+    const handleUpdateProduct = async () => {
+        if (selectedEvent) {
+            await Promise.all([
+                fetchEventDetails(selectedEvent.junno),
+                handleSearch(true)
+            ]);
+        }
+    };
+
+    const handleRemoveProduct = (barcode: string) => {
+        if (!selectedEvent) return;
+        const itemToRemove = draftItems.find(i => String(i.barcode || i['바코드']) === barcode);
+        if (!itemToRemove) return;
+
+        const isItemApplied = String(itemToRemove.isappl) === '1';
+        const msg = isItemApplied
+            ? `'${itemToRemove.descr || itemToRemove['상품명']}' 상품이 행사 적용 중입니다.\n중지 후 행사에서 제외하시겠습니까? (가격 복구)`
+            : `'${itemToRemove.descr || itemToRemove['상품명']}' 상품을 행사에서 제외하시겠습니까?`;
+
+        showAlert(msg, async () => {
+            if (!selectedEvent) return;
+            setIsProcessing(true);
+            try {
+                if (isItemApplied) {
+                    const stopSql = `
+                        SET NOCOUNT ON; SET XACT_ABORT ON;
+                        DECLARE @JunnoToStop VARCHAR(20) = @Junno; DECLARE @BarcodeToStop VARCHAR(20) = @Barcode;
+                        BEGIN TRY
+                            BEGIN TRANSACTION;
+                                UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = @JunnoToStop AND barcode = @BarcodeToStop;
+                                
+                                DECLARE @NextBestSalePrice DECIMAL(18,0), @NextBestSaleCost DECIMAL(18,0), @NextBestStart VARCHAR(10), @NextBestEnd VARCHAR(10);
+                                SELECT TOP 1 
+                                    @NextBestSalePrice = r.salemoney1, @NextBestSaleCost = r.salemoney0, 
+                                    @NextBestStart = m.startday, @NextBestEnd = m.endday 
+                                FROM sale_ready r WITH(NOLOCK) 
+                                JOIN sale_mast m WITH(NOLOCK) ON r.junno = m.junno 
+                                WHERE r.barcode = @BarcodeToStop AND m.isappl = '1' AND LTRIM(RTRIM(m.junno)) <> LTRIM(RTRIM(@JunnoToStop)) 
+                                ORDER BY m.startday DESC;
+                                
+                                IF @@ROWCOUNT > 0
+                                    UPDATE p SET p.money1comp = @NextBestSalePrice, p.salemoney0 = @NextBestSaleCost, p.salestartday = @NextBestStart, p.saleendday = @NextBestEnd FROM parts p WHERE p.barcode = @BarcodeToStop;
+                                ELSE
+                                    UPDATE p SET p.money1comp = p.money1, p.salemoney0 = p.money0vat, p.salestartday = NULL, p.saleendday = NULL FROM parts p WHERE p.barcode = @BarcodeToStop;
+                            COMMIT TRANSACTION;
+                        END TRY
+                        BEGIN CATCH
+                            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                            DECLARE @err_msg_remove NVARCHAR(MAX) = ERROR_MESSAGE();
+                            RAISERROR(@err_msg_remove, 16, 1);
+                        END CATCH`;
+                    await executeUserQuery('행사상품_개별중지_및_Parts업데이트', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, stopSql);
+                }
+                
+                const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))) WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
+                await executeUserQuery('행사상품_개별삭제', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, deleteSql);
+                
+                showToast(isItemApplied ? '중지 및 삭제되었습니다.' : '상품을 삭제했습니다.', 'success');
+                
+                await Promise.all([ fetchEventDetails(selectedEvent.junno), handleSearch(true) ]);
+            } catch (e: any) {
+                showAlert('삭제 실패: ' + e.message);
+            } finally {
+                setIsProcessing(false);
+            }
+        }, '삭제', 'bg-rose-500');
+    };
+
+    const handlePeriodChange = async () => {
+        if (!selectedEvent) return;
+    
+        const today = new Date().toISOString().slice(0, 10);
+        const oldStatus = selectedEvent.isappl;
+        const newStatus = (editableStartDate <= today && editableEndDate >= today) ? '1' : (editableStartDate > today ? '0' : '2');
+    
+        let alertMessage = "행사 기간을 변경하시겠습니까?";
+        if (oldStatus === '1' && newStatus !== '1') {
+            alertMessage += "\n\n기간 변경으로 행사가 '대기' 또는 '종료' 상태가 되어, 적용된 가격이 원래대로 복구됩니다.";
+        } else if (oldStatus !== '1' && newStatus === '1') {
+            alertMessage += "\n\n기간 변경으로 행사가 '진행중' 상태가 되어, 모든 품목의 가격이 즉시 적용됩니다.";
+        }
+    
+        showAlert(alertMessage, async () => {
+            setIsProcessing(true);
+            try {
+                const params = {
+                    Junno: selectedEvent.junno.trim(),
+                    StartDay: editableStartDate,
+                    EndDay: editableEndDate,
+                };
+                const result = await executeUserQuery('행사기간_및_상태_수정', params, UPDATE_PERIOD_AND_STATUS_SQL);
+
+                if (result && result[0]?.RESULT === 'FAIL') throw new Error(result[0].MSG);
+                
+                showToast('행사 기간이 변경되었습니다.', 'success');
+
+                const refreshedEvent = { ...selectedEvent, startday: editableStartDate, endday: editableEndDate, isappl: newStatus };
+                setSelectedEvent(refreshedEvent);
+                await fetchEventDetails(selectedEvent.junno);
+                await handleSearch(true);
+            } catch (e: any) {
+                showAlert('기간 변경 실패: ' + e.message);
+            } finally {
+                setIsProcessing(false);
+            }
+        }, "기간 변경", "bg-blue-600");
+    };
+
+    const statusInfo: { [key: string]: { text: string; className: string } } = {
+        '1': { text: '진행중', className: 'bg-green-100 text-green-700' },
+        '0': { text: '대기', className: 'bg-yellow-100 text-yellow-700' },
+        '2': { text: '종료', className: 'bg-gray-100 text-gray-600' },
+        default: { text: '대기', className: 'bg-yellow-100 text-yellow-700' }
+    };
+
+    return (
+        <div className="flex flex-col h-full bg-gray-50">
+            <div className="p-3 bg-white border-b space-y-2 flex-shrink-0 z-20">
+                <div className="flex gap-2">
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 h-10 border rounded-lg px-2 text-sm font-bold" />
+                    <span className="text-gray-400 font-bold self-center">~</span>
+                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 h-10 border rounded-lg px-2 text-sm font-bold" />
+                </div>
+                <div className="flex gap-2">
+                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="w-full h-10 border rounded-lg px-2 text-sm font-bold">
+                        <option value="all">전체 상태</option>
+                        <option value="0">대기 (0)</option>
+                        <option value="1">진행중 (1)</option>
+                        <option value="2">종료 (2)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div className="flex-grow overflow-auto p-2">
+                {isLoading ? (
+                    <div className="flex flex-col items-center justify-center h-40"><SpinnerIcon className="w-8 h-8 text-blue-500 animate-spin" /><p className="mt-2 text-sm text-gray-500">조회 중...</p></div>
+                ) : error ? (
+                    <div className="p-4 bg-red-50 text-red-600 rounded-xl text-center text-sm">{error}</div>
+                ) : events.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-gray-400"><p className="font-bold">조회된 행사가 없습니다.</p></div>
+                ) : (
+                    <div className="space-y-2">
+                        {events.map((ev, idx) => {
+                             const currentStatus = statusInfo[ev.isappl] || statusInfo.default;
+                             return (
+                                <div key={ev.junno || idx} onClick={() => handleEventAction(ev)} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm cursor-pointer active:bg-gray-50 transition-all hover:shadow-md">
+                                    <div className="flex justify-between items-center gap-2 mb-3">
+                                        <h3 className="font-bold text-gray-800 text-base break-words pr-2 flex-grow min-w-0">
+                                            {ev.salename}
+                                            <span className="text-xs text-gray-400 font-mono ml-1.5 align-middle">({(ev.junno || '').trim()})</span>
+                                        </h3>
+                                        <span className={`text-xs px-2.5 py-1 rounded-full font-black whitespace-nowrap ${currentStatus.className}`}>
+                                            {currentStatus.text}
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="space-y-2 pt-3 border-t border-gray-100">
+                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                            <CalendarIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                            <span className="font-semibold">{ev.startday}</span>
+                                            <span className="text-gray-400">~</span>
+                                            <span className="font-semibold">{ev.endday}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-4 text-sm pt-1">
+                                            <div className="flex items-center gap-2">
+                                                <ArchiveBoxIcon className="w-4 h-4 text-gray-400" />
+                                                <span className="text-gray-500">품목수</span>
+                                                <span className="font-bold text-indigo-600">{ev.itemcount}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <ChartBarIcon className="w-4 h-4 text-gray-400" />
+                                                <span className="text-gray-500">평균마진</span>
+                                                <span className="font-bold text-emerald-600">{Number(ev.avgmgrate || 0).toFixed(1)}%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                             );
+                        })}
+                    </div>
+                )}
+            </div>
+
+            <EventActionSelectModal
+                isOpen={isActionSelectModalOpen}
+                onClose={() => setIsActionSelectModalOpen(false)}
+                event={selectedEvent}
+                onViewDetails={() => { setIsActionSelectModalOpen(false); setDetailModalOpen(true); if (selectedEvent) fetchEventDetails(selectedEvent.junno); }}
+                onApply={() => { setIsActionSelectModalOpen(false); selectedEvent && handleApplyEvent(selectedEvent); }}
+                onStop={() => { setIsActionSelectModalOpen(false); setIsStopChoiceModalOpen(true); }}
+                onDelete={() => { setIsActionSelectModalOpen(false); selectedEvent && handleDeleteEvent(selectedEvent); }}
+            />
+
+            <StopEventModal
+                isOpen={isStopChoiceModalOpen}
+                onClose={() => setIsStopChoiceModalOpen(false)}
+                event={selectedEvent}
+                onConfirm={executeStopEvent}
+            />
+
+            <ActionModal isOpen={detailModalOpen} onClose={() => setDetailModalOpen(false)} title={selectedEvent?.salename || '행사 상세'} zIndexClass="z-[80]" disableBodyScroll>
+                <div className="flex flex-col h-full bg-gray-50">
+                    <div className="p-2 bg-white border-b z-10">
+                        <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 flex-grow">
+                                <input type="date" value={editableStartDate} onChange={e => setEditableStartDate(e.target.value)} className="w-full h-8 border-gray-200 border rounded-lg px-1 text-[11px] font-bold outline-none focus:ring-1 focus:ring-blue-500"/>
+                                <span className="text-gray-300 font-bold text-[11px]">~</span>
+                                <input type="date" value={editableEndDate} onChange={e => setEditableEndDate(e.target.value)} className="w-full h-8 border-gray-200 border rounded-lg px-1 text-[11px] font-bold outline-none focus:ring-1 focus:ring-blue-500"/>
+                            </div>
+                            <button onClick={handlePeriodChange} className="bg-blue-600 text-white p-1.5 h-8 w-12 rounded-lg shadow-sm active:scale-95 flex items-center justify-center flex-shrink-0" title="날짜 변경">
+                                <span className="text-[11px] font-bold">변경</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex-grow overflow-auto p-2 relative">
+                        {isProcessing && (
+                            <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center">
+                                <div className="bg-white p-4 rounded-xl shadow-lg border border-gray-200 flex items-center gap-3">
+                                    <SpinnerIcon className="w-6 h-6 text-indigo-600 animate-spin" />
+                                    <span className="font-bold text-gray-700">처리 중...</span>
+                                </div>
+                            </div>
+                        )}
+                        {isDetailLoading ? (
+                            <div className="flex items-center justify-center h-40"><SpinnerIcon className="w-8 h-8 text-blue-500 animate-spin" /></div>
+                        ) : (
+                            <div className="space-y-2">
+                                {draftItems.map((item, idx) => {
+                                    const itemStatusMap = {
+                                        '1': { text: '적용중', className: 'bg-green-100 text-green-700 border-green-200' },
+                                        '0': { text: '대기', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+                                        'D': { text: '종료', className: 'bg-gray-100 text-gray-600 border border-gray-200' },
+                                    };
+                                    const itemStatus = itemStatusMap[String(item.isappl) as keyof typeof itemStatusMap] || itemStatusMap['0'];
+                                    return (
+                                        <div 
+                                            key={item.junno_serial || idx}
+                                            onClick={() => { setEditingProduct(item); }}
+                                            className="w-full text-left bg-white p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer active:bg-gray-100 transition-all hover:shadow-md"
+                                        >
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${itemStatus.className}`}>
+                                                        {itemStatus.text}
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <p className="font-bold text-gray-800 text-sm leading-tight truncate">{item.descr}</p>
+                                                        <p className="text-[10px] text-gray-500 font-mono truncate">{item.barcode}</p>
+                                                    </div>
+                                                </div>
+                                                <button 
+                                                    disabled={isProcessing}
+                                                    onClick={(e) => { e.stopPropagation(); handleRemoveProduct(item.barcode); }} 
+                                                    className="p-1.5 text-gray-400 hover:text-red-600 bg-gray-50 hover:bg-red-50 rounded-full flex-shrink-0 disabled:opacity-50"
+                                                >
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
+                                            </div>
+
+                                            <div className="grid grid-cols-4 gap-2 text-center text-[11px] pt-1">
+                                                <div className="bg-gray-50 p-1 rounded-lg border border-gray-100">
+                                                    <p className="text-gray-400 font-bold leading-none mb-1">행사매입</p>
+                                                    <p className="font-bold text-gray-800">{Number(item.salemoney0).toLocaleString()}</p>
+                                                </div>
+                                                <div className="bg-blue-50 p-1 rounded-lg border border-blue-200">
+                                                    <p className="text-blue-500 font-bold leading-none mb-1">행사판가</p>
+                                                    <p className="font-bold text-blue-700">{Number(item.salemoney1).toLocaleString()}</p>
+                                                </div>
+                                                <div className="bg-gray-50 p-1 rounded-lg border border-gray-100">
+                                                    <p className="text-gray-400 font-bold leading-none mb-1">이전판가</p>
+                                                    <p className="font-bold text-gray-400 line-through">{Number(item.orgmoney1).toLocaleString()}</p>
+                                                </div>
+                                                <div className="bg-emerald-50 p-1 rounded-lg border border-emerald-100">
+                                                    <p className="text-emerald-500 font-bold leading-none mb-1">마진율</p>
+                                                    <p className="font-bold text-emerald-700">{Number(item.salecount).toFixed(1)}%</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    <div className="p-3 bg-white border-t flex gap-2">
+                        <button onClick={() => setIsAddProductModalOpen(true)} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold active:scale-95 transition-transform shadow-md">상품 추가</button>
+                        <button onClick={() => setDetailModalOpen(false)} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold active:scale-95 transition-transform">닫기</button>
+                    </div>
+                </div>
+            </ActionModal>
+
+            {isAddProductModalOpen && selectedEvent && (
+                <AddEventProductModal
+                    isOpen={isAddProductModalOpen}
+                    onClose={() => setIsAddProductModalOpen(false)}
+                    junno={selectedEvent.junno}
+                    onSuccess={handleAddProductSuccess}
+                    existingBarcodes={draftItems.map(i => i.barcode)}
+                    parentStatus={selectedEvent.isappl as ('0' | '1' | '2')}
+                />
+            )}
+
+            {editingProduct && (
+                <EditEventProductModal
+                    isOpen={!!editingProduct}
+                    onClose={() => setEditingProduct(null)}
+                    product={{...editingProduct, '상품명': editingProduct.descr, '행사매입가': editingProduct.salemoney0, '행사판매가': editingProduct.salemoney1, '이전판매가': editingProduct.orgmoney1}}
+                    editContext="management"
+                    onSuccess={async (updated) => {
+                        if (selectedEvent) {
+                            try {
+                                const params = {
+                                    Junno: selectedEvent.junno.trim(),
+                                    Barcode: updated.barcode,
+                                    SaleCost: updated['행사매입가'],
+                                    SalePrice: updated['행사판매가'],
+                                    IsAppl: updated.isappl
+                                };
+                                const result = await executeUserQuery('행사상품_수정저장', params, UPSERT_ITEM_SQL);
+                                if (result && result[0].RESULT === 'FAIL') throw new Error(result[0].MSG);
+                                
+                                await handleUpdateProduct();
+                                showToast(result[0]?.MSG || '수정되었습니다.', 'success');
+                            } catch (e: any) {
+                                showAlert('수정 실패: ' + e.message);
+                            }
+                        }
+                    }}
+                />
+            )}
+        </div>
+    );
+};
+
+export default EventManagementPage;
