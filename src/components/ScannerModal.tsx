@@ -379,14 +379,17 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 z-20"><SpinnerIcon className="w-10 h-10 text-white mb-3" /><p className="text-white font-bold text-shadow">스캐너 준비 중...</p></div>
                 )}
                 <div className={`mb-6 text-center px-4 transition-opacity duration-300 ${isPaused ? 'opacity-0' : 'opacity-100'}`}><p className="text-white text-sm font-bold text-shadow bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm">{isScanningActive ? "가이드라인 안에 바코드를 맞추세요" : (scanSettings.useScannerButton ? "버튼을 눌러 스캔하세요" : "스캔 준비 중...")}</p></div>
-                <div className="w-[80%] max-w-[24rem]"><div ref={guideBoxRef} className={`relative h-[45px] w-full rounded-xl transition-all duration-300 ${isPaused ? 'border-2 border-white/10' : (isScanningActive ? 'scanner-box-active' : 'scanner-box-idle')}`} /></div>
-                {scanSettings.useScannerButton && !isPaused && (
-                    <div className="absolute bottom-10 z-[110] pointer-events-auto" style={{ bottom: 'max(2.5rem, env(safe-area-inset-bottom) + 2rem)' }}>
-                        <button onClick={handleScanButtonClick} onTouchStart={handleScanButtonClick} className="w-20 h-20 bg-white/90 rounded-full flex items-center justify-center backdrop-blur-md shadow-2xl active:scale-95 transition-transform border border-white/20">
-                            {isScanningActive ? <div className="w-8 h-8 bg-red-500 rounded-md animate-pulse"></div> : <BarcodeScannerIcon className="w-10 h-10 text-gray-700" />}
-                        </button>
-                    </div>
-                )}
+                <div className="w-[80%] max-w-[24rem] flex flex-col items-center">
+                    <div ref={guideBoxRef} className={`relative h-[45px] w-full rounded-xl transition-all duration-300 ${isPaused ? 'border-2 border-white/10' : (isScanningActive ? 'scanner-box-active' : 'scanner-box-idle')}`} />
+                    {scanSettings.useScannerButton && !isPaused && (
+                        <div className="mt-12 pointer-events-auto flex flex-col items-center">
+                            <button onClick={handleScanButtonClick} onTouchStart={handleScanButtonClick} className="w-20 h-20 bg-white/90 rounded-full flex items-center justify-center backdrop-blur-md shadow-2xl active:scale-95 transition-transform border border-white/20">
+                                {isScanningActive ? <div className="w-8 h-8 bg-red-500 rounded-md animate-pulse"></div> : <BarcodeScannerIcon className="w-10 h-10 text-gray-700" />}
+                            </button>
+                            <p className="text-white text-[10px] font-black mt-2 text-shadow opacity-60 uppercase tracking-tighter">Manual Scan</p>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>,
         document.body
