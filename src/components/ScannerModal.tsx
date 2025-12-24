@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useScanner, useAlert } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
-import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon, StopCircleIcon } from './Icons';
+import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon } from './Icons';
 import './ScannerModal.css';
 
 // Assuming ZXing is loaded from a CDN and available on the window object
@@ -48,7 +48,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const longPressTimer = useRef<any>(null);
 
     const { selectedCameraId, scanSettings } = useScanner();
-    const { showAlert } = useAlert();
+    const { showAlert, showToast } = useAlert();
     
     // State
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
@@ -354,7 +354,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }, 200);
     };
 
-    // 수동 스캔 버튼 제어 로직 개선 (터치 시 재탐색, 길게 누름 시 중지)
+    // 수동 스캔 버튼 제어 로직
     const handleScanButtonPress = (e: React.SyntheticEvent | React.PointerEvent) => {
         e.preventDefault(); e.stopPropagation(); unlockAudio();
         
@@ -387,8 +387,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             longPressTimer.current = null;
         }
     };
-
-    const { showToast } = useAlert();
 
     if (!isOpen) return null;
 
@@ -427,10 +425,10 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                                     )}
                                 </div>
                             </button>
-                            <div className="mt-4 flex flex-col items-center gap-1 opacity-80">
-                                <p className="text-white text-[11px] font-black text-shadow uppercase tracking-widest bg-black/30 px-3 py-1 rounded-full border border-white/10 flex items-center gap-2">
-                                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-ping"></span>
-                                    Tip: Touch to Focus / Long Press to Stop
+                            <div className="mt-4 flex flex-col items-center gap-1 opacity-60">
+                                <p className="text-white text-[11px] font-bold text-shadow uppercase tracking-widest bg-black/30 px-3 py-1 rounded-full border border-white/10 flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-ping"></span>
+                                    팁: 터치 시 초점 재조정 / 길게 누르면 중지
                                 </p>
                             </div>
                         </div>
