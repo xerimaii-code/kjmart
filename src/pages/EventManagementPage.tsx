@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { executeUserQuery } from '../services/sqlService';
 import { useAlert, useDataState, useScanner } from '../context/AppContext';
 import { SpinnerIcon, SearchIcon, PencilSquareIcon, TrashIcon, CalendarIcon, SaveIcon, ArchiveBoxIcon, ChartBarIcon, BarcodeScannerIcon } from '../components/Icons';
@@ -262,9 +262,19 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [isDetailLoading, setIsDetailLoading] = useState(false);
     const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<any | null>(null);
+    
+    // 위치 이동 및 배지용 상태
+    const [highlightedBarcode, setHighlightedBarcode] = useState<string | null>(null);
 
     // 통합 검색 훅
     const { searchTerm, setSearchTerm, results, isSearching, search, searchByBarcode, clear: clearProductSearch } = useProductSearch('productInquiry', 50, '상품조회');
+
+    // 검색어 2자 이상 자동 검색
+    useEffect(() => {
+        if (isActive && searchTerm.trim().length >= 2) {
+            search();
+        }
+    }, [searchTerm, search, isActive]);
 
     useEffect(() => {
         if (selectedEvent) {
@@ -319,7 +329,6 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (isActive) handleSearch(true);
     }, [isActive, handleSearch]);
 
-    // fetchEventDetails가 mappedResult를 반환하도록 수정하여 jumpToEventByBarcode에서 사용할 수 있게 함
     const fetchEventDetails = useCallback(async (junno: string) => {
         setIsDetailLoading(true);
         try {
@@ -348,7 +357,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             });
 
             setDraftItems(mappedResult);
-            return mappedResult; // 결과값 반환 추가
+            return mappedResult;
         } catch (e: any) {
             showAlert('상세 내역 로드 실패: ' + e.message);
             return null;
@@ -357,7 +366,6 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         }
     }, [userQueries, showAlert]);
 
-    // [핵심 기능] 특정 상품 바코드로 행사를 찾아 상세 화면으로 이동 및 자동 수정 모달 호출
     const jumpToEventByBarcode = async (barcode: string) => {
         setIsLoading(true);
         try {
@@ -377,15 +385,16 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 setSelectedEvent(mappedEvent);
                 setDetailModalOpen(true);
                 
-                // 상세 목록을 불러온 후 해당 상품을 찾아 editingProduct 상태에 설정
                 const items = await fetchEventDetails(mappedEvent.junno);
                 if (items && items.length > 0) {
                     const targetItem = items.find(i => String(i.barcode).trim() === barcode.trim());
                     if (targetItem) {
-                        setEditingProduct(targetItem);
-                        showToast(`'${targetItem.descr}' 상품 수정을 시작합니다.`, 'success');
-                    } else {
-                        showToast(`'${mappedEvent.salename}' 행사로 이동했습니다.`, 'success');
+                        setHighlightedBarcode(barcode);
+                        // 모달 렌더링 후 스크롤 이동
+                        setTimeout(() => {
+                            const el = document.getElementById(`event-item-${barcode}`);
+                            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 500);
                     }
                 }
             } else {
@@ -415,7 +424,6 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             handleScan();
             return;
         }
-        // 바코드 형식인 경우 즉시 점프 시도
         if (/^\d{7,}$/.test(term)) {
             jumpToEventByBarcode(term);
         } else {
@@ -437,12 +445,18 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             if (result && result.length > 0 && result[0].RESULT === 'FAIL') {
                 throw new Error(result[0].MSG || '상품 추가에 실패했습니다.');
             }
+            
+            // 배지 및 하이라이트 설정
+            setHighlightedBarcode(newItem['바코드']);
             showToast(result[0]?.MSG || '상품이 추가되었습니다.', 'success');
             
-            await Promise.all([
-                fetchEventDetails(selectedEvent.junno),
-                handleSearch(true)
-            ]);
+            await fetchEventDetails(selectedEvent.junno);
+            await handleSearch(true);
+
+            setTimeout(() => {
+                document.getElementById(`event-item-${newItem['바코드']}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 300);
+
         } catch (e: any) {
             showAlert('저장 실패: ' + e.message);
             throw e; 
@@ -577,10 +591,8 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleUpdateProduct = async () => {
         if (selectedEvent) {
-            await Promise.all([
-                fetchEventDetails(selectedEvent.junno),
-                handleSearch(true)
-            ]);
+            await fetchEventDetails(selectedEvent.junno);
+            await handleSearch(true);
         }
     };
 
@@ -588,35 +600,60 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (!selectedEvent) return;
         const itemToRemove = draftItems.find(i => String(i.barcode || i['바코드']) === barcode);
         if (!itemToRemove) return;
-    
-        const isDeletable = String(itemToRemove.isappl) === 'D';
-    
-        if (!isDeletable) {
-            showAlert("진행중인 상품은 '종료(D)' 상태에서만 삭제할 수 있습니다.\n먼저 개별 수정을 통해 상태를 '종료'로 변경해주세요.");
-            return;
-        }
-    
-        showAlert(
-            `'${itemToRemove.descr || itemToRemove['상품명']}' 상품을 행사에서 제외하시겠습니까?`,
-            async () => {
-                if (!selectedEvent) return;
-                setIsProcessing(true);
-                try {
-                    const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))) WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
-                    await executeUserQuery('행사상품_개별삭제', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, deleteSql);
-                    
-                    showToast('상품을 삭제했습니다.', 'success');
-                    
-                    await Promise.all([ fetchEventDetails(selectedEvent.junno), handleSearch(true) ]);
-                } catch (e: any) {
-                    showAlert('삭제 실패: ' + e.message);
-                } finally {
-                    setIsProcessing(false);
+
+        const isItemApplied = String(itemToRemove.isappl) === '1';
+        const msg = isItemApplied
+            ? `'${itemToRemove.descr || itemToRemove['상품명']}' 상품이 행사 적용 중입니다.\n중지 후 행사에서 제외하시겠습니까? (가격 복구)`
+            : `'${itemToRemove.descr || itemToRemove['상품명']}' 상품을 행사에서 제외하시겠습니까?`;
+
+        showAlert(msg, async () => {
+            if (!selectedEvent) return;
+            setIsProcessing(true);
+            try {
+                if (isItemApplied) {
+                    const stopSql = `
+                        SET NOCOUNT ON; SET XACT_ABORT ON;
+                        DECLARE @JunnoToStop VARCHAR(20) = @Junno; DECLARE @BarcodeToStop VARCHAR(20) = @Barcode;
+                        BEGIN TRY
+                            BEGIN TRANSACTION;
+                                UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = @JunnoToStop AND barcode = @BarcodeToStop;
+                                
+                                DECLARE @NextBestSalePrice DECIMAL(18,0), @NextBestSaleCost DECIMAL(18,0), @NextBestStart VARCHAR(10), @NextBestEnd VARCHAR(10);
+                                SELECT TOP 1 
+                                    @NextBestSalePrice = r.salemoney1, @NextBestSaleCost = r.salemoney0, 
+                                    @NextBestStart = m.startday, @NextBestEnd = m.endday 
+                                FROM sale_ready r WITH(NOLOCK) 
+                                JOIN sale_mast m WITH(NOLOCK) ON r.junno = m.junno 
+                                WHERE r.barcode = @BarcodeToStop AND m.isappl = '1' AND LTRIM(RTRIM(m.junno)) <> LTRIM(RTRIM(@JunnoToStop)) 
+                                ORDER BY m.startday DESC;
+                                
+                                IF @@ROWCOUNT > 0
+                                    UPDATE p SET p.money1comp = @NextBestSalePrice, p.salemoney0 = @NextBestSaleCost, p.salestartday = @NextBestStart, p.saleendday = @NextBestEnd FROM parts p WHERE p.barcode = @BarcodeToStop;
+                                ELSE
+                                    UPDATE p SET p.money1comp = p.money1, p.salemoney0 = p.money0vat, p.salestartday = NULL, p.saleendday = NULL FROM parts p WHERE p.barcode = @BarcodeToStop;
+                            COMMIT TRANSACTION;
+                        END TRY
+                        BEGIN CATCH
+                            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                            DECLARE @err_msg_remove NVARCHAR(MAX) = ERROR_MESSAGE();
+                            RAISERROR(@err_msg_remove, 16, 1);
+                        END CATCH`;
+                    await executeUserQuery('행사상품_개별중지_및_Parts업데이트', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, stopSql);
                 }
-            }, 
-            '삭제', 
-            'bg-rose-500'
-        );
+                
+                const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))) WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
+                await executeUserQuery('행사상품_개별삭제', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, deleteSql);
+                
+                showToast(isItemApplied ? '중지 및 삭제되었습니다.' : '상품을 삭제했습니다.', 'success');
+                
+                await fetchEventDetails(selectedEvent.junno);
+                await handleSearch(true);
+            } catch (e: any) {
+                showAlert('삭제 실패: ' + e.message);
+            } finally {
+                setIsProcessing(false);
+            }
+        }, '삭제', 'bg-rose-500');
     };
 
     const handlePeriodChange = async () => {
@@ -668,7 +705,6 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     return (
         <div className="flex flex-col h-full bg-gray-50">
-            {/* 상단 검색 필터 바 */}
             <div className="p-3 bg-white border-b space-y-2 flex-shrink-0 z-20 shadow-sm">
                 <div className="flex gap-2">
                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 h-10 border border-gray-200 rounded-lg px-2 text-sm font-bold bg-white" />
@@ -676,7 +712,6 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 h-10 border border-gray-200 rounded-lg px-2 text-sm font-bold bg-white" />
                 </div>
                 
-                {/* 행사 상태 필터 + 상품/바코드 통합 검색 */}
                 <div className="flex gap-2 items-stretch">
                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="w-1/4 h-11 border border-gray-200 rounded-xl px-2 text-xs font-bold bg-white">
                         <option value="all">전체</option>
@@ -757,7 +792,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 isOpen={isActionSelectModalOpen}
                 onClose={() => setIsActionSelectModalOpen(false)}
                 event={selectedEvent}
-                onViewDetails={() => { setIsActionSelectModalOpen(false); setDetailModalOpen(true); if (selectedEvent) fetchEventDetails(selectedEvent.junno); }}
+                onViewDetails={() => { setIsActionSelectModalOpen(false); setDetailModalOpen(true); if (selectedEvent) { fetchEventDetails(selectedEvent.junno); setHighlightedBarcode(null); } }}
                 onApply={() => { setIsActionSelectModalOpen(false); selectedEvent && handleApplyEvent(selectedEvent); }}
                 onStop={() => { setIsActionSelectModalOpen(false); setIsStopChoiceModalOpen(true); }}
                 onDelete={() => { setIsActionSelectModalOpen(false); selectedEvent && handleDeleteEvent(selectedEvent); }}
@@ -799,6 +834,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         ) : (
                             <div className="space-y-2">
                                 {draftItems.map((item, idx) => {
+                                    const isHighlighted = item.barcode === highlightedBarcode;
                                     const itemStatusMap = {
                                         '1': { text: '적용중', className: 'bg-green-100 text-green-700 border-green-200' },
                                         '0': { text: '대기', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
@@ -809,14 +845,18 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                     return (
                                         <div 
                                             key={item.junno_serial || idx}
+                                            id={`event-item-${item.barcode}`}
                                             onClick={() => setEditingProduct(item)}
-                                            className={`w-full text-left bg-white p-3 rounded-xl border border-gray-200 shadow-sm transition-all cursor-pointer active:bg-gray-100 hover:shadow-md ${isEnded ? 'opacity-60' : ''}`}
+                                            className={`w-full text-left bg-white p-3 rounded-xl border shadow-sm transition-all cursor-pointer active:bg-gray-100 hover:shadow-md ${isEnded ? 'opacity-60' : ''} ${isHighlighted ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50/30' : 'border-gray-200'}`}
                                         >
                                             <div className="flex justify-between items-start mb-2">
                                                 <div className="flex items-center gap-2 min-w-0">
                                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${itemStatus.className}`}>
                                                         {itemStatus.text}
                                                     </span>
+                                                    {isHighlighted && (
+                                                        <span className="bg-blue-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm animate-pulse">최근</span>
+                                                    )}
                                                     <div className="min-w-0">
                                                         <p className="font-bold text-gray-800 text-sm leading-tight truncate">{item.descr}</p>
                                                         <p className="text-[10px] text-gray-500 font-mono truncate">{item.barcode}</p>
@@ -892,8 +932,14 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 const result = await executeUserQuery('행사상품_수정저장', params, UPSERT_ITEM_SQL);
                                 if (result && result[0].RESULT === 'FAIL') throw new Error(result[0].MSG);
                                 
+                                setHighlightedBarcode(updated.barcode);
                                 await handleUpdateProduct();
                                 showToast(result[0]?.MSG || '수정되었습니다.', 'success');
+                                
+                                setTimeout(() => {
+                                    document.getElementById(`event-item-${updated.barcode}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }, 300);
+
                             } catch (e: any) {
                                 showAlert('수정 실패: ' + e.message);
                             }
