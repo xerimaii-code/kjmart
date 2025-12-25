@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { executeUserQuery } from '../services/sqlService';
 import { useAlert, useDataState, useScanner } from '../context/AppContext';
@@ -411,11 +410,17 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
 
     const handleManualSearch = () => {
-        if (!searchTerm.trim()) {
+        const term = searchTerm.trim();
+        if (!term) {
             handleScan();
             return;
         }
-        search();
+        // 바코드 형식인 경우 즉시 점프 시도
+        if (/^\d{7,}$/.test(term)) {
+            jumpToEventByBarcode(term);
+        } else {
+            search();
+        }
     };
     
     const handleAddProductSuccess = async (newItem: any) => {
@@ -712,7 +717,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             isSearching={isSearching}
                             results={results}
                             onSelectProduct={handleProductSelect}
-                            onScan={handleScan}
+                            onScan={handleManualSearch}
                             isBoxUnit={false}
                             onBoxUnitChange={() => {}}
                             placeholder="상품명/바코드 검색"

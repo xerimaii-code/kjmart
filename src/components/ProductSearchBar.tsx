@@ -44,6 +44,9 @@ const ProductSearchBar: React.FC<ProductSearchBarProps> = ({
         inputRef.current?.blur();
     };
 
+    // 입력값이 있으면 검색 아이콘, 없으면 스캔 아이콘 표시
+    const isInputActive = searchTerm.trim().length > 0;
+
     return (
         <div className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
             <div className="relative flex-grow">
@@ -58,6 +61,12 @@ const ProductSearchBar: React.FC<ProductSearchBarProps> = ({
                     }}
                     onBlur={() => {
                         blurTimeoutRef.current = window.setTimeout(() => setShowDropdown(false), 200);
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            onScan(); // 엔터 입력 시 통합 액션 실행
+                        }
                     }}
                     placeholder={placeholder}
                     className="w-full h-11 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400 transition-colors duration-200 text-base pr-24"
@@ -87,10 +96,14 @@ const ProductSearchBar: React.FC<ProductSearchBarProps> = ({
             
             <button 
                 onClick={onScan} 
-                className="w-11 h-11 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold hover:bg-blue-700 transition active:scale-95 shadow shadow-blue-500/30 flex-shrink-0"
-                aria-label="스캔"
+                className={`w-11 h-11 text-white rounded-lg flex items-center justify-center font-bold transition-all active:scale-95 shadow flex-shrink-0 ${isInputActive ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'}`}
+                aria-label={isInputActive ? "검색" : "스캔"}
             >
-                <BarcodeScannerIcon className="w-6 h-6" />
+                {isInputActive ? (
+                    <SearchIcon className="w-6 h-6" />
+                ) : (
+                    <BarcodeScannerIcon className="w-6 h-6" />
+                )}
             </button>
         </div>
     );
