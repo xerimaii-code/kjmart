@@ -195,12 +195,6 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                                     onClick={() => onNavigate('orderHistory')}
                                 />
                             </div>
-                            <MenuButton 
-                                label="매입 내역" 
-                                icon={<TableCellsIcon className={iconClass} />} 
-                                onClick={() => onNavigate('purchaseHistory')}
-                                subText="기간별 입고 조회"
-                            />
                              <div className="grid grid-cols-2 gap-1.5">
                                 <MenuButton 
                                     label="행사 조회/수정" 
@@ -242,6 +236,12 @@ const MenuPage: React.FC<MenuPageProps> = ({ onNavigate }) => {
                         <div className="flex flex-col gap-3 md:gap-2">
                             <div className="flex flex-col gap-1.5">
                                 <SectionHeader title="Business" />
+                                <MenuButton 
+                                    label="매입 내역" 
+                                    icon={<TableCellsIcon className={iconClass} />} 
+                                    onClick={() => onNavigate('purchaseHistory')}
+                                    subText="기간별 입고 조회"
+                                />
                                 <MenuButton 
                                     label="고객 관리" 
                                     icon={<UserCircleIcon className={iconClass} />} 
