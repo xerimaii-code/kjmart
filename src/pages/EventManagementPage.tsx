@@ -588,59 +588,35 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (!selectedEvent) return;
         const itemToRemove = draftItems.find(i => String(i.barcode || i['바코드']) === barcode);
         if (!itemToRemove) return;
-
-        const isItemApplied = String(itemToRemove.isappl) === '1';
-        const msg = isItemApplied
-            ? `'${itemToRemove.descr || itemToRemove['상품명']}' 상품이 행사 적용 중입니다.\n중지 후 행사에서 제외하시겠습니까? (가격 복구)`
-            : `'${itemToRemove.descr || itemToRemove['상품명']}' 상품을 행사에서 제외하시겠습니까?`;
-
-        showAlert(msg, async () => {
-            if (!selectedEvent) return;
-            setIsProcessing(true);
-            try {
-                if (isItemApplied) {
-                    const stopSql = `
-                        SET NOCOUNT ON; SET XACT_ABORT ON;
-                        DECLARE @JunnoToStop VARCHAR(20) = @Junno; DECLARE @BarcodeToStop VARCHAR(20) = @Barcode;
-                        BEGIN TRY
-                            BEGIN TRANSACTION;
-                                UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = @JunnoToStop AND barcode = @BarcodeToStop;
-                                
-                                DECLARE @NextBestSalePrice DECIMAL(18,0), @NextBestSaleCost DECIMAL(18,0), @NextBestStart VARCHAR(10), @NextBestEnd VARCHAR(10);
-                                SELECT TOP 1 
-                                    @NextBestSalePrice = r.salemoney1, @NextBestSaleCost = r.salemoney0, 
-                                    @NextBestStart = m.startday, @NextBestEnd = m.endday 
-                                FROM sale_ready r WITH(NOLOCK) 
-                                JOIN sale_mast m WITH(NOLOCK) ON r.junno = m.junno 
-                                WHERE r.barcode = @BarcodeToStop AND m.isappl = '1' AND LTRIM(RTRIM(m.junno)) <> LTRIM(RTRIM(@JunnoToStop)) 
-                                ORDER BY m.startday DESC;
-                                
-                                IF @@ROWCOUNT > 0
-                                    UPDATE p SET p.money1comp = @NextBestSalePrice, p.salemoney0 = @NextBestSaleCost, p.salestartday = @NextBestStart, p.saleendday = @NextBestEnd FROM parts p WHERE p.barcode = @BarcodeToStop;
-                                ELSE
-                                    UPDATE p SET p.money1comp = p.money1, p.salemoney0 = p.money0vat, p.salestartday = NULL, p.saleendday = NULL FROM parts p WHERE p.barcode = @BarcodeToStop;
-                            COMMIT TRANSACTION;
-                        END TRY
-                        BEGIN CATCH
-                            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-                            DECLARE @err_msg_remove NVARCHAR(MAX) = ERROR_MESSAGE();
-                            RAISERROR(@err_msg_remove, 16, 1);
-                        END CATCH`;
-                    await executeUserQuery('행사상품_개별중지_및_Parts업데이트', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, stopSql);
+    
+        const isDeletable = String(itemToRemove.isappl) === 'D';
+    
+        if (!isDeletable) {
+            showAlert("진행중인 상품은 '종료(D)' 상태에서만 삭제할 수 있습니다.\n먼저 개별 수정을 통해 상태를 '종료'로 변경해주세요.");
+            return;
+        }
+    
+        showAlert(
+            `'${itemToRemove.descr || itemToRemove['상품명']}' 상품을 행사에서 제외하시겠습니까?`,
+            async () => {
+                if (!selectedEvent) return;
+                setIsProcessing(true);
+                try {
+                    const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))) WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
+                    await executeUserQuery('행사상품_개별삭제', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, deleteSql);
+                    
+                    showToast('상품을 삭제했습니다.', 'success');
+                    
+                    await Promise.all([ fetchEventDetails(selectedEvent.junno), handleSearch(true) ]);
+                } catch (e: any) {
+                    showAlert('삭제 실패: ' + e.message);
+                } finally {
+                    setIsProcessing(false);
                 }
-                
-                const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))) WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
-                await executeUserQuery('행사상품_개별삭제', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, deleteSql);
-                
-                showToast(isItemApplied ? '중지 및 삭제되었습니다.' : '상품을 삭제했습니다.', 'success');
-                
-                await Promise.all([ fetchEventDetails(selectedEvent.junno), handleSearch(true) ]);
-            } catch (e: any) {
-                showAlert('삭제 실패: ' + e.message);
-            } finally {
-                setIsProcessing(false);
-            }
-        }, '삭제', 'bg-rose-500');
+            }, 
+            '삭제', 
+            'bg-rose-500'
+        );
     };
 
     const handlePeriodChange = async () => {
@@ -829,11 +805,12 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                         'D': { text: '종료', className: 'bg-gray-100 text-gray-600 border border-gray-200' },
                                     };
                                     const itemStatus = itemStatusMap[String(item.isappl) as keyof typeof itemStatusMap] || itemStatusMap['0'];
+                                    const isEnded = String(item.isappl) === 'D';
                                     return (
                                         <div 
                                             key={item.junno_serial || idx}
-                                            onClick={() => { setEditingProduct(item); }}
-                                            className="w-full text-left bg-white p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer active:bg-gray-100 transition-all hover:shadow-md"
+                                            onClick={() => setEditingProduct(item)}
+                                            className={`w-full text-left bg-white p-3 rounded-xl border border-gray-200 shadow-sm transition-all cursor-pointer active:bg-gray-100 hover:shadow-md ${isEnded ? 'opacity-60' : ''}`}
                                         >
                                             <div className="flex justify-between items-start mb-2">
                                                 <div className="flex items-center gap-2 min-w-0">
