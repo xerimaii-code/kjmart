@@ -134,36 +134,53 @@ const AddEventProductModal: React.FC<AddEventProductModalProps> = ({
     }, [isOpen, resetForm]);
 
     const handleProductSelect = async (product: Product) => {
-        setSearchTerm(product.barcode);
-        setWarning(null);
-        
-        try {
-            const res = await executeUserQuery('행사상품체크', { Junno: junno, Barcode: product.barcode }, CHECK_PRODUCT_EVENT_SQL);
+        // [수정] 중복 체크 로직 추가
+        const isDuplicate = existingBarcodes.includes(product.barcode);
+
+        const proceedSelection = async () => {
+            setSearchTerm(product.barcode);
+            setWarning(null);
             
-            if (res && res.length > 0) {
-                const info = res[0];
-                setSelectedProduct({ ...product, barcode: product.barcode, name: info.GoodsName });
-                setSaleCost(info.SaleCost);
-                setSalePrice(info.SalePrice);
+            try {
+                const res = await executeUserQuery('행사상품체크', { Junno: junno, Barcode: product.barcode }, CHECK_PRODUCT_EVENT_SQL);
+                
+                if (res && res.length > 0) {
+                    const info = res[0];
+                    setSelectedProduct({ ...product, barcode: product.barcode, name: info.GoodsName });
+                    setSaleCost(info.SaleCost);
+                    setSalePrice(info.SalePrice);
+                    setIsEditMode(info.Mode === 'UPDATE');
 
-                if (info.WarningMsg) {
-                    setWarning(info.WarningMsg);
-                    setOrgPrice(info.DuplicatePrice || info.Price);
+                    if (info.WarningMsg) {
+                        setWarning(info.WarningMsg);
+                        setOrgPrice(info.DuplicatePrice || info.Price);
 
-                    showAlert(
-                        `중복 행사 주의!\n\n${info.WarningMsg}\n\n위 행사와 기간이 겹칩니다. 등록 시 현재 입력한 행사가격으로 최종 적용됩니다. 계속 진행하시겠습니까?`,
-                        () => showToast("중복 행사 가격이 기준가로 설정되었습니다.", "success"),
-                        "계속 진행", "bg-orange-600",
-                        () => resetForm(), "취소"
-                    );
+                        showAlert(
+                            `중복 행사 주의!\n\n${info.WarningMsg}\n\n위 행사와 기간이 겹칩니다. 등록 시 현재 입력한 행사가격으로 최종 적용됩니다. 계속 진행하시겠습니까?`,
+                            () => showToast("중복 행사 가격이 기준가로 설정되었습니다.", "success"),
+                            "계속 진행", "bg-orange-600",
+                            () => resetForm(), "취소"
+                        );
+                    } else {
+                        setOrgPrice(info.Price);
+                    }
                 } else {
-                    setOrgPrice(info.Price);
+                    showToast("상품 정보를 가져올 수 없습니다.", "error");
                 }
-            } else {
-                showToast("상품 정보를 가져올 수 없습니다.", "error");
+            } catch (e: any) {
+                showAlert("조회 오류: " + e.message);
             }
-        } catch (e: any) {
-            showAlert("조회 오류: " + e.message);
+        };
+
+        if (isDuplicate) {
+            showAlert(
+                "이미 이 행사에 등록된 상품입니다.\n내용을 수정하시겠습니까?",
+                () => proceedSelection(),
+                "수정하기", "bg-indigo-600",
+                () => resetForm(), "취소"
+            );
+        } else {
+            proceedSelection();
         }
     };
 

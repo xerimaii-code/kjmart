@@ -1,14 +1,32 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { executeUserQuery } from '../services/sqlService';
-import { useAlert, useDataState } from '../context/AppContext';
-import { SpinnerIcon, SearchIcon, PencilSquareIcon, TrashIcon, CalendarIcon, SaveIcon, ArchiveBoxIcon, ChartBarIcon } from '../components/Icons';
+import { useAlert, useDataState, useScanner } from '../context/AppContext';
+import { SpinnerIcon, SearchIcon, PencilSquareIcon, TrashIcon, CalendarIcon, SaveIcon, ArchiveBoxIcon, ChartBarIcon, BarcodeScannerIcon } from '../components/Icons';
 import ActionModal from '../components/ActionModal';
 import AddEventProductModal from '../components/AddEventProductModal';
 import EditEventProductModal from '../components/EditEventProductModal';
 import EventActionSelectModal from '../components/EventActionSelectModal';
 import StopEventModal from '../components/StopEventModal';
-import { EventItem } from '../types';
+import { EventItem, Product } from '../types';
+import { useProductSearch } from '../hooks/useProductSearch';
+import ProductSearchBar from '../components/ProductSearchBar';
+
+const FIND_EVENT_BY_PRODUCT_SQL = `
+-- [상품 바코드로 소속 행사 찾기]
+SELECT TOP 1 
+    M.junno, 
+    M.salename, 
+    M.startday, 
+    M.endday, 
+    M.isappl, 
+    M.itemcount,
+    M.avgmgrate
+FROM sale_ready R WITH(NOLOCK)
+JOIN sale_mast M WITH(NOLOCK) ON R.junno = M.junno
+WHERE R.barcode = @Barcode
+ORDER BY M.startday DESC, M.junno DESC
+`;
 
 const UPSERT_ITEM_SQL = `
 -- 쿼리 이름: 행사상품_저장_통합 (SQL 2005) - 이전 행사가격 자동 조회 기능 추가
@@ -214,6 +232,7 @@ END CATCH
 const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { showToast, showAlert } = useAlert();
     const { userQueries } = useDataState();
+    const { openScanner } = useScanner();
 
     const [startDate, setStartDate] = useState(() => {
         const d = new Date();
@@ -244,6 +263,9 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [isDetailLoading, setIsDetailLoading] = useState(false);
     const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<any | null>(null);
+
+    // 통합 검색 훅
+    const { searchTerm, setSearchTerm, results, isSearching, search, searchByBarcode, clear: clearProductSearch } = useProductSearch('productInquiry', 50, '상품조회');
 
     useEffect(() => {
         if (selectedEvent) {
@@ -332,6 +354,56 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             setIsDetailLoading(false);
         }
     }, [userQueries, showAlert]);
+
+    // [핵심 기능] 특정 상품 바코드로 행사를 찾아 상세 화면으로 이동
+    const jumpToEventByBarcode = async (barcode: string) => {
+        setIsLoading(true);
+        try {
+            const res = await executeUserQuery('행사찾기', { Barcode: barcode }, FIND_EVENT_BY_PRODUCT_SQL);
+            if (res && res.length > 0) {
+                const ev = res[0];
+                const mappedEvent: EventItem = {
+                    ...ev,
+                    salename: ev.salename || '이름 없음',
+                    junno: ev.junno || 'N/A',
+                    startday: ev.startday || '',
+                    endday: ev.endday || '',
+                    itemcount: ev.itemcount || 0,
+                    isappl: String(ev.isappl ?? '0'),
+                    avgmgrate: ev.avgmgrate || 0,
+                };
+                setSelectedEvent(mappedEvent);
+                setDetailModalOpen(true);
+                fetchEventDetails(mappedEvent.junno);
+                showToast(`'${mappedEvent.salename}' 행사로 이동했습니다.`, 'success');
+            } else {
+                showAlert('해당 상품이 포함된 행사를 찾을 수 없습니다.');
+            }
+        } catch (e: any) {
+            showAlert('행사 조회 실패: ' + e.message);
+        } finally {
+            setIsLoading(false);
+            clearProductSearch();
+        }
+    };
+
+    const handleProductSelect = (product: Product) => {
+        jumpToEventByBarcode(product.barcode);
+    };
+
+    const handleScan = () => {
+        openScanner('modal', (barcode) => {
+            jumpToEventByBarcode(barcode);
+        }, false);
+    };
+
+    const handleManualSearch = () => {
+        if (!searchTerm.trim()) {
+            handleScan();
+            return;
+        }
+        search();
+    };
     
     const handleAddProductSuccess = async (newItem: any) => {
         if (!selectedEvent) return;
@@ -602,19 +674,38 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     return (
         <div className="flex flex-col h-full bg-gray-50">
-            <div className="p-3 bg-white border-b space-y-2 flex-shrink-0 z-20">
+            {/* 상단 검색 필터 바 */}
+            <div className="p-3 bg-white border-b space-y-2 flex-shrink-0 z-20 shadow-sm">
                 <div className="flex gap-2">
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 h-10 border rounded-lg px-2 text-sm font-bold" />
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 h-10 border border-gray-200 rounded-lg px-2 text-sm font-bold bg-white" />
                     <span className="text-gray-400 font-bold self-center">~</span>
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 h-10 border rounded-lg px-2 text-sm font-bold" />
+                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 h-10 border border-gray-200 rounded-lg px-2 text-sm font-bold bg-white" />
                 </div>
-                <div className="flex gap-2">
-                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="w-full h-10 border rounded-lg px-2 text-sm font-bold">
-                        <option value="all">전체 상태</option>
-                        <option value="0">대기 (0)</option>
-                        <option value="1">진행중 (1)</option>
-                        <option value="2">종료 (2)</option>
+                
+                {/* 행사 상태 필터 + 상품/바코드 통합 검색 */}
+                <div className="flex gap-2 items-stretch">
+                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="w-1/4 h-11 border border-gray-200 rounded-xl px-2 text-xs font-bold bg-white">
+                        <option value="all">전체</option>
+                        <option value="0">대기</option>
+                        <option value="1">진행</option>
+                        <option value="2">종료</option>
                     </select>
+
+                    <div className="relative flex-grow">
+                        <ProductSearchBar 
+                            id="event-main-search"
+                            searchTerm={searchTerm}
+                            onSearchTermChange={setSearchTerm}
+                            isSearching={isSearching}
+                            results={results}
+                            onSelectProduct={handleProductSelect}
+                            onScan={handleScan}
+                            isBoxUnit={false}
+                            onBoxUnitChange={() => {}}
+                            placeholder="상품명/바코드 검색"
+                            showBoxToggle={false}
+                        />
+                    </div>
                 </div>
             </div>
 
