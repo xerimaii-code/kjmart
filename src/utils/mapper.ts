@@ -30,26 +30,31 @@ export const formatDateFromSQL = (dateValue: any): string | undefined => {
     }
 };
 
-export const mapSqlResultToProduct = (p: any): Product => ({
-    barcode: sanitizeString(p.바코드 || p.barcode || ''),
-    name: sanitizeString(p.상품명 || p.descr || ''),
-    spec: sanitizeString(p.규격 || p.spec || '') || undefined,
-    costPrice: Number(p.매입가 ?? p.money0vat ?? 0),
-    sellingPrice: Number(p.판매가 ?? p.money1 ?? 0),
-    eventCostPrice: p.행사매입가 ? Number(p.행사매입가) : undefined,
-    salePrice: p.행사판매가 ? Number(p.행사판매가) : undefined,
-    saleName: sanitizeString(p.행사명 || p.salename) || undefined,
-    saleStartDate: formatDateFromSQL(p.행사시작일),
-    saleEndDate: formatDateFromSQL(p.행사종료일),
-    supplierName: sanitizeString(p.거래처명) || undefined,
-    lastModified: p.최종수정일 || undefined,
-    stockQuantity: p.재고수량 !== null && p.재고수량 !== undefined ? parseFloat(String(p.재고수량)) : undefined,
-    bomStatus: p['BOM여부'] || undefined,
-    comcode: sanitizeString(p.거래처코드 || p.comcode),
-    gubun1: sanitizeString(p.대분류 || p.gubun1),
-    gubun2: sanitizeString(p.중분류 || p.gubun2),
-    gubun3: sanitizeString(p.소분류 || p.gubun3),
-});
+export const mapSqlResultToProduct = (p: any): Product => {
+    // 재고 필드명 불일치 해결 (재고수량 또는 curjago 확인)
+    const stockVal = p.재고수량 !== undefined && p.재고수량 !== null ? p.재고수량 : p.curjago;
+    
+    return {
+        barcode: sanitizeString(p.바코드 || p.barcode || ''),
+        name: sanitizeString(p.상품명 || p.descr || ''),
+        spec: sanitizeString(p.규격 || p.spec || '') || undefined,
+        costPrice: Number(p.매입가 ?? p.money0vat ?? 0),
+        sellingPrice: Number(p.판매가 ?? p.money1 ?? 0),
+        eventCostPrice: p.행사매입가 ? Number(p.행사매입가) : undefined,
+        salePrice: p.행사판매가 ? Number(p.행사판매가) : undefined,
+        saleName: sanitizeString(p.행사명 || p.salename) || undefined,
+        saleStartDate: formatDateFromSQL(p.행사시작일),
+        saleEndDate: formatDateFromSQL(p.행사종료일),
+        supplierName: sanitizeString(p.거래처명) || undefined,
+        lastModified: p.최종수정일 || undefined,
+        stockQuantity: stockVal !== null && stockVal !== undefined ? parseFloat(String(stockVal)) : undefined,
+        bomStatus: p['BOM여부'] || undefined,
+        comcode: sanitizeString(p.거래처코드 || p.comcode),
+        gubun1: sanitizeString(p.대분류 || p.gubun1),
+        gubun2: sanitizeString(p.중분류 || p.gubun2),
+        gubun3: sanitizeString(p.소분류 || p.gubun3),
+    };
+};
 
 export const mapSqlResultToCustomer = (c: any): Customer => ({
     comcode: sanitizeString(c.거래처코드 || c.comcode || ''),

@@ -98,7 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             finalQuery = "SELECT comcode, comname FROM comp WITH(NOLOCK) WHERE isuse <> '0'";
         } else if (type === 'syncProductsIncrementally') {
             request.input('lastDate', sql.VarChar, lastSyncDate || '1900-01-01');
-            finalQuery = "SELECT barcode, descr, spec, money0vat, money1, comcode, gubun1, gubun2, gubun3, curjago, isuse, ispack, upday1 FROM parts WITH(NOLOCK) WHERE upday1 >= @lastDate";
+            finalQuery = "SELECT barcode, descr, spec, money0vat, money1, comcode, gubun1, gubun2, gubun3, curjago AS [재고수량], isuse, ispack, upday1 FROM parts WITH(NOLOCK) WHERE upday1 >= @lastDate";
         } else if (type === 'searchProductsOnline' || type === 'searchProductsForEdit') {
             const kw = searchTerm || '';
             request.input('kw', sql.NVarChar, kw);
