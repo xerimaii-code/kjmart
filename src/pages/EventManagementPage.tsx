@@ -320,6 +320,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         if (isActive) handleSearch(true);
     }, [isActive, handleSearch]);
 
+    // fetchEventDetails가 mappedResult를 반환하도록 수정하여 jumpToEventByBarcode에서 사용할 수 있게 함
     const fetchEventDetails = useCallback(async (junno: string) => {
         setIsDetailLoading(true);
         try {
@@ -348,14 +349,16 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             });
 
             setDraftItems(mappedResult);
+            return mappedResult; // 결과값 반환 추가
         } catch (e: any) {
             showAlert('상세 내역 로드 실패: ' + e.message);
+            return null;
         } finally {
             setIsDetailLoading(false);
         }
     }, [userQueries, showAlert]);
 
-    // [핵심 기능] 특정 상품 바코드로 행사를 찾아 상세 화면으로 이동
+    // [핵심 기능] 특정 상품 바코드로 행사를 찾아 상세 화면으로 이동 및 자동 수정 모달 호출
     const jumpToEventByBarcode = async (barcode: string) => {
         setIsLoading(true);
         try {
@@ -374,8 +377,18 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 };
                 setSelectedEvent(mappedEvent);
                 setDetailModalOpen(true);
-                fetchEventDetails(mappedEvent.junno);
-                showToast(`'${mappedEvent.salename}' 행사로 이동했습니다.`, 'success');
+                
+                // 상세 목록을 불러온 후 해당 상품을 찾아 editingProduct 상태에 설정
+                const items = await fetchEventDetails(mappedEvent.junno);
+                if (items && items.length > 0) {
+                    const targetItem = items.find(i => String(i.barcode).trim() === barcode.trim());
+                    if (targetItem) {
+                        setEditingProduct(targetItem);
+                        showToast(`'${targetItem.descr}' 상품 수정을 시작합니다.`, 'success');
+                    } else {
+                        showToast(`'${mappedEvent.salename}' 행사로 이동했습니다.`, 'success');
+                    }
+                }
             } else {
                 showAlert('해당 상품이 포함된 행사를 찾을 수 없습니다.');
             }
