@@ -35,6 +35,91 @@ const QUERY_TEMPLATES = [
         name: "행사 목록 조회 (진행중)",
         description: "현재 진행 중인 모든 행사 리스트를 조회합니다.",
         sql: "SELECT junno, salename, startday, endday, itemcount FROM sale_mast WITH(NOLOCK) WHERE isappl = '1' ORDER BY startday DESC"
+    },
+    {
+        name: "고객_기간별매출",
+        description: "고객별 구매 이력을 마감 전/후 데이터 모두 포함하여 조회합니다.",
+        sql: `-- [고객 구매 이력] 마감 전/후 데이터 100% 통합 조회
+SET NOCOUNT ON;
+
+DECLARE @p_mem   VARCHAR(20);
+DECLARE @p_s     VARCHAR(10);
+DECLARE @p_e     VARCHAR(10);
+DECLARE @d_s     VARCHAR(8);
+DECLARE @d_e     VARCHAR(8);
+
+SET @p_mem = @target;
+SET @p_s   = @startDate;
+SET @p_e   = @endDate;
+
+SET @d_s = REPLACE(@p_s, '-', '');
+SET @d_e = REPLACE(@p_e, '-', '');
+
+DECLARE @iterDate   DATETIME;
+DECLARE @finalDate  DATETIME;
+DECLARE @yymm       CHAR(4);
+DECLARE @tblName    NVARCHAR(50);
+DECLARE @d_sql      NVARCHAR(MAX);
+
+IF OBJECT_ID('tempdb..#SaleList') IS NOT NULL DROP TABLE #SaleList;
+CREATE TABLE #SaleList (
+    posno VARCHAR(10), day1 VARCHAR(10), junno VARCHAR(20), saletime VARCHAR(10),
+    tmamoney1 MONEY, tbamoney1 MONEY, cdmoney1 MONEY, pointuse MONEY, isbaedal CHAR(1)
+);
+
+-- 기본 outm 테이블 조회
+IF OBJECT_ID('outm', 'U') IS NOT NULL
+BEGIN
+    INSERT INTO #SaleList
+    SELECT posno, day1, junno, saletime, tmamoney1, tbamoney1, cdmoney1, pointuse, isbaedal
+    FROM outm WITH (NOLOCK)
+    WHERE (memberno LIKE '%' + @p_mem + '%')
+      AND (day1 BETWEEN @p_s AND @p_e OR day1 BETWEEN @d_s AND @d_e);
+END
+
+-- 월별 테이블 순환 조회
+SET @iterDate  = CONVERT(DATETIME, @p_s);
+SET @finalDate = CONVERT(DATETIME, @p_e);
+SET @iterDate = DATEADD(MONTH, DATEDIFF(MONTH, 0, @iterDate), 0);
+SET @finalDate = DATEADD(MONTH, DATEDIFF(MONTH, 0, @finalDate), 0);
+
+WHILE @iterDate <= @finalDate
+BEGIN
+    SET @yymm = SUBSTRING(CONVERT(VARCHAR(8), @iterDate, 112), 3, 4);
+    SET @tblName = 'outm_' + @yymm;
+    
+    IF OBJECT_ID(@tblName, 'U') IS NOT NULL
+    BEGIN
+        SET @d_sql = N'INSERT INTO #SaleList
+                       SELECT 
+                           posno, day1, junno, saletime
+                         , ISNULL(tmamoney1,0), ISNULL(tbamoney1,0)
+                         , ISNULL(cdmoney1,0), ISNULL(pointuse,0), isbaedal
+                       FROM ' + QUOTENAME(@tblName) + N' WITH (NOLOCK)
+                       WHERE (memberno LIKE ''%'' + @m + ''%'')
+                         AND (day1 BETWEEN @s AND @e OR day1 BETWEEN @ds AND @de)';
+        
+        EXEC sp_executesql @d_sql, 
+            N'@m VARCHAR(20), @s VARCHAR(10), @e VARCHAR(10), @ds VARCHAR(8), @de VARCHAR(8)', 
+            @m=@p_mem, @s=@p_s, @e=@p_e, @ds=@d_s, @de=@d_e;
+    END
+    SET @iterDate = DATEADD(MONTH, 1, @iterDate);
+END
+
+-- 결과 출력
+SELECT DISTINCT
+      day1 AS [판매일]
+    , posno AS [포스]
+    , REPLACE(CONVERT(VARCHAR, CAST((ISNULL(tmamoney1,0) - ISNULL(tbamoney1,0)) AS MONEY), 1), '.00', '') AS [순매출]
+    , REPLACE(CONVERT(VARCHAR, CAST(ISNULL(cdmoney1,0) AS MONEY), 1), '.00', '') AS [카드]
+    , REPLACE(CONVERT(VARCHAR, CAST(ISNULL(pointuse,0) AS MONEY), 1), '.00', '') AS [포인트]
+    , junno AS [전표]
+    , saletime AS [시간]
+    , CASE WHEN isbaedal = 'Y' THEN '배달' ELSE '-' END AS [배달]
+FROM #SaleList
+ORDER BY day1 DESC, saletime DESC;
+
+DROP TABLE #SaleList;`
     }
 ];
 

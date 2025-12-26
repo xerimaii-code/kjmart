@@ -119,12 +119,13 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
         const userQuery = userQueries.find(q => q.name === targetQueryName);
         
         if (!userQuery) {
-            showToast(`'${targetQueryName}' 쿼리가 없습니다.\n[설정 > SQL Runner]에서 쿼리를 추가해주세요.`, 'error');
+            showToast(`'${targetQueryName}' 쿼리가 등록되지 않았습니다.\n[설정 > SQL Runner > 추천]에서 쿼리를 추가해주세요.`, 'error');
             setDetailStatus('idle');
             return;
         }
         
         try {
+            // Case-insensitive replace for parameters used in the template
             let sql = userQuery.query
                 .replace(/@startDate\b/gi, `'${start.replace(/'/g, "''")}'`)
                 .replace(/@endDate\b/gi, `'${end.replace(/'/g, "''")}'`)
