@@ -129,7 +129,18 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const startCamera = useCallback(async () => {
         if (!videoRef.current || isClosingRef.current) return;
         try {
-            stopCamera(); 
+            // [Safety Check] If a stream is already active, stop it and wait for hardware release
+            if (mediaStreamRef.current) {
+                stopCamera();
+                // Wait 250ms for the OS/driver to fully release the camera resource
+                await new Promise(resolve => setTimeout(resolve, 250));
+            } else {
+                stopCamera();
+            }
+
+            // Check mounting status again after delay
+            if (!isMountedRef.current || isClosingRef.current) return;
+
             const constraints = {
                 video: {
                     deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
