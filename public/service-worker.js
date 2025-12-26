@@ -2,7 +2,7 @@
 // public/service-worker.js
 
 // Define cache names for better management and versioning
-const CACHE_VERSION = 'v1.36'; // Version bumped
+const CACHE_VERSION = 'v1.37'; // Version bumped
 const APP_SHELL_CACHE_NAME = `kjmart-app-shell-${CACHE_VERSION}`; // For core app files
 const STATIC_ASSETS_CACHE_NAME = `kjmart-static-assets-${CACHE_VERSION}`; // For fonts, styles from CDNs
 
@@ -102,8 +102,9 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // Strategy for Google Fonts, Tailwind, and other CDNs: Stale-While-Revalidate
-  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com' || url.hostname === 'cdn.tailwindcss.com' || url.hostname === 'aistudiocdn.com') {
+  // Strategy for Google Fonts, Tailwind, ZXing (jsdelivr), and other CDNs: Stale-While-Revalidate
+  // Added 'cdn.jsdelivr.net' to cache the scanner library offline
+  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com' || url.hostname === 'cdn.tailwindcss.com' || url.hostname === 'aistudiocdn.com' || url.hostname === 'cdn.jsdelivr.net') {
     event.respondWith(staleWhileRevalidate(request, STATIC_ASSETS_CACHE_NAME));
     return;
   }
