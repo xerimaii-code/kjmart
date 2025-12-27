@@ -1,26 +1,17 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useScanner, useAlert } from '../context/AppContext';
-import { loadScript } from '../services/dataService';
-import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon, ReturnBoxIcon } from './Icons';
+import { SpinnerIcon, BarcodeScannerIcon, XMarkIcon } from './Icons';
+import { Capacitor } from '@capacitor/core';
+import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import './ScannerModal.css';
 
-// Assuming ZXing is loaded from a CDN and available on the window object
-declare const ZXing: any;
-declare const BarcodeDetector: any; // Standard API definition
-
-const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
-
-// --- Global Audio Context Singleton ---
 let sharedAudioCtx: AudioContext | null = null;
 
 const getAudioContext = () => {
     if (!sharedAudioCtx) {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContextClass) {
-            sharedAudioCtx = new AudioContextClass();
-        }
+        if (AudioContextClass) sharedAudioCtx = new AudioContextClass();
     }
     return sharedAudioCtx;
 };
@@ -35,472 +26,185 @@ interface ScannerModalProps {
 
 const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSuccess, continuous = false, isPaused = false }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(document.createElement('canvas')); 
     const guideBoxRef = useRef<HTMLDivElement>(null); 
-    
-    // Logic Refs
-    const mediaStreamRef = useRef<MediaStream | null>(null);
-    const scanIntervalRef = useRef<any>(null); 
     const isHandlingResult = useRef(false);
-    const detectorRef = useRef<any>(null); 
-    const isClosingRef = useRef(false); 
-    const isMountedRef = useRef(false);
-    const longPressTimer = useRef<any>(null);
+    const mlKitListener = useRef<any>(null);
 
     const { selectedCameraId, scanSettings } = useScanner();
-    const { showAlert, showToast } = useAlert();
+    const { showToast } = useAlert();
     
-    // State
-    const [isLibraryLoading, setIsLibraryLoading] = useState(true);
-    const [isRendered, setIsRendered] = useState(false);
-    const [isNativeSupported, setIsNativeSupported] = useState(false);
-    const [isStreamReady, setIsStreamReady] = useState(false);
     const [isScanningActive, setIsScanningActive] = useState(false);
-    
-    // Recovery State
-    const [restartToken, setRestartToken] = useState(0);
     const [cameraError, setCameraError] = useState<string | null>(null);
 
-    const unlockAudio = useCallback(() => {
-        const ctx = getAudioContext();
-        if (ctx && ctx.state === 'suspended') {
-            ctx.resume().catch((e) => console.warn("Audio resume failed", e));
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!isOpen) return;
-        unlockAudio();
-        const handleInteraction = () => unlockAudio();
-        window.addEventListener('touchstart', handleInteraction, { passive: true });
-        window.addEventListener('click', handleInteraction);
-        return () => {
-            window.removeEventListener('touchstart', handleInteraction);
-            window.removeEventListener('click', handleInteraction);
-        };
-    }, [isOpen, unlockAudio]);
+    const isAppNative = Capacitor.isNativePlatform();
 
     const playBeep = useCallback(() => {
         if (!scanSettings.soundOnScan) return;
         const ctx = getAudioContext();
         if (!ctx) return;
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-
         try {
             const oscillator = ctx.createOscillator();
             const gainNode = ctx.createGain();
             oscillator.connect(gainNode);
             gainNode.connect(ctx.destination);
-
             oscillator.type = 'square';
-            const now = ctx.currentTime;
-            oscillator.frequency.setValueAtTime(3000, now); 
-
-            gainNode.gain.setValueAtTime(0, now);
-            gainNode.gain.linearRampToValueAtTime(1.0, now + 0.002);
-            gainNode.gain.setValueAtTime(1.0, now + 0.08);
-            gainNode.gain.linearRampToValueAtTime(0, now + 0.12);
-
-            oscillator.start(now);
-            oscillator.stop(now + 0.15);
-            oscillator.onended = () => {
-                oscillator.disconnect();
-                gainNode.disconnect();
-            };
-        } catch (e) { console.error("Beep failed:", e); }
+            oscillator.frequency.setValueAtTime(3000, ctx.currentTime); 
+            gainNode.gain.setValueAtTime(0, ctx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(1.0, ctx.currentTime + 0.002);
+            gainNode.gain.setValueAtTime(1.0, ctx.currentTime + 0.08);
+            gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.12);
+            oscillator.start(); oscillator.stop(ctx.currentTime + 0.15);
+        } catch (e) {}
     }, [scanSettings.soundOnScan]);
 
-    const stopDetection = useCallback(() => {
-        if (scanIntervalRef.current) {
-            clearInterval(scanIntervalRef.current);
-            scanIntervalRef.current = null;
+    const stopDetection = useCallback(async () => {
+        if (isAppNative) {
+            try {
+                if (mlKitListener.current) {
+                    await mlKitListener.current.remove();
+                    mlKitListener.current = null;
+                }
+                await BarcodeScanner.stopScan();
+                document.body.classList.remove('scanner-active');
+            } catch (e) {}
         }
-    }, []);
+    }, [isAppNative]);
 
     const stopCamera = useCallback(() => {
         if (videoRef.current) {
             videoRef.current.pause();
             videoRef.current.srcObject = null;
-            videoRef.current.load();
         }
-        if (mediaStreamRef.current) {
-            mediaStreamRef.current.getTracks().forEach(track => track.stop());
-            mediaStreamRef.current = null;
-        }
-        if (isMountedRef.current) setIsStreamReady(false);
     }, []);
 
     const startCamera = useCallback(async () => {
-        if (!videoRef.current || isClosingRef.current) return;
-        
-        setCameraError(null);
-        setIsStreamReady(false); // Reset ready state to hide video element (prevent black screen)
-
-        try {
-            // [Safety Check] Stop existing stream first
-            stopCamera();
-            
-            // Wait briefly for hardware release
-            await new Promise(resolve => setTimeout(resolve, 200));
-
-            // Check mounting status again
-            if (!isMountedRef.current || isClosingRef.current) return;
-
-            const constraints = {
-                video: {
-                    deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
-                    facingMode: 'environment',
-                    width: { ideal: 1280 }, 
-                    height: { ideal: 720 } 
+        if (isAppNative) {
+            try {
+                const status = await BarcodeScanner.requestPermissions();
+                if (status.camera !== 'granted') {
+                    setCameraError("카메라 권한이 필요합니다.");
+                    return;
                 }
-            };
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            
-            if (!isMountedRef.current || isClosingRef.current) { 
-                stream.getTracks().forEach(t => t.stop()); 
-                return; 
+
+                document.body.classList.add('scanner-active');
+                await BarcodeScanner.startScan(); 
+                
+                if (mlKitListener.current) await mlKitListener.current.remove();
+                mlKitListener.current = await BarcodeScanner.addListener('barcodeScanned', async (result) => {
+                    // 수동 버튼 모드일 때, 버튼이 활성화된 상태가 아니면 무시
+                    if (scanSettings.useScannerButton && !isScanningActive) return;
+                    handleSuccess(result.barcode.rawValue);
+                });
+            } catch (err: any) {
+                setCameraError("카메라 시작 실패: " + err.message);
+                document.body.classList.remove('scanner-active');
             }
-            
-            mediaStreamRef.current = stream;
-            
+            return;
+        }
+
+        if (!videoRef.current) return;
+        setCameraError(null);
+        try {
+            stopCamera();
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined, facingMode: 'environment' }
+            });
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
-                videoRef.current.setAttribute('playsinline', 'true'); 
-                
-                // Use a promise race to detect timeout
-                const playPromise = videoRef.current.play();
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000));
-
-                await Promise.race([playPromise, timeoutPromise]);
-                
-                // If we reach here, play started successfully
-                setIsStreamReady(true);
+                await videoRef.current.play();
             }
-        } catch (err: any) {
-            console.error("Camera start failed:", err);
-            if (isMountedRef.current && !isClosingRef.current) {
-                setCameraError("카메라를 시작할 수 없습니다. 권한을 확인하거나 다시 시도해주세요.");
-                setIsStreamReady(false);
-            }
+        } catch (err) {
+            setCameraError("카메라 권한을 확인해주세요.");
         }
-    }, [selectedCameraId, stopCamera]);
-
-    // Handle Visibility Changes (Background/Foreground)
-    useEffect(() => {
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                // App came to foreground: Force a complete restart of the camera flow
-                console.log("App resumed: Restarting camera...");
-                unlockAudio();
-                setRestartToken(prev => prev + 1);
-            } else {
-                // App went to background: Clean up aggressively
-                console.log("App suspended: Stopping camera...");
-                stopDetection();
-                stopCamera();
-                setIsScanningActive(false);
-            }
-        };
-
-        const handlePageShow = (event: PageTransitionEvent) => {
-            if (event.persisted) {
-                 // Page was restored from bfcache
-                 setRestartToken(prev => prev + 1);
-            }
-        };
-
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-        window.addEventListener("pageshow", handlePageShow);
-
-        return () => {
-            document.removeEventListener("visibilitychange", handleVisibilityChange);
-            window.removeEventListener("pageshow", handlePageShow);
-        };
-    }, [stopCamera, stopDetection, unlockAudio]);
-
+    }, [selectedCameraId, stopCamera, isAppNative, scanSettings.useScannerButton, isScanningActive]);
 
     const handleSuccess = useCallback((barcode: string) => {
         if (isHandlingResult.current) return;
         isHandlingResult.current = true;
-        stopDetection();
-        setIsScanningActive(false); 
         playBeep();
         
         if (continuous) {
             onScanSuccess(barcode);
-            setTimeout(() => { 
-                if (isMountedRef.current && !isPaused && !isClosingRef.current) {
-                    isHandlingResult.current = false; 
-                    if (!scanSettings.useScannerButton) {
-                        setIsScanningActive(true);
-                    }
-                }
-            }, 1200);
+            setTimeout(() => { isHandlingResult.current = false; }, 1200);
         } else {
+            stopDetection(); 
             stopCamera();
-            setTimeout(() => {
-                if (isMountedRef.current) {
-                    onScanSuccess(barcode);
-                    onClose();
-                }
-            }, 100);
+            onScanSuccess(barcode);
+            onClose();
         }
-    }, [playBeep, onScanSuccess, onClose, stopDetection, stopCamera, continuous, isPaused, scanSettings.useScannerButton]);
+    }, [playBeep, onScanSuccess, onClose, stopDetection, stopCamera, continuous]);
 
-    const handleManualClose = (e?: React.SyntheticEvent | React.TouchEvent) => {
-        if (e) { e.preventDefault(); e.stopPropagation(); }
-        if (isClosingRef.current) return;
-        isClosingRef.current = true;
-        setIsRendered(false); 
-        stopDetection();
-        setIsScanningActive(false);
-        isHandlingResult.current = false;
-        stopCamera();
-        setTimeout(() => onClose(), 150); 
-    };
-
-    useEffect(() => {
-        if (isPaused) {
-            stopDetection();
-            setIsScanningActive(false);
-        } else {
-            if (!isHandlingResult.current) {
-                if (!scanSettings.useScannerButton && isStreamReady && !isLibraryLoading) {
-                    setIsScanningActive(true);
-                } else {
-                    setIsScanningActive(false);
-                }
-            }
-        }
-    }, [isPaused, scanSettings.useScannerButton, isStreamReady, isLibraryLoading, stopDetection]);
-
-    // Initial Mount & Library Load
-    useEffect(() => {
-        isMountedRef.current = true;
-        if (isOpen) {
-            isClosingRef.current = false;
-            const timer = setTimeout(() => setIsRendered(true), 10);
-            isHandlingResult.current = false;
-            unlockAudio();
-
-            if (scanSettings.useScannerButton) {
-                setIsScanningActive(false);
-            }
-
-            if ('BarcodeDetector' in window) {
-                BarcodeDetector.getSupportedFormats().then((supportedFormats: string[]) => {
-                    if (!isMountedRef.current) return;
-                    const desiredFormats = ['ean_13', 'ean_8', 'qr_code', 'code_128', 'code_39', 'itf', 'upc_a', 'upc_e'];
-                    const validFormats = desiredFormats.filter(f => supportedFormats.includes(f));
-                    if (validFormats.length > 0) {
-                        setIsNativeSupported(true);
-                        setIsLibraryLoading(false);
-                        if (!detectorRef.current) detectorRef.current = new BarcodeDetector({ formats: validFormats });
-                    } else loadZXing();
-                }).catch(() => { if (isMountedRef.current) loadZXing(); });
-            } else loadZXing();
-            return () => clearTimeout(timer);
-        } else {
-            setIsRendered(false);
-            setIsStreamReady(false);
-            stopCamera();
-            stopDetection();
-        }
-        return () => { isMountedRef.current = false; stopCamera(); stopDetection(); }
-    }, [isOpen, stopDetection, unlockAudio, stopCamera, scanSettings.useScannerButton]);
-
-    const loadZXing = () => {
-        setIsLibraryLoading(true);
-        loadScript(ZXING_CDN).then(() => {
-            if (!isMountedRef.current) return;
-            setIsLibraryLoading(false);
-            if (!detectorRef.current) detectorRef.current = new ZXing.BrowserMultiFormatReader();
-        }).catch(err => { if (isMountedRef.current) setIsLibraryLoading(false); });
-    };
-
-    // Camera Start Effect (Triggered by open or restartToken)
-    useEffect(() => { 
-        if (isOpen) startCamera(); 
-    }, [isOpen, startCamera, restartToken]); // restartToken triggers this on resume
-
-    const cropVideoFrame = (video: HTMLVideoElement, guide: HTMLElement, canvas: HTMLCanvasElement) => {
-        if (!video || !guide || !canvas || video.videoWidth === 0 || video.videoHeight === 0) return null;
-        try {
-            const videoRect = video.getBoundingClientRect();
-            const guideRect = guide.getBoundingClientRect();
-            if (videoRect.width === 0 || videoRect.height === 0) return null;
-            const scaleX = video.videoWidth / videoRect.width;
-            const scaleY = video.videoHeight / videoRect.height;
-            const scale = Math.min(scaleX, scaleY);
-            const sourceWidth = guideRect.width * scale;
-            const sourceHeight = guideRect.height * scale;
-            canvas.width = Math.floor(sourceWidth);
-            canvas.height = Math.floor(sourceHeight);
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            if (ctx) {
-                const offsetX = (videoRect.width * scale - video.videoWidth) / 2;
-                const offsetY = (videoRect.height * scale - video.videoHeight) / 2;
-                const sourceX = ((guideRect.left - videoRect.left) * scale) - offsetX;
-                const sourceY = ((guideRect.top - videoRect.top) * scale) - offsetY;
-                ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-                return canvas;
-            }
-        } catch (e) { }
-        return null;
-    };
-
-    useEffect(() => {
-        if (isScanningActive && isStreamReady && !isHandlingResult.current && !isLibraryLoading && !isPaused) startDetection();
-        else stopDetection();
-        return () => stopDetection();
-    }, [isScanningActive, isStreamReady, isNativeSupported, isLibraryLoading, stopDetection, isPaused]);
-
-    const startDetection = async () => {
+    const handleManualClose = () => {
         stopDetection(); 
-        if (!detectorRef.current) return;
-        scanIntervalRef.current = setInterval(async () => {
-            if (!videoRef.current || !guideBoxRef.current || !isScanningActive || !isMountedRef.current || isPaused) return;
-            try {
-                const croppedCanvas = cropVideoFrame(videoRef.current, guideBoxRef.current, canvasRef.current);
-                if (!croppedCanvas) return;
-                if (isNativeSupported) {
-                    const barcodes = await detectorRef.current.detect(croppedCanvas);
-                    if (barcodes.length > 0) handleSuccess(barcodes[0].rawValue);
-                } else {
-                    try {
-                        const result = await detectorRef.current.decodeFromImage(undefined, croppedCanvas.toDataURL());
-                        if (result) handleSuccess(result.getText());
-                    } catch (e) { }
-                }
-            } catch (e) { }
-        }, 200);
+        stopCamera();
+        onClose();
     };
 
-    // 수동 스캔 버튼 제어 로직
-    const handleScanButtonPress = (e: React.SyntheticEvent | React.PointerEvent) => {
-        e.preventDefault(); e.stopPropagation(); unlockAudio();
-        
-        longPressTimer.current = setTimeout(() => {
-            if (isScanningActive) {
-                setIsScanningActive(false);
-                stopDetection();
-                showToast("스캔 중지됨", "success");
-            }
-            longPressTimer.current = null;
-        }, 600);
-
-        if (isScanningActive) {
-            stopDetection();
-            setTimeout(() => {
-                if (isMountedRef.current && !isPaused && !isHandlingResult.current) {
-                    startDetection();
-                }
-            }, 50);
-        } else {
-            setIsScanningActive(true);
-        }
-    };
-
-    const handleScanButtonRelease = (e: React.SyntheticEvent) => {
-        if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
-        }
-    };
-
-    const handleRetry = (e: React.MouseEvent) => {
+    const handleScanToggle = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        setRestartToken(prev => prev + 1);
-    }
+        setIsScanningActive(prev => !prev);
+        if (!isScanningActive) {
+            showToast("스캔 활성화", "success");
+        }
+    };
+
+    useEffect(() => {
+        if (isOpen) {
+            startCamera();
+        } else {
+            stopDetection(); 
+            stopCamera();
+        }
+    }, [isOpen, startCamera, stopDetection, stopCamera]);
 
     if (!isOpen) return null;
 
     return createPortal(
-        <div className={`fixed inset-0 bg-black z-[130] flex flex-col items-center justify-center transition-opacity duration-150 ease-out ${isRendered ? 'opacity-100' : 'opacity-0'}`}>
-            {/* 1. Video Element: opacity-0 until ready to prevent black screen */}
-            <video 
-                ref={videoRef} 
-                className={`absolute top-0 left-0 w-full h-full object-cover transition-opacity duration-300 ${isStreamReady ? 'opacity-100' : 'opacity-0'}`} 
-                playsInline 
-                muted 
-                disablePictureInPicture 
-            />
+        <div className={`fixed inset-0 z-[200] flex flex-col items-center justify-center transition-opacity duration-150 ${isAppNative ? 'bg-transparent' : 'bg-black'}`}>
+            {!isAppNative && <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" playsInline muted />}
             
-            {/* 2. Dim Overlay for Paused State */}
-            <div className={`absolute inset-0 pointer-events-none transition-all duration-300 ${isPaused ? 'scanner-overlay-paused' : ''}`}></div>
+            <div className={`absolute inset-0 pointer-events-none transition-all duration-300 ${(isPaused || (scanSettings.useScannerButton && !isScanningActive)) ? 'scanner-overlay-paused' : ''}`}></div>
             
-            {/* 3. Close Button: Always Visible and High Z-Index */}
-            <button onClick={handleManualClose} className={`absolute top-4 right-4 z-[100] p-4 bg-black/40 text-white/90 rounded-full backdrop-blur-md border border-white/10 transition-colors shadow-lg active:scale-95 touch-manipulation ${isPaused ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{ top: 'max(1rem, env(safe-area-inset-top) + 1rem)', right: '1rem' }} aria-label="닫기"><XCircleIcon className="w-8 h-8" /></button>
-            
-            {/* 4. Center UI: Guide box and Status Messages */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
-                {/* Error State */}
-                {cameraError && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/80 z-20 pointer-events-auto p-6 text-center">
-                        <ReturnBoxIcon className="w-12 h-12 text-red-500 mb-4" />
-                        <p className="text-white font-bold text-lg mb-2">카메라 오류</p>
-                        <p className="text-gray-300 text-sm mb-6">{cameraError}</p>
-                        <button onClick={handleRetry} className="px-6 py-3 bg-white text-gray-900 rounded-xl font-bold active:scale-95 transition-transform">
-                            다시 시도
+            <button onClick={handleManualClose} className="absolute top-10 right-5 z-[210] p-4 bg-black/40 text-white rounded-full backdrop-blur-md border border-white/10 active:scale-95">
+                <XMarkIcon className="w-8 h-8" />
+            </button>
+
+            <div className="relative z-10 w-[85%] max-w-[26rem] flex flex-col items-center pointer-events-none">
+                <div ref={guideBoxRef} className={`h-[55px] w-full rounded-2xl border-2 transition-all duration-300 ${isScanningActive || (isAppNative && !scanSettings.useScannerButton) ? 'scanner-box-active' : 'scanner-box-idle'}`}></div>
+                
+                <p className="text-white text-center mt-8 font-extrabold text-shadow bg-black/40 px-6 py-2.5 rounded-full backdrop-blur-sm border border-white/10">
+                    {scanSettings.useScannerButton && !isScanningActive ? "하단 버튼을 눌러 스캔을 시작하세요" : "가이드라인 안에 바코드를 맞추세요"}
+                </p>
+
+                {scanSettings.useScannerButton && !isPaused && (
+                    <div className="w-full mt-16 pointer-events-auto">
+                        <button 
+                            onClick={handleScanToggle}
+                            className={`w-full h-20 rounded-2xl flex items-center justify-center gap-4 shadow-2xl active:scale-95 transition-all border-4 ${isScanningActive ? 'bg-red-600 border-red-400 text-white' : 'bg-white border-blue-600 text-blue-700'}`}
+                        >
+                            {isScanningActive ? (
+                                <>
+                                    <div className="w-4 h-4 bg-white rounded-full animate-ping"></div>
+                                    <span className="font-black text-2xl">SCANNING...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <BarcodeScannerIcon className="w-10 h-10" />
+                                    <span className="font-black text-2xl">START SCAN</span>
+                                </>
+                            )}
                         </button>
                     </div>
                 )}
-
-                {/* Loading State (Library or Stream) */}
-                {((isLibraryLoading && !isNativeSupported) || (!isStreamReady && !cameraError)) && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/20 z-20">
-                        <SpinnerIcon className="w-10 h-10 text-white mb-3" />
-                        <p className="text-white font-bold text-shadow">
-                            {isLibraryLoading ? "엔진 로딩 중..." : "카메라 준비 중..."}
-                        </p>
-                    </div>
-                )}
-
-                {/* Active Scan UI */}
-                <div className={`mb-6 text-center px-4 transition-opacity duration-300 ${isPaused || cameraError ? 'opacity-0' : 'opacity-100'}`}>
-                    <p className="text-white text-sm font-bold text-shadow bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm">
-                        {isScanningActive ? "가이드라인 안에 바코드를 맞추세요" : (scanSettings.useScannerButton ? "버튼을 눌러 스캔을 시작하세요" : "준비 중...")}
-                    </p>
-                </div>
-                
-                <div className="w-[80%] max-w-[24rem] flex flex-col items-center">
-                    <div ref={guideBoxRef} className={`relative h-[45px] w-full rounded-t-xl transition-all duration-300 ${isPaused ? 'border-2 border-white/10' : (isScanningActive ? 'scanner-box-active' : 'scanner-box-idle')}`} />
-                    
-                    {/* Manual Scan Button */}
-                    {scanSettings.useScannerButton && !isPaused && isStreamReady && (
-                        <div className="w-full pointer-events-auto flex flex-col items-center">
-                            <button 
-                                onPointerDown={handleScanButtonPress}
-                                onPointerUp={handleScanButtonRelease}
-                                onPointerLeave={handleScanButtonRelease}
-                                onContextMenu={(e) => e.preventDefault()}
-                                className={`w-full h-[68px] mt-1 rounded-b-xl flex items-center justify-center backdrop-blur-md shadow-2xl active:scale-[0.98] transition-all border border-white/20 ${isScanningActive ? 'bg-indigo-600/90 text-white' : 'bg-white/90 text-gray-700'}`}
-                            >
-                                <div className="flex items-center gap-3">
-                                    {isScanningActive ? (
-                                        <>
-                                            <div className="w-6 h-6 bg-red-500 rounded-md animate-pulse"></div>
-                                            <span className="font-black text-xl tracking-tight uppercase">Scanning...</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <BarcodeScannerIcon className="w-8 h-8" />
-                                            <span className="font-black text-xl tracking-tight uppercase">Touch to Scan</span>
-                                        </>
-                                    )}
-                                </div>
-                            </button>
-                            <div className="mt-4 flex flex-col items-center gap-1 opacity-60">
-                                <p className="text-white text-[11px] font-bold text-shadow uppercase tracking-widest bg-black/30 px-3 py-1 rounded-full border border-white/10 flex items-center gap-2">
-                                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-ping"></span>
-                                    팁: 터치 시 초점 재조정 / 길게 누르면 중지
-                                </p>
-                            </div>
-                        </div>
-                    )}
-                </div>
             </div>
+
+            {cameraError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/95 z-[220] p-8 text-center pointer-events-auto">
+                    <p className="text-white font-bold text-lg mb-6">{cameraError}</p>
+                    <button onClick={startCamera} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-black shadow-lg active:scale-95">다시 시도</button>
+                </div>
+            )}
         </div>,
         document.body
     );

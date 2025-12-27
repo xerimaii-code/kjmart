@@ -1,11 +1,9 @@
-
 import React, { useState, lazy, Suspense, useMemo, useEffect } from 'react';
 import { AppProvider, useModals, useScanner, useSyncState, useDataActions, useAlert, useMiscUI } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import { SpinnerIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
-import { exportToXLS, loadScript } from './services/dataService';
 import AddItemModal from './components/AddItemModal';
 import EditItemModal from './components/EditItemModal';
 import { IS_DEVELOPER_MODE } from './config';
@@ -16,9 +14,6 @@ const MainView = lazy(() => import('./pages/MainView'));
 const OrderDetailModal = lazy(() => import('./components/OrderDetailModal') as Promise<{ default: React.ComponentType<any> }>);
 const ScannerModal = lazy(() => import('./components/ScannerModal'));
 const ClearHistoryModal = lazy(() => import('./components/ClearHistoryModal'));
-
-
-const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
 
 // Fallback UI for suspense
 const PageSuspenseFallback: React.FC = () => (
@@ -187,9 +182,6 @@ const App: React.FC = () => {
     const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
     useEffect(() => {
-        // Preload scanner library for faster modal opening.
-        loadScript(ZXING_CDN).catch(err => console.warn("Failed to preload scanner library:", err));
-
         // Register the service worker to enable PWA functionality (offline caching).
         const isPreview = window.location.hostname.includes('usercontent.goog');
         

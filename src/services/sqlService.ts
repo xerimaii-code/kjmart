@@ -1,8 +1,10 @@
-
-// src/services/sqlService.ts
 import { DbSchema } from './schemaService';
+import { Capacitor } from '@capacitor/core';
 
-const API_ENDPOINT = '/api/sql';
+// [중요] 안드로이드 APK에서는 상대 경로(/api/sql)가 작동하지 않으므로 Vercel 도메인을 명시합니다.
+const PROD_API_URL = 'https://kjmart.vercel.app/api/sql'; 
+const API_ENDPOINT = Capacitor.isNativePlatform() ? PROD_API_URL : '/api/sql';
+
 const DEFAULT_TIMEOUT_MS = 30000;
 
 async function fetchApi(body: object, signal?: AbortSignal) {
@@ -26,14 +28,12 @@ async function fetchApi(body: object, signal?: AbortSignal) {
         });
 
         if (!response.ok) {
-            let errorDetails = `Server responded with status ${response.status}`;
+            let errorDetails = `서버 오류 (${response.status})`;
             try {
                 const errorData = await response.json();
                 errorDetails = errorData.details || errorData.error || errorDetails;
             } catch (e) {
-                try {
-                    errorDetails = await response.text();
-                } catch (textErr) {}
+                try { errorDetails = await response.text(); } catch (textErr) {}
             }
             throw new Error(errorDetails);
         }
@@ -42,30 +42,24 @@ async function fetchApi(body: object, signal?: AbortSignal) {
         if (contentType && contentType.indexOf("application/json") !== -1) {
             return await response.json();
         } else {
-            return { success: true, message: await response.text() };
+            // [수정] 응답이 JSON이 아니면 경로 오류로 간주하고 에러를 던짐 (가짜 "완료" 방지)
+            throw new Error("서버 경로 설정 오류: 올바른 데이터 응답을 받지 못했습니다.");
         }
 
     } catch (err: any) {
+        console.error(`[SQL_SERVICE_ERROR] ${err.message}`);
         if (err.name === 'AbortError') {
             if (signal?.aborted) throw signal.reason || new Error('API 요청이 중단되었습니다.');
-            else throw new Error('서버 응답 시간이 초과되었습니다. 연결을 확인해주세요.');
+            else throw new Error('서버 연결 시간이 초과되었습니다.');
         }
-        if (err instanceof SyntaxError) throw new Error(`응답 해석 실패 (JSON 아님): ${err.message}`);
         throw new Error(err.message || 'API 요청에 실패했습니다.');
     } finally {
         if (timeoutId) clearTimeout(timeoutId);
     }
 }
 
-/**
- * 쿼리 텍스트 내의 @변수명을 찾아 실제 전달할 파라미터만 걸러냅니다.
- * 대소문자를 무시하고 매칭하여 안정성을 높입니다.
- */
 export const extractParamsForQuery = (queryText: string, sourceParams: Record<string, any>): Record<string, any> => {
-    // 주석을 제외한 쿼리에서만 추출 (정밀도 향상)
     const sqlWithoutComments = queryText.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    
-    // 한글 파라미터 및 언더바 포함 매칭 (@한글, @abc_123 등)
     const matches = Array.from(sqlWithoutComments.matchAll(/@([a-zA-Z0-9_가-힣]+)/g), m => m[1]);
     const uniqueVars = [...new Set(matches)];
     
@@ -77,7 +71,6 @@ export const extractParamsForQuery = (queryText: string, sourceParams: Record<st
     const finalParams: Record<string, any> = {};
     uniqueVars.forEach(variableNameInQuery => {
         const lowerVarName = variableNameInQuery.toLowerCase();
-        // 대소문자 구분 없이 sourceParams에서 값을 찾아 할당
         if (lookup[lowerVarName] !== undefined) {
             finalParams[variableNameInQuery] = lookup[lowerVarName];
         }
@@ -86,24 +79,8 @@ export const extractParamsForQuery = (queryText: string, sourceParams: Record<st
     return finalParams;
 };
 
-
 export async function checkSqlConnection(): Promise<{ success: boolean; message: string }> {
-    const controller = new AbortController();
-    const timeout = 10000; 
-    const timeoutId = setTimeout(() => {
-        const error = new Error(`서버 연결 확인 시간이 초과되었습니다 (${timeout / 1000}초).`);
-        error.name = 'TimeoutError';
-        controller.abort(error);
-    }, timeout);
-
-    try {
-        return await fetchApi({ type: 'connect' }, controller.signal);
-    } catch (err: any) {
-        if (controller.signal.reason && (controller.signal.reason as Error).name === 'TimeoutError') throw controller.signal.reason;
-        throw err;
-    } finally {
-        clearTimeout(timeoutId);
-    }
+    return await fetchApi({ type: 'connect' });
 }
 
 export async function getDatabaseSchema(): Promise<DbSchema> {
@@ -175,7 +152,6 @@ export async function searchProductsForEdit(searchTerm: string): Promise<any[]> 
 }
 
 export async function executeUserQuery(name: string, params: Record<string, any> = {}, userQuery?: string): Promise<any[]> {
-    // 전달된 파라미터 중 쿼리에서 실제로 쓰이는 것만 추출 (API 최적화)
     const activeParams = userQuery ? extractParamsForQuery(userQuery, params) : params;
     const body: { [key: string]: any } = { type: 'executeUserQuery', name, params: activeParams };
     if (userQuery) body.userQuery = userQuery;
