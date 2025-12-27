@@ -21,11 +21,6 @@ const INITIAL_VISIBLE_ROWS = 100;
 
 const QUERY_TEMPLATES = [
     {
-        name: "BOM (묶음 상품 구성 조회)",
-        description: "묶음 상품의 구성 품목 정보를 조회합니다.",
-        sql: `-- [묶음 상품(BOM) 구성 품목 조회]\n-- 파라미터: @barcode (부모 상품 바코드)\n\nSELECT \n    b.childbar AS [바코드],        -- 하위 구성품 바코드\n    p.descr AS [상품명],        -- 하위 구성품 명칭\n    p.spec  AS [규격],          -- 하위 구성품 규격\n    p.money0vat AS [매입가],    -- 하위 구성품의 현재 매입가\n    b.childcount AS [수량]      -- 묶음에 포함된 개수\nFROM bom AS b WITH(NOLOCK)\nJOIN parts AS p WITH(NOLOCK) ON b.childbar = p.barcode\nWHERE b.parebar = @barcode`
-    },
-    {
         name: "상품조회 (행사포함)",
         description: "현재 진행 중인 행사 정보를 포함하여 상품을 검색합니다.",
         sql: `DECLARE @Today VARCHAR(10) = CONVERT(VARCHAR(10), GETDATE(), 120);\n\nSELECT TOP 50 \n  p.barcode AS [바코드], \n  p.descr AS [상품명], \n  p.money1 AS [판매가], \n  CASE WHEN s.barcode IS NOT NULL THEN 'Y' ELSE 'N' END AS [행사유무],\n  ISNULL(s.salemoney1, 0) AS [행사판매가],\n  ISNULL(m.salename, '') AS [행사명]\nFROM parts p WITH(NOLOCK)\nLEFT JOIN sale_ready s WITH(NOLOCK) ON p.barcode = s.barcode AND s.isappl = '1'\nLEFT JOIN sale_mast m WITH(NOLOCK) ON s.junno = m.junno AND m.isappl = '1' AND (@Today BETWEEN m.startday AND m.endday)\nWHERE p.descr LIKE '%@kw%' OR p.barcode = '@kw'`

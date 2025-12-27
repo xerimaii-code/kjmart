@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ActionModal from '../components/ActionModal';
 import { useAlert, useDataState, useScanner, useMiscUI } from '../context/AppContext';
@@ -309,6 +310,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         setIsBundle(isPack);
 
         if (isPack) {
+            // [수정] 쿼리명을 'BOM'으로 변경
             executeUserQuery('BOM', { barcode: p.barcode || p.바코드 })
                 .then(res => setBomList(res))
                 .catch(err => {
@@ -624,7 +626,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                         setShowSupplierDropdown(true);
                                     }}
                                     onBlur={() => {
-                                        // FIX: Changed undefined 'supplierSearchBlurTimeout' to 'blurTimeoutRef'
                                         blurTimeoutRef.current = window.setTimeout(() => setShowSupplierDropdown(false), 200);
                                     }}
                                     placeholder="거래처 검색 (선택)"
@@ -639,7 +640,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                         <XMarkIcon className="w-4 h-4" />
                                     </button>
                                 )}
-                                {/* FIX: Corrected missing ChevronDownIcon which is now imported */}
                                 {!comcode && <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"><ChevronDownIcon className="w-4 h-4" /></div>}
                             </div>
                             <SearchDropdown<Customer>
