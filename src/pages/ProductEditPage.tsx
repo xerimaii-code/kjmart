@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ActionModal from '../components/ActionModal';
-import { useAlert, useDataState, useScanner, useMiscUI } from '../context/AppContext';
+import { useAlert, useDataState, useScanner, useMiscUI, useModals } from '../context/AppContext';
 import { executeUserQuery, searchProductsForEdit, extractParamsForQuery } from '../services/sqlService';
-import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon } from '../components/Icons';
+import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon, XMarkIcon, ChevronDownIcon } from '../components/Icons';
 import { Customer, Category, Product } from '../types';
 import { getCachedData } from '../services/cacheDbService';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
@@ -36,6 +36,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const { showAlert, showToast } = useAlert();
     const { openScanner } = useScanner();
     const { sqlStatus } = useMiscUI();
+    const { openAddItemModal } = useModals();
 
     const [barcode, setBarcode] = useState('');
     const [productName, setProductName] = useState('');
@@ -197,11 +198,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             if (mc) { await loadSmallCats(lc, mc); setSCode(sc); }
         }
 
-        // [수정사항] 매입가/판매가 입력 필드에는 항상 정상가(money0vat, money1)를 표시
         setCostPrice(p.money0vat || p.매입가 || 0);
         setSellingPrice(p.money1 || p.판매가 || 0);
 
-        // 행사 정보는 참조용으로 따로 보관 (UI 하단 패널용)
         if (p.행사유무 === 'Y') {
             setSaleInfo({ 
                 name: p.행사명, 
@@ -212,12 +211,22 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             });
         } else setSaleInfo(null);
 
-        const isPack = String(p.ispack) === '1';
+        const isPack = String(p.ispack || p.BOM여부 === '묶음') === '1' || p.BOM여부 === '묶음';
         setIsBundle(isPack);
+        
         if (isPack) {
-            executeUserQuery('getBomComponents', { barcode: p.barcode || p.바코드 }, "SELECT b.ccode as 바코드, p.descr as 상품명, p.spec as 규격, p.money0vat as 매입가, b.childcount as 수량 FROM bom b JOIN parts p ON b.ccode = p.barcode WHERE b.pcode = @barcode")
-                .then(res => setBomList(res)).catch(() => setBomList([]));
-        } else setBomList([]);
+            // [수정 사항] 사용자 쿼리 'BOM'을 사용하여 데이터 호출
+            executeUserQuery('BOM', { barcode: p.barcode || p.바코드 })
+                .then(res => {
+                    setBomList(res || []);
+                })
+                .catch((err) => {
+                    console.error("BOM fetch error:", err);
+                    setBomList([]);
+                });
+        } else {
+            setBomList([]);
+        }
 
         setIsEditMode(true);
         showToast('상품 정보를 불러왔습니다.', 'success');
@@ -253,16 +262,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const handleScan = () => {
         openScanner('modal', async (code) => {
             setSearchInput(code);
-            if (sqlStatus === 'connected') {
-                const onlineProduct = await searchByBarcode(code);
-                if (onlineProduct) {
-                    performSearch(code); 
-                } else {
-                    performSearch(code);
-                }
-            } else {
-                performSearch(code);
-            }
+            performSearch(code);
         }, false);
     };
 
@@ -335,6 +335,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
     const handleSelectSupplier = (customer: Customer) => {
         setComcode(customer.comcode);
+        setSupplierSearch(customer.name);
         setShowSupplierDropdown(false);
         recordUsage(customer.comcode);
     };
@@ -383,25 +384,32 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     <div className="flex gap-1 pt-1">
                          <div className="relative flex-grow flex flex-col gap-0.5">
                             <label className="text-xs font-bold text-gray-700">거래처</label>
-                            <input
-                                ref={supplierInputRef}
-                                type="text"
-                                value={comcode ? (supplierList.find(c => c.comcode === comcode)?.name || '') : supplierSearch}
-                                onChange={(e) => setSupplierSearch(e.target.value)}
-                                onFocus={() => {
-                                    if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
-                                    setShowSupplierDropdown(true);
-                                }}
-                                onBlur={() => {
-                                    blurTimeoutRef.current = window.setTimeout(() => setShowSupplierDropdown(false), 200);
-                                }}
-                                readOnly={!!comcode}
-                                placeholder="거래처 검색"
-                                className={`w-full h-9 px-2 border rounded-md focus:ring-1 focus:ring-blue-500 text-sm ${!!comcode ? 'bg-gray-100' : 'bg-white'}`}
-                            />
-                            {comcode && (
-                                <button type="button" onClick={handleClearSupplier} className="absolute right-1 top-1/2 mt-1.5 h-7 px-2 bg-gray-200 text-gray-700 rounded text-xs font-bold active:bg-gray-300">변경</button>
-                            )}
+                            <div className="relative">
+                                <input
+                                    ref={supplierInputRef}
+                                    type="text"
+                                    value={supplierSearch}
+                                    onChange={(e) => {
+                                        setSupplierSearch(e.target.value);
+                                        if (comcode) setComcode('');
+                                        setShowSupplierDropdown(true);
+                                    }}
+                                    onFocus={() => {
+                                        if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
+                                        setShowSupplierDropdown(true);
+                                    }}
+                                    onBlur={() => {
+                                        blurTimeoutRef.current = window.setTimeout(() => setShowSupplierDropdown(false), 200);
+                                    }}
+                                    placeholder="거래처 검색"
+                                    className={`w-full h-9 px-2 pr-8 border rounded-md focus:ring-1 focus:ring-blue-500 text-sm ${comcode ? 'bg-blue-50 border-blue-500 font-bold text-blue-800' : 'bg-white border-gray-300'}`}
+                                />
+                                {comcode ? (
+                                    <button onClick={handleClearSupplier} className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-rose-500" type="button"><XMarkIcon className="w-4 h-4" /></button>
+                                ) : (
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"><ChevronDownIcon className="w-4 h-4" /></div>
+                                )}
+                            </div>
                             <SearchDropdown<Customer>
                                 items={filteredSuppliers}
                                 show={showSupplierDropdown && !comcode}
