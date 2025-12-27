@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import ActionModal from '../components/ActionModal';
 import { useAlert, useDataState, useScanner, useMiscUI } from '../context/AppContext';
 import { executeUserQuery, searchProductsForEdit, extractParamsForQuery } from '../services/sqlService';
-import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon } from '../components/Icons';
+// FIX: Added missing ChevronDownIcon to the imports
+import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon, XMarkIcon, ChevronDownIcon } from '../components/Icons';
 import { Customer, Category } from '../types';
 import { getCachedData } from '../services/cacheDbService';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
 import ProductSelectionModal from '../components/ProductSelectionModal';
 import { useSortedCustomers } from '../hooks/useSortedCustomers';
+import SearchDropdown from '../components/SearchDropdown';
 
 interface ProductEditPageProps {
     isOpen: boolean;
@@ -50,8 +52,13 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [mCats, setMCats] = useState<CategoryOption[]>([]);
     const [sCats, setSCats] = useState<CategoryOption[]>([]);
     
+    // Supplier State
     const [comcode, setComcode] = useState('');
     const [supplierList, setSupplierList] = useState<Customer[]>([]);
+    const [supplierSearch, setSupplierSearch] = useState('');
+    const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
+    const supplierInputRef = useRef<HTMLInputElement>(null);
+    const blurTimeoutRef = useRef<number | null>(null);
     
     const [stockQty, setStockQty] = useState<number>(0);
     const [isBundle, setIsBundle] = useState(false);
@@ -173,6 +180,41 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
     }, [isOpen, loadSuppliers, loadLargeCats]);
 
+    // Update supplierSearch when comcode is set programmatically (e.g. from populateProductData)
+    useEffect(() => {
+        if (comcode && supplierList.length > 0) {
+            const found = supplierList.find(c => c.comcode === comcode);
+            // Only update if search text doesn't match found name (to avoid interfering with typing)
+            if (found && supplierSearch !== found.name) {
+                // If the current search text is empty, it's safe to update.
+                // If user is typing, comcode would likely be empty until selection.
+                // So this effect primarily handles initial data load.
+                setSupplierSearch(found.name);
+            }
+        }
+    }, [comcode, supplierList]);
+
+    const filteredSuppliers = useMemo(() => {
+        const term = supplierSearch.trim().toLowerCase();
+        if (!term) return sortedCustomers.slice(0, 50);
+        return sortedCustomers.filter(c => 
+            c.name.toLowerCase().includes(term) || c.comcode.includes(term)
+        ).slice(0, 50);
+    }, [sortedCustomers, supplierSearch]);
+
+    const handleSelectSupplier = (c: Customer) => {
+        setComcode(c.comcode);
+        setSupplierSearch(c.name);
+        setShowSupplierDropdown(false);
+        recordUsage(c.comcode);
+    };
+
+    const handleClearSupplier = () => {
+        setComcode('');
+        setSupplierSearch('');
+        supplierInputRef.current?.focus();
+    };
+
     const handleLargeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value;
         setLCode(val); setMCode(''); setSCode(''); setSCats([]);
@@ -196,7 +238,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         if (full) {
             setBarcode(''); setProductName(''); setSpec('');
             setCostPrice(0); setSellingPrice(0);
-            setComcode(''); setLCode(''); setMCode(''); setSCode('');
+            setComcode(''); setSupplierSearch(''); setLCode(''); setMCode(''); setSCode('');
             setStockQty(0);
             setIsBundle(false);
             setIsUse(true); setIsTaxable(true); setIsPoint(true); setIsStockManaged(true);
@@ -246,7 +288,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
         
         setStopSaleOnSave(false);
-        // Sale Info Logic uses Korean keys, which is correct from the updated API query
         if (p.행사유무 === 'Y') {
             const newSaleInfo = {
                 name: p.행사명,
@@ -256,23 +297,19 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 end: p.행사종료일
             };
             setSaleInfo(newSaleInfo);
-            // Populate inputs with event prices
             setCostPrice(newSaleInfo.cost);
             setSellingPrice(newSaleInfo.price);
         } else {
             setSaleInfo(null);
-            // Populate with regular prices
             setCostPrice(p.money0vat || p.매입가);
             setSellingPrice(p.money1 || p.판매가);
         }
 
-        // BOM Info Logic
         const isPack = String(p.ispack) === '1';
         setIsBundle(isPack);
 
         if (isPack) {
-            // Fetch BOM components
-            executeUserQuery('getBomComponents', { barcode: p.barcode || p.바코드 })
+            executeUserQuery('BOM', { barcode: p.barcode || p.바코드 })
                 .then(res => setBomList(res))
                 .catch(err => {
                     console.error("Failed to fetch BOM", err);
@@ -306,7 +343,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     setIsEditMode(false);
                     showToast('등록되지 않은 바코드입니다. 신규 등록합니다.', 'success');
                     
-                    // Focus on Product Name for new item registration
                     setTimeout(() => {
                         productNameRef.current?.focus();
                     }, 150);
@@ -571,18 +607,54 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
                     {/* 5. Customer & Stock */}
                     <div className="flex gap-1 pt-1">
-                        <div className="flex-grow flex flex-col gap-0.5">
+                         <div className="relative flex-grow flex flex-col gap-0.5">
                             <label className="text-xs font-bold text-gray-700">거래처</label>
-                            <select
-                                value={comcode}
-                                onChange={(e) => setComcode(e.target.value)}
-                                className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm bg-white"
-                            >
-                                <option value="">거래처를 선택하세요</option>
-                                {sortedCustomers.map(c => (
-                                    <option key={c.comcode} value={c.comcode}>{c.name}</option>
-                                ))}
-                            </select>
+                            <div className="relative">
+                                <input
+                                    ref={supplierInputRef}
+                                    type="text"
+                                    value={supplierSearch}
+                                    onChange={(e) => {
+                                        setSupplierSearch(e.target.value);
+                                        setComcode(''); // 타이핑 시 선택 해제 (재검색 모드)
+                                        setShowSupplierDropdown(true);
+                                    }}
+                                    onFocus={() => {
+                                        if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
+                                        setShowSupplierDropdown(true);
+                                    }}
+                                    onBlur={() => {
+                                        // FIX: Changed undefined 'supplierSearchBlurTimeout' to 'blurTimeoutRef'
+                                        blurTimeoutRef.current = window.setTimeout(() => setShowSupplierDropdown(false), 200);
+                                    }}
+                                    placeholder="거래처 검색 (선택)"
+                                    className={`w-full h-9 px-2 pr-8 border rounded-md focus:ring-1 focus:ring-blue-500 text-sm ${comcode ? 'bg-blue-50 border-blue-500 text-blue-800 font-bold' : 'bg-white border-gray-300'}`}
+                                />
+                                {comcode && (
+                                    <button 
+                                        onClick={handleClearSupplier} 
+                                        className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                                        type="button"
+                                    >
+                                        <XMarkIcon className="w-4 h-4" />
+                                    </button>
+                                )}
+                                {/* FIX: Corrected missing ChevronDownIcon which is now imported */}
+                                {!comcode && <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"><ChevronDownIcon className="w-4 h-4" /></div>}
+                            </div>
+                            <SearchDropdown<Customer>
+                                items={filteredSuppliers}
+                                show={showSupplierDropdown && !comcode}
+                                renderItem={(c) => (
+                                    <div
+                                        onMouseDown={(e) => { e.preventDefault(); handleSelectSupplier(c); }}
+                                        className="p-2 hover:bg-gray-100 cursor-pointer border-b last:border-b-0"
+                                    >
+                                        <p className="font-semibold text-sm">{c.name}</p>
+                                        <p className="text-xs text-gray-500">{c.comcode}</p>
+                                    </div>
+                                )}
+                            />
                         </div>
                         <div className="w-1/3 flex flex-col gap-0.5">
                             <div className="flex justify-between items-center">
