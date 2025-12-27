@@ -211,26 +211,31 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             });
         } else setSaleInfo(null);
 
+        // BOM 여부 판단 (사용자의 의견에 따라 ispack 필드 중시)
         const isPack = String(p.ispack || p.BOM여부 === '묶음') === '1' || p.BOM여부 === '묶음';
         setIsBundle(isPack);
         
         if (isPack) {
-            // [수정 사항] 사용자 쿼리 'BOM'을 사용하여 데이터 호출
-            executeUserQuery('BOM', { barcode: p.barcode || p.바코드 })
-                .then(res => {
-                    setBomList(res || []);
-                })
-                .catch((err) => {
-                    console.error("BOM fetch error:", err);
-                    setBomList([]);
-                });
+            // [중요 수정] SQL Runner에 등록된 'BOM' 쿼리 내용을 찾아 직접 전달하여 데이터 로딩
+            const bomQueryObj = userQueries.find(q => q.name === 'BOM');
+            if (bomQueryObj) {
+                executeUserQuery('BOM', { barcode: p.barcode || p.바코드 }, bomQueryObj.query)
+                    .then(res => setBomList(res || []))
+                    .catch((err) => {
+                        console.error("BOM fetch error:", err);
+                        setBomList([]);
+                    });
+            } else {
+                console.warn("'BOM' query not found in SQL Runner.");
+                setBomList([]);
+            }
         } else {
             setBomList([]);
         }
 
         setIsEditMode(true);
         showToast('상품 정보를 불러왔습니다.', 'success');
-    }, [loadMediumCats, loadSmallCats, showToast]);
+    }, [loadMediumCats, loadSmallCats, showToast, userQueries]);
 
     const performSearch = useCallback(async (code: string) => {
         if (!code) return;
@@ -439,14 +444,14 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                         <button onClick={handleSave} disabled={isSaving} className="h-12 bg-blue-600 text-white rounded-md font-bold text-lg flex items-center justify-center gap-2 hover:bg-blue-700 shadow-md active:scale-95 disabled:bg-gray-400 transition-transform">{isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}저장</button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-1 mt-1 mb-0">
+                    <div className="grid grid-cols-2 gap-1 mt-1 mb-0 pb-4">
                         <div className="bg-gray-50 border border-gray-200 rounded flex flex-col min-h-[5rem]">
                             <div className="bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600 border-b text-center">할인정보</div>
                             <div className="p-1 flex-1 flex flex-col items-center justify-center">{saleInfo ? (<><div className="flex-1 flex items-center justify-center w-full"><p className="text-sm font-bold text-blue-700 text-center leading-tight line-clamp-2">{saleInfo.name}</p></div><div className="flex-shrink-0 text-center w-full"><p className="text base font-bold text-red-600 leading-none my-0.5">{Number(saleInfo.cost).toLocaleString()} / {Number(saleInfo.price).toLocaleString()}</p><p className="text-xs text-gray-500 leading-tight mt-1">{saleInfo.start} ~ {saleInfo.end}</p></div></>) : <p className="text-sm text-gray-400">할인 정보 없음</p>}</div>
                         </div>
                         <div className="bg-gray-50 border border-gray-200 rounded flex flex-col min-h-[5rem]">
                             <div className="bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600 border-b text-center">BOM 정보</div>
-                            <div className="p-1 flex-1">{bomList.length > 0 ? (<div className="space-y-1">{bomList.map((item, idx) => (<div key={idx} className="bg-white border border-gray-100 rounded p-1.5 shadow-sm flex flex-col gap-0.5"><p className="text-[10px] font-mono text-gray-400 leading-none">{item.바코드}</p><p className="text-xs font-bold text-gray-800 leading-tight">{item.상품명}</p><p className="text-[10px] text-gray-500">{item.규격}</p><div className="flex justify-between items-center mt-0.5 border-t border-gray-50 pt-0.5"><p className="text-xs text-gray-600 font-medium">{Number(item.매입가).toLocaleString()}원</p><p className="text-xs font-bold text-blue-600">x{item.수량}</p></div></div>))}</div>) : <div className="h-full flex items-center justify-center"><p className="text-sm text-gray-400">일반 상품</p></div>}</div>
+                            <div className="p-1 flex-1 overflow-y-auto">{bomList.length > 0 ? (<div className="space-y-1">{bomList.map((item, idx) => (<div key={idx} className="bg-white border border-gray-100 rounded p-1.5 shadow-sm flex flex-col gap-0.5"><p className="text-[10px] font-mono text-gray-400 leading-none">{item.바코드}</p><p className="text-xs font-bold text-gray-800 leading-tight truncate">{item.상품명}</p><div className="flex justify-between items-center mt-0.5 border-t border-gray-50 pt-0.5"><p className="text-[10px] text-gray-600 font-medium">{Number(item.매입가).toLocaleString()}원</p><p className="text-xs font-bold text-blue-600">x{item.수량}</p></div></div>))}</div>) : <div className="h-full flex items-center justify-center"><p className="text-sm text-gray-400">{isBundle ? 'BOM 로딩 중...' : '일반 상품'}</p></div>}</div>
                         </div>
                     </div>
                 </div>
