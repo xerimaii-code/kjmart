@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ActionModal from '../components/ActionModal';
 import { useAlert, useDataState, useScanner, useMiscUI, useModals } from '../context/AppContext';
@@ -176,26 +175,34 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     }, []);
 
     const populateProductData = useCallback(async (p: any) => {
-        setBarcode(p.barcode || p.바코드);
-        setProductName(p.descr || p.상품명);
-        setSpec(p.spec || p.규격 || '');
+        setBarcode(p.barcode || p['바코드'] || '');
+        setProductName(p.descr || p['상품명'] || '');
+        setSpec(p.spec || p['규격'] || '');
         
-        // [중요 수정] 거래처 정보를 comcode와 supplierSearch에 모두 반영하여 화면에 즉시 표시되게 함
-        const targetComcode = p.comcode || p.거래처코드 || '';
-        const targetComname = p.comname || p.거래처명 || '';
+        // [수정] 거래처 정보 매핑 강화 - 다양한 키 이름 대응 및 로컬 리스트 대조
+        const targetComcode = p.comcode || p['거래처코드'] || '';
+        let targetComname = p.comname || p['거래처명'] || '';
+        
+        // 거래처명이 검색 결과에 없을 경우 전체 리스트에서 찾기
+        if (!targetComname && targetComcode) {
+            const found = supplierList.find(s => s.comcode === targetComcode);
+            if (found) targetComname = found.name;
+            else targetComname = targetComcode; // 못찾으면 코드라도 표시
+        }
+        
         setComcode(targetComcode);
         setSupplierSearch(targetComname);
         
-        setStockQty(p.curjago || p.재고수량 || 0);
+        setStockQty(p.curjago || p['재고수량'] || 0);
         
-        setIsUse(String(p.isuse || p.사용유무) === '1' || p.isuse === true);
-        setIsTaxable(String(p.isvat || p.과세여부) === '1' || p.isvat === true);
-        setIsPoint(String(p.ispoint || p.포인트적립) === '1' || p.ispoint === true);
-        setIsStockManaged(String(p.isjago || p.재고관리) === '1' || p.isjago === true);
+        setIsUse(String(p.isuse || p['사용유무']) === '1' || p.isuse === true);
+        setIsTaxable(String(p.isvat || p['과세여부']) === '1' || p.isvat === true);
+        setIsPoint(String(p.ispoint || p['포인트적립']) === '1' || p.ispoint === true);
+        setIsStockManaged(String(p.isjago || p['재고관리']) === '1' || p.isjago === true);
         
-        const lc = p.gubun1 || p.대분류코드 || '';
-        const mc = p.gubun2 || p.중분류코드 || '';
-        const sc = p.gubun3 || p.소분류코드 || '';
+        const lc = p.gubun1 || p['대분류코드'] || '';
+        const mc = p.gubun2 || p['중분류코드'] || '';
+        const sc = p.gubun3 || p['소분류코드'] || '';
         
         setLCode(lc);
         if (lc) {
@@ -204,27 +211,27 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             if (mc) { await loadSmallCats(lc, mc); setSCode(sc); }
         }
 
-        setCostPrice(p.money0vat || p.매입가 || 0);
-        setSellingPrice(p.money1 || p.판매가 || 0);
+        setCostPrice(p.money0vat || p['매입가'] || 0);
+        setSellingPrice(p.money1 || p['판매가'] || 0);
 
-        if (p.행사유무 === 'Y') {
+        if (p['행사유무'] === 'Y' || p.isSale === 'Y') {
             setSaleInfo({ 
-                name: p.행사명, 
-                cost: p.행사매입가, 
-                price: p.행사판매가, 
-                start: p.행사시작일, 
-                end: p.행사종료일 
+                name: p['행사명'] || p.saleName, 
+                cost: p['행사매입가'] || p.saleCost, 
+                price: p['행사판매가'] || p.salePrice, 
+                start: p['행사시작일'] || p.saleStart, 
+                end: p['행사종료일'] || p.saleEnd 
             });
         } else setSaleInfo(null);
 
-        // BOM 여부 판단
-        const isPack = String(p.ispack || p.BOM여부 === '묶음') === '1' || p.BOM여부 === '묶음';
+        // [수정] BOM 여부 판단 단순화 - ispack 필드 기준
+        const isPack = String(p.ispack) === '1' || p['BOM여부'] === '묶음';
         setIsBundle(isPack);
         
         if (isPack) {
             const bomQueryObj = userQueries.find(q => q.name === 'BOM');
             if (bomQueryObj) {
-                executeUserQuery('BOM', { barcode: p.barcode || p.바코드 }, bomQueryObj.query)
+                executeUserQuery('BOM', { barcode: p.barcode || p['바코드'] }, bomQueryObj.query)
                     .then(res => setBomList(res || []))
                     .catch((err) => {
                         console.error("BOM fetch error:", err);
@@ -239,7 +246,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
         setIsEditMode(true);
         showToast('상품 정보를 불러왔습니다.', 'success');
-    }, [loadMediumCats, loadSmallCats, showToast, userQueries]);
+    }, [loadMediumCats, loadSmallCats, showToast, userQueries, supplierList]);
 
     const performSearch = useCallback(async (code: string) => {
         if (!code) return;
@@ -316,7 +323,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
     const handleProductSelect = (product: any) => {
         setIsSelectionModalOpen(false);
-        setSearchInput(product.barcode || product.바코드);
+        setSearchInput(product.barcode || product['바코드']);
         populateProductData(product);
     };
 
