@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ActionModal from '../components/ActionModal';
 import { useAlert, useDataState, useScanner, useMiscUI, useModals } from '../context/AppContext';
@@ -98,7 +99,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         if (sqlStatus === 'connected') {
             try {
                 const res = await executeUserQuery('getSuppliers', {}, "SELECT comcode, comname FROM comp WITH(NOLOCK) WHERE isuse <> '0'");
-                setSupplierList(res.map((r: any) => ({ comcode: r.comcode, name: r.comname })));
+                const mapped = res.map((r: any) => ({ comcode: String(r.comcode), name: r.comname }));
+                setSupplierList(mapped);
             } catch (e) { setSupplierList(offlineCustomers); }
         } else setSupplierList(offlineCustomers);
     }, [sqlStatus, offlineCustomers]);
@@ -179,17 +181,17 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         setProductName(p.descr || p['상품명'] || '');
         setSpec(p.spec || p['규격'] || '');
         
-        // [수정] 거래처 정보 매핑 강화 - 다양한 키 이름 대응 및 로컬 리스트 대조
-        const targetComcode = p.comcode || p['거래처코드'] || '';
-        let targetComname = p.comname || p['거래처명'] || '';
+        // [수정] 거래처 정보 로드 로직 강화
+        const targetComcode = String(p.comcode || p['거래처코드'] || '').trim();
+        let targetComname = String(p.comname || p['거래처명'] || '').trim();
         
-        // 거래처명이 검색 결과에 없을 경우 전체 리스트에서 찾기
+        // 검색 결과에 이름이 없으면 전체 거래처 리스트에서 대조하여 찾음
         if (!targetComname && targetComcode) {
-            const found = supplierList.find(s => s.comcode === targetComcode);
+            const found = supplierList.find(s => String(s.comcode) === targetComcode);
             if (found) targetComname = found.name;
             else targetComname = targetComcode; // 못찾으면 코드라도 표시
         }
-        
+
         setComcode(targetComcode);
         setSupplierSearch(targetComname);
         
@@ -214,18 +216,18 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         setCostPrice(p.money0vat || p['매입가'] || 0);
         setSellingPrice(p.money1 || p['판매가'] || 0);
 
-        if (p['행사유무'] === 'Y' || p.isSale === 'Y') {
+        if (p['행사유무'] === 'Y') {
             setSaleInfo({ 
-                name: p['행사명'] || p.saleName, 
-                cost: p['행사매입가'] || p.saleCost, 
-                price: p['행사판매가'] || p.salePrice, 
-                start: p['행사시작일'] || p.saleStart, 
-                end: p['행사종료일'] || p.saleEnd 
+                name: p['행사명'], 
+                cost: p['행사매입가'], 
+                price: p['행사판매가'], 
+                start: p['행사시작일'], 
+                end: p['행사종료일'] 
             });
         } else setSaleInfo(null);
 
-        // [수정] BOM 여부 판단 단순화 - ispack 필드 기준
-        const isPack = String(p.ispack) === '1' || p['BOM여부'] === '묶음';
+        // BOM 여부 판단
+        const isPack = String(p.ispack || p['BOM여부'] === '묶음') === '1' || p['BOM여부'] === '묶음';
         setIsBundle(isPack);
         
         if (isPack) {
