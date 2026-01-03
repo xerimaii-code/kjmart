@@ -98,53 +98,107 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const isUnregistered = !product.name || product.name === '미등록 상품' || product.name === '';
     const displayName = isUnregistered ? (customName || '미등록 상품') : product.name;
 
-    const ButtonBase = ({ onClick, className, children, disabled }: any) => (
-        <button onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); playKeypadBeep(); if (!disabled && !isSubmitting) onClick(); }} disabled={disabled || isSubmitting} className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm whitespace-nowrap ${className} ${disabled || isSubmitting ? 'opacity-50' : ''}`}>
+    // [InputButton] 숫자 입력용 (PointerDown 사용으로 빠른 반응)
+    const InputButton = ({ onClick, className, children, disabled }: any) => (
+        <button 
+            onPointerDown={(e) => { 
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                if (!disabled) {
+                    playKeypadBeep(); 
+                    onClick();
+                }
+            }} 
+            disabled={disabled}
+            className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm whitespace-nowrap ${className} ${disabled ? 'opacity-50' : ''}`}
+        >
             {children}
         </button>
     );
+
+    // [ActionButton] 저장/닫기용 (Click 이벤트 사용으로 안정적 실행 보장)
+    const ActionButton = ({ onClick, className, children, disabled }: any) => (
+        <button 
+            onClick={(e) => { 
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                if (!disabled && !isSubmitting) {
+                    playKeypadBeep(); 
+                    onClick();
+                }
+            }} 
+            disabled={disabled || isSubmitting} 
+            className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm whitespace-nowrap ${className} ${disabled || isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+            {children}
+        </button>
+    );
+
+    const handleAddItem = (isReturn: boolean, shouldScanNext: boolean) => {
+        const qty = isReturn ? -Number(quantity) : Number(quantity);
+        const cost = Number(String(costPrice).replace(/,/g, ''));
+        const selling = Number(String(sellingPrice).replace(/,/g, ''));
+        
+        onAdd({ 
+            barcode: product.barcode, 
+            name: displayName, 
+            costPrice: cost, 
+            sellingPrice: selling, 
+            quantity: qty, 
+            isNew: true 
+        });
+
+        // 닫기 로직을 약간 지연시켜 상태 업데이트 보장
+        if (shouldScanNext && onScanNext) {
+            onClose();
+            setTimeout(onScanNext, 150);
+        } else {
+            if (onScanNext) closeScanner();
+            onClose();
+        }
+    };
 
     const ControllerSection = (
         <div className="flex flex-col gap-1 h-full w-full min-w-0">
             <div className="flex flex-col gap-1 flex-shrink-0 mb-1">
                 <div className="grid grid-cols-2 gap-1 mb-0.5">
-                    <ButtonBase onClick={() => { if (onScanNext) closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm"><XCircleIcon className="w-4 h-4 mr-1" />종료</ButtonBase>
-                    <ButtonBase onClick={() => { onClose(); if (onScanNext) setTimeout(onScanNext, 200); }} className="bg-white border border-gray-300 text-gray-500 h-11 text-xs sm:text-sm"><ChevronRightIcon className="w-4 h-4 mr-1" />스킵</ButtonBase>
+                    <ActionButton onClick={() => { if (onScanNext) closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm"><XCircleIcon className="w-4 h-4 mr-1" />종료</ActionButton>
+                    <ActionButton onClick={() => { onClose(); if (onScanNext) setTimeout(onScanNext, 200); }} className="bg-white border border-gray-300 text-gray-500 h-11 text-xs sm:text-sm"><ChevronRightIcon className="w-4 h-4 mr-1" />스킵</ActionButton>
                 </div>
                 <div className="grid grid-cols-2 gap-1">
-                    <ButtonBase onClick={() => { onAdd({ barcode: product.barcode, name: displayName, costPrice: Number(String(costPrice).replace(/,/g, '')), sellingPrice: Number(String(sellingPrice).replace(/,/g, '')), quantity: -Number(quantity), isNew: true }); if (onScanNext) closeScanner(); onClose(); }} disabled={!isQuantityValid} className="bg-red-50 text-red-500 border border-red-200 h-11 text-xs sm:text-sm font-bold"><ReturnBoxIcon className="w-4 h-4 mr-1" />반품</ButtonBase>
-                    <ButtonBase onClick={() => { onAdd({ barcode: product.barcode, name: displayName, costPrice: Number(String(costPrice).replace(/,/g, '')), sellingPrice: Number(String(sellingPrice).replace(/,/g, '')), quantity: Number(quantity), isNew: true }); if (onScanNext) closeScanner(); onClose(); }} disabled={!isQuantityValid} className="bg-white border border-blue-200 text-blue-700 h-11 text-xs sm:text-sm font-bold"><SaveIcon className="w-4 h-4 mr-1" />추가&종료</ButtonBase>
+                    <ActionButton onClick={() => handleAddItem(true, false)} disabled={!isQuantityValid} className="bg-red-50 text-red-500 border border-red-200 h-11 text-xs sm:text-sm font-bold"><ReturnBoxIcon className="w-4 h-4 mr-1" />반품</ActionButton>
+                    <ActionButton onClick={() => handleAddItem(false, false)} disabled={!isQuantityValid} className="bg-white border border-blue-200 text-blue-700 h-11 text-xs sm:text-sm font-bold"><SaveIcon className="w-4 h-4 mr-1" />추가&종료</ActionButton>
                 </div>
-                {onScanNext && <ButtonBase onClick={() => { onAdd({ barcode: product.barcode, name: displayName, costPrice: Number(String(costPrice).replace(/,/g, '')), sellingPrice: Number(String(sellingPrice).replace(/,/g, '')), quantity: Number(quantity), isNew: true }); onClose(); setTimeout(onScanNext, 200); }} disabled={!isQuantityValid} className={`font-bold text-base sm:text-xl h-16 shadow-md mt-1 ${isUnregistered ? 'bg-orange-600' : 'bg-blue-600'} text-white`}><BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />추가 & 스캔</ButtonBase>}
+                {onScanNext && <ActionButton onClick={() => handleAddItem(false, true)} disabled={!isQuantityValid} className={`font-bold text-base sm:text-xl h-16 shadow-md mt-1 ${isUnregistered ? 'bg-orange-600' : 'bg-blue-600'} text-white`}><BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />추가 & 스캔</ActionButton>}
             </div>
             <div className="grid grid-cols-3 gap-1 flex-grow min-h-0">
                 {[7, 8, 9, 4, 5, 6, 1, 2, 3].map(num => (
-                    <ButtonBase key={num} onClick={() => {
+                    <InputButton key={num} onClick={() => {
                         const wasFirst = isFirstInputRef.current;
                         const update = (prev: any) => wasFirst ? num : Number(String(prev).replace(/,/g, '') + num);
                         if (activeField === 'quantity') setQuantity(update); else if (activeField === 'cost') setCostPrice(update); else setSellingPrice(update);
                         isFirstInputRef.current = false;
-                    }} className="bg-white text-gray-800 text-xl font-bold border border-gray-200 shadow-sm">{num}</ButtonBase>
+                    }} className="bg-white text-gray-800 text-xl font-bold border border-gray-200 shadow-sm">{num}</InputButton>
                 ))}
-                <ButtonBase onClick={() => {
+                <InputButton onClick={() => {
                     const wasFirst = isFirstInputRef.current;
                     const update = (prev: any) => wasFirst ? 0 : Number(String(prev).replace(/,/g, '') + '0');
                     if (activeField === 'quantity') setQuantity(update);
                     else if (activeField === 'cost') setCostPrice(update);
                     else setSellingPrice(update);
                     isFirstInputRef.current = false;
-                }} className="bg-white text-gray-800 text-xl font-bold border border-gray-200 shadow-sm">0</ButtonBase>
-                <ButtonBase onClick={() => {
+                }} className="bg-white text-gray-800 text-xl font-bold border border-gray-200 shadow-sm">0</InputButton>
+                <InputButton onClick={() => {
                     if (activeField === 'quantity') setQuantity(0); else if (activeField === 'cost') setCostPrice(0); else setSellingPrice(0);
                     isFirstInputRef.current = true;
-                }} className="bg-orange-50 text-orange-600 border border-orange-200 text-lg font-bold">C</ButtonBase>
-                <ButtonBase onClick={() => {
+                }} className="bg-orange-50 text-orange-600 border border-orange-200 text-lg font-bold">C</InputButton>
+                <InputButton onClick={() => {
                     const toggleSign = (prev: any) => -Number(String(prev).replace(/,/g, ''));
                     if (activeField === 'quantity') setQuantity(toggleSign); 
                     else if (activeField === 'cost') setCostPrice(toggleSign); 
                     else setSellingPrice(toggleSign);
                     isFirstInputRef.current = false;
-                }} className="bg-gray-100 text-gray-800 border border-gray-300 text-2xl font-bold font-mono shadow-sm">-</ButtonBase>
+                }} className="bg-gray-100 text-gray-800 border border-gray-300 text-2xl font-bold font-mono shadow-sm">-</InputButton>
             </div>
         </div>
     );

@@ -47,7 +47,6 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         const audioCtx = audioCtxRef.current;
         if (!audioCtx) return;
         
-        // Ensure AudioContext is running
         if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
         
         try {
@@ -91,14 +90,15 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const finalQuantity = Number(quantityStr);
     const isQuantityValid = !isNaN(finalQuantity) && finalQuantity !== 0;
 
-    // 최종 액션 버튼 (onClick 사용)
     const ActionButton = ({ onClick, className, children, disabled }: any) => (
         <button 
             onClick={(e) => { 
                 e.preventDefault(); 
                 e.stopPropagation(); 
-                playKeypadBeep(); 
-                if (!disabled && !isSubmitting) onClick(); 
+                if (!disabled && !isSubmitting) {
+                    playKeypadBeep(); 
+                    onClick(); 
+                }
             }} 
             disabled={disabled || isSubmitting} 
             className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm whitespace-nowrap ${className} ${disabled || isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -107,14 +107,15 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         </button>
     );
 
-    // 입력용 숫자 버튼 (onPointerDown 사용)
     const InputButton = ({ onClick, className, children, disabled }: any) => (
         <button 
             onPointerDown={(e) => { 
                 e.preventDefault(); 
                 e.stopPropagation(); 
-                playKeypadBeep(); 
-                if (!disabled) onClick(); 
+                if (!disabled) {
+                    playKeypadBeep(); 
+                    onClick(); 
+                }
             }} 
             disabled={disabled}
             className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm ${className} ${disabled ? 'opacity-50' : ''}`}

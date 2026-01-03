@@ -141,8 +141,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     };
 
     const closeItemModal = () => {
-        // Critical: Reset the scan processing flag on any modal close event
-        // to prevent subsequent scans from being blocked.
         isProcessingScanRef.current = false;
 
         if (window.history.state?.modal === 'receiveItem') {
@@ -241,7 +239,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         if (term.length >= 2 || (isBarcode && term.length > 0)) {
             searchProduct(term);
         } else if (term.length === 0) {
-            // 검색어 비우면 결과 초기화 (useProductSearch 내부 로직이 처리)
             searchProduct('');
         }
     }, [debouncedProductSearch, searchProduct]);
@@ -450,7 +447,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             return updatedItems;
         });
         setProductSearch('');
-        // This is called AFTER the item is added. So the flag can be reset here.
         isProcessingScanRef.current = false;
     }, [saveDraft, setProductSearch]); 
 

@@ -82,17 +82,8 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
 
     const isQuantityValid = quantityStr !== '' && !isNaN(Number(quantityStr));
 
-    const handleKeypadPress = (action: () => void, e: React.PointerEvent) => {
-        e.preventDefault(); 
-        e.stopPropagation();
+    const handleKeypadPress = (action: () => void) => {
         playKeypadBeep(); 
-        action();
-    };
-
-    const handleFinalAction = (action: () => void, e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        playKeypadBeep();
         action();
     };
 
@@ -109,16 +100,19 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
             <div className="flex flex-col gap-1 flex-shrink-0 mb-1">
                 <div className="grid grid-cols-2 gap-1">
                      <button 
-                        onClick={(e) => handleFinalAction(onClose, e)} 
+                        onClick={(e) => { e.stopPropagation(); onClose(); }} 
                         className="bg-gray-100 text-gray-500 border border-gray-200 h-12 text-xs sm:text-sm font-bold rounded-lg shadow-sm active:scale-95 flex items-center justify-center gap-1 transition-transform whitespace-nowrap"
                     >
                         <XCircleIcon className="w-4 h-4" />취소
                     </button>
                     <button 
-                        onClick={(e) => handleFinalAction(() => { 
-                            onSave({ quantity: Number(quantityStr), unit, memo: memo.trim() }); 
-                            onClose(); 
-                        }, e)} 
+                        onClick={(e) => { 
+                            e.stopPropagation();
+                            if(isQuantityValid) {
+                                onSave({ quantity: Number(quantityStr), unit, memo: memo.trim() }); 
+                                onClose(); 
+                            }
+                        }} 
                         disabled={!isQuantityValid}
                         className="bg-blue-600 text-white font-bold h-12 text-sm sm:text-lg rounded-lg shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-transform whitespace-nowrap"
                     >
@@ -127,7 +121,7 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
                 </div>
                  {onScanNext && (
                     <button 
-                        onClick={(e) => handleFinalAction(handleSaveAndScan, e)}
+                        onClick={(e) => { e.stopPropagation(); if(isQuantityValid) handleSaveAndScan(); }}
                         disabled={!isQuantityValid}
                         className="bg-blue-600 text-white font-extrabold h-16 text-base sm:text-xl rounded-lg shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-transform whitespace-nowrap"
                     >
@@ -139,34 +133,46 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
                 {[7, 8, 9, 4, 5, 6, 1, 2, 3].map(num => (
                     <button 
                         key={num} 
-                        onPointerDown={(e) => handleKeypadPress(() => {
-                            const wasFirst = isFirstInputRef.current;
-                            setQuantityStr(prev => (wasFirst || prev === '0') ? String(num) : prev + num);
-                            isFirstInputRef.current = false;
-                        }, e)} 
+                        onPointerDown={(e) => {
+                            e.preventDefault(); e.stopPropagation();
+                            handleKeypadPress(() => {
+                                const wasFirst = isFirstInputRef.current;
+                                setQuantityStr(prev => (wasFirst || prev === '0') ? String(num) : prev + num);
+                                isFirstInputRef.current = false;
+                            });
+                        }} 
                         className="bg-white text-gray-800 text-xl border border-gray-200 font-bold rounded-lg shadow-sm active:scale-95"
                     >
                         {num}
                     </button>
                 ))}
                 <button 
-                    onPointerDown={(e) => handleKeypadPress(() => { 
-                        if (!isFirstInputRef.current && quantityStr !== '0') setQuantityStr(prev => prev + '0'); 
-                    }, e)} 
+                    onPointerDown={(e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        handleKeypadPress(() => { 
+                            if (!isFirstInputRef.current && quantityStr !== '0') setQuantityStr(prev => prev + '0'); 
+                        });
+                    }} 
                     className="bg-white text-gray-800 text-xl border border-gray-200 font-bold rounded-lg shadow-sm active:scale-95"
                 >
                     0
                 </button>
                 <button 
-                    onPointerDown={(e) => handleKeypadPress(() => { 
-                        setQuantityStr('0'); isFirstInputRef.current = true; 
-                    }, e)} 
+                    onPointerDown={(e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        handleKeypadPress(() => { 
+                            setQuantityStr('0'); isFirstInputRef.current = true; 
+                        });
+                    }} 
                     className="bg-red-50 text-red-600 border border-red-200 text-lg font-bold rounded-lg active:scale-95"
                 >
                     C
                 </button>
                 <button 
-                    onPointerDown={(e) => handleKeypadPress(() => setQuantityStr(prev => prev.startsWith('-') ? prev.slice(1) : '-' + prev), e)} 
+                    onPointerDown={(e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        handleKeypadPress(() => setQuantityStr(prev => prev.startsWith('-') ? prev.slice(1) : '-' + prev));
+                    }} 
                     className="bg-gray-100 text-gray-800 border border-gray-300 text-2xl font-bold font-mono rounded-lg active:scale-95"
                 >
                     -
@@ -190,7 +196,7 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
                         <span className="text-2xl font-extrabold text-gray-500 tracking-tight">{activeItem.quantity.toLocaleString()}</span>
                     </div>
                     <div 
-                        onPointerDown={(e) => handleKeypadPress(() => { isFirstInputRef.current = true; }, e)} 
+                        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handleKeypadPress(() => { isFirstInputRef.current = true; }); }} 
                         className="w-[60%] border-2 border-blue-600 ring-2 ring-blue-50 rounded-xl flex flex-col items-center justify-center bg-white shadow-inner cursor-pointer relative overflow-hidden"
                     >
                         <label className="absolute top-1 left-2 text-[9px] font-bold text-gray-400">수량</label>
@@ -198,8 +204,8 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
                     </div>
                 </div>
                 <div className="flex gap-1 h-8 flex-shrink-0 mb-2">
-                    <button onPointerDown={(e) => handleKeypadPress(() => setUnit('개'), e)} className={`flex-1 rounded-lg text-xs font-bold border transition-all ${unit === '개' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white border-gray-200 text-gray-500'}`}>낱개</button>
-                    <button onPointerDown={(e) => handleKeypadPress(() => setUnit('박스'), e)} className={`flex-1 rounded-lg text-xs font-bold border transition-all ${unit === '박스' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white border-gray-200 text-gray-500'}`}>박스</button>
+                    <button onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handleKeypadPress(() => setUnit('개')); }} className={`flex-1 rounded-lg text-xs font-bold border transition-all ${unit === '개' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white border-gray-200 text-gray-500'}`}>낱개</button>
+                    <button onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handleKeypadPress(() => setUnit('박스')); }} className={`flex-1 rounded-lg text-xs font-bold border transition-all ${unit === '박스' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white border-gray-200 text-gray-500'}`}>박스</button>
                 </div>
                 <div className="bg-white border border-gray-300 rounded-lg flex items-center px-2 h-9 mb-2 flex-shrink-0">
                     <ChatBubbleLeftIcon className="w-3.5 h-3.5 text-gray-400 mr-1.5 flex-shrink-0" />

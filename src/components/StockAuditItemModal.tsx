@@ -78,20 +78,32 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
 
     if (!isMounted || !product) return null;
 
-    // 숫자 입력 버튼
+    // 숫자 입력 버튼 (PointerDown)
     const InputButton = ({ onClick, className, children }: any) => (
         <button 
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); playBeep(); onClick(); }} 
+            onPointerDown={(e) => { 
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                playBeep(); 
+                onClick(); 
+            }} 
             className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm ${className}`}
         >
             {children}
         </button>
     );
 
-    // 최종 실행 버튼
+    // 최종 실행 버튼 (Click)
     const ActionButton = ({ onClick, className, children, disabled }: any) => (
         <button 
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); playBeep(); if(!disabled) onClick(); }} 
+            onClick={(e) => { 
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                if(!disabled) {
+                    playBeep(); 
+                    onClick();
+                } 
+            }} 
             disabled={disabled}
             className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm whitespace-nowrap ${className} ${disabled ? 'opacity-50' : ''}`}
         >
