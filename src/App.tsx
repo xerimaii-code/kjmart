@@ -1,5 +1,5 @@
 
-import React, { useState, lazy, Suspense, useMemo, useEffect, useLayoutEffect } from 'react';
+import React, { useState, lazy, Suspense, useMemo, useEffect } from 'react';
 import { AppProvider, useModals, useScanner, useSyncState, useDataActions, useAlert, useMiscUI } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/Header';
@@ -9,10 +9,10 @@ import { exportToXLS, loadScript } from './services/dataService';
 import AddItemModal from './components/AddItemModal';
 import EditItemModal from './components/EditItemModal';
 import { IS_DEVELOPER_MODE } from './config';
-import { App as CapacitorApp } from '@capacitor/app';
 
 // Lazy load pages and heavy modals
 const MainView = lazy(() => import('./pages/MainView')); 
+// FIX: Add type assertion to resolve incorrect type inference for the lazy-loaded module.
 const OrderDetailModal = lazy(() => import('./components/OrderDetailModal') as Promise<{ default: React.ComponentType<any> }>);
 const ScannerModal = lazy(() => import('./components/ScannerModal'));
 const ClearHistoryModal = lazy(() => import('./components/ClearHistoryModal'));
@@ -20,6 +20,7 @@ const ClearHistoryModal = lazy(() => import('./components/ClearHistoryModal'));
 
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
 
+// Fallback UI for suspense
 const PageSuspenseFallback: React.FC = () => (
     <div className="w-full h-full flex items-center justify-center bg-transparent">
         <SpinnerIcon className="w-10 h-10 text-blue-500" />
@@ -79,11 +80,12 @@ const AppContent: React.FC = () => {
         isClearHistoryModalOpen,
         closeClearHistoryModal,
         isDeliveryModalOpen,
-        editingOrder 
+        editingOrder // Get current editing order to use as key
      } = useModals();
-    const { isScannerOpen, onScanSuccess, closeScanner, options } = useScanner();
+    const { isScannerOpen, onScanSuccess, closeScanner, options, scannerContext } = useScanner();
 
-    // 입력창이 떴을 때 배경 어둡게 처리 (98% 블랙 레이어 적용)
+    // [중요] 스캔 모드에서 어떤 입력 팝업이라도 뜨면 배경을 98% 블랙으로 전환
+    // history state의 modal 값을 체크하여 입고(receiveItem)나 실사(auditItem) 팝업 여부도 포함
     const isAnyInputModalOpen = !!addItemModalProps || 
                                !!editItemModalProps || 
                                !!isClearHistoryModalOpen || 
@@ -91,55 +93,8 @@ const AppContent: React.FC = () => {
                                window.history.state?.modal === 'receiveItem' ||
                                window.history.state?.modal === 'auditItem';
     
-    // [중요] 스캐너 -> 입력창 전환 시 흰색(body) 배경이 노출되는 것을 방지하기 위해
-    // 입력창 활성 상태에서는 body 배경을 강제로 검은색으로 변경
-    useLayoutEffect(() => {
-        if (isAnyInputModalOpen) {
-            document.body.classList.add('input-modal-active');
-        } else {
-            document.body.classList.remove('input-modal-active');
-        }
-    }, [isAnyInputModalOpen]);
-
-    // 스캐너가 열려있을 때는 투명 유지(스캐너 자체 레이어에서 암전 처리), 그 외 입력창 시 98% 블랙
-    const backgroundClass = isScannerOpen ? 'bg-transparent' : (isAnyInputModalOpen ? 'bg-black/98' : 'bg-transparent');
-
-    useEffect(() => {
-        const isNative = window.hasOwnProperty('Capacitor');
-        if (isNative) {
-            const backButtonListener = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-                if (window.history.state?.modal) {
-                    window.history.back();
-                } else {
-                    const now = Date.now();
-                    const lastBack = (window as any).lastBackPressTime || 0;
-                    if (now - lastBack < 2000) {
-                        CapacitorApp.exitApp();
-                    } else {
-                        (window as any).lastBackPressTime = now;
-                        const toast = document.createElement('div');
-                        toast.innerText = "'뒤로' 버튼을 한번 더 누르면 종료됩니다.";
-                        Object.assign(toast.style, {
-                            position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
-                            backgroundColor: 'rgba(50, 50, 50, 0.9)', color: 'white', padding: '10px 20px',
-                            borderRadius: '20px', zIndex: '9999', fontSize: '13px', fontWeight: 'bold',
-                            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-                        });
-                        document.body.appendChild(toast);
-                        setTimeout(() => toast.remove(), 2000);
-                    }
-                }
-            });
-
-            return () => {
-                backButtonListener.then(handler => handler.remove());
-            };
-        }
-    }, []);
-
-    // [수정] transition-colors duration-300 제거하여 배경 전환 시 깜박임 방지
     return (
-        <div className={`h-full w-full flex flex-col ${backgroundClass}`}>
+        <div className="h-full w-full flex flex-col bg-transparent">
             <Header />
             <main className="main-content flex-grow relative overflow-y-auto">
                  <Suspense fallback={<PageSuspenseFallback />}>
@@ -147,7 +102,9 @@ const AppContent: React.FC = () => {
                 </Suspense>
             </main>
 
+            {/* Global Modals */}
             <Suspense fallback={null}>
+              {/* Key ensures Modal is destroyed and recreated when order changes, preventing data mix-up */}
               <OrderDetailModal key={editingOrder ? `order-${editingOrder.id}` : 'no-order'} />
               
               {isScannerOpen && (
@@ -162,12 +119,15 @@ const AppContent: React.FC = () => {
               {isClearHistoryModalOpen && <ClearHistoryModal isOpen={isClearHistoryModalOpen} onClose={closeClearHistoryModal} />}
             </Suspense>
             
+            {/* Core Modals (Static Import) */}
             {addItemModalProps && (
                 <AddItemModal
+                    // Use timestamp if available to force remount on consecutive scans of same item
                     key={addItemModalProps.timestamp || addItemModalProps.product.barcode}
                     isOpen={true}
                     product={addItemModalProps.product}
                     existingItem={addItemModalProps.existingItem}
+                    // FIX: Execute payload's onClose if provided, then call the global close handler
                     onClose={() => {
                         addItemModalProps.onClose?.();
                         closeAddItemModal();
@@ -181,7 +141,7 @@ const AppContent: React.FC = () => {
             )}
             {editItemModalProps && (
                 <EditItemModal
-                    key={editItemModalProps.item.barcode}
+                    key={editItemModalProps.item.barcode} // FORCE REMOUNT ON ITEM CHANGE
                     isOpen={true}
                     item={editItemModalProps.item}
                     onClose={closeEditItemModal}
@@ -213,10 +173,21 @@ const AppRouter: React.FC = () => {
     const { user, loading, isAdmin } = useAuth();
     const { initialSyncCompleted } = useSyncState();
 
-    if (loading) return <PageSuspenseFallback />;
-    if (!user) return <LoginPage />;
-    if (!isAdmin) return <AccessDeniedPage />;
-    if (!initialSyncCompleted) return <InitialSyncLoader />;
+    if (loading) {
+        return <PageSuspenseFallback />;
+    }
+
+    if (!user) {
+        return <LoginPage />;
+    }
+
+    if (!isAdmin) {
+        return <AccessDeniedPage />;
+    }
+
+    if (!initialSyncCompleted) {
+        return <InitialSyncLoader />;
+    }
     
     return <AppContent />;
 };
@@ -225,17 +196,22 @@ const App: React.FC = () => {
     const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
     useEffect(() => {
+        // Preload scanner library for faster modal opening.
         loadScript(ZXING_CDN).catch(err => console.warn("Failed to preload scanner library:", err));
 
+        // Register the service worker to enable PWA functionality (offline caching).
         const isPreview = window.location.hostname.includes('usercontent.goog');
-        const isNative = window.hasOwnProperty('Capacitor');
         
-        if ('serviceWorker' in navigator && !IS_DEVELOPER_MODE && !isPreview && !isNative) {
+        if ('serviceWorker' in navigator && !IS_DEVELOPER_MODE && !isPreview) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/service-worker.js')
                     .then(reg => {
+                        console.log('ServiceWorker registration successful with scope: ', reg.scope);
                         setRegistration(reg);
+
+                        // [Automatic Update Logic - Force Update]
                         if (reg.waiting) {
+                            console.log("New version found on load. Updating automatically...");
                             reg.waiting.postMessage({ type: 'SKIP_WAITING' });
                         }
                         
@@ -244,15 +220,20 @@ const App: React.FC = () => {
                             if (newWorker) {
                                 newWorker.addEventListener('statechange', () => {
                                     if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                        console.log("New content is available; please refresh.");
+                                        // Force update immediately
                                         newWorker.postMessage({ type: 'SKIP_WAITING' });
                                     }
                                 });
                             }
                         });
                     })
-                    .catch(error => console.error('SW registration failed:', error));
+                    .catch(error => {
+                        console.error('ServiceWorker registration failed: ', error);
+                    });
             });
 
+            // Reload page when the new service worker takes control (completion of update)
             let refreshing = false;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
                 if (!refreshing) {
@@ -263,6 +244,7 @@ const App: React.FC = () => {
         }
     }, []);
 
+    // Check for SW updates in background when app becomes visible.
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible' && registration) {

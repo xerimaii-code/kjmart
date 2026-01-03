@@ -8,23 +8,23 @@ export interface Customer {
 export interface Product {
     barcode: string;
     name: string;
-    spec?: string;
+    spec?: string; // Added spec field
     costPrice: number;
     sellingPrice: number;
     eventCostPrice?: number;
     salePrice?: number;
-    saleName?: string;
+    saleName?: string; // Added saleName field
     saleStartDate?: string;
     saleEndDate?: string;
     supplierName?: string;
     lastModified?: string;
     stockQuantity?: number;
     bomStatus?: string;
-    ispack?: any;
-    comcode?: string;
-    gubun1?: string;
-    gubun2?: string;
-    gubun3?: string;
+    ispack?: any; // Added to support BOM logic
+    comcode?: string; // Added for full sync
+    gubun1?: string;  // Added for full sync
+    gubun2?: string;  // Added for full sync
+    gubun3?: string;  // Added for full sync
 }
 
 export interface OrderItem {
@@ -34,7 +34,7 @@ export interface OrderItem {
     quantity: number;
     unit: '개' | '박스';
     memo?: string;
-    isModified?: boolean;
+    isModified?: boolean; // Added to track modification status in New Order
 }
 
 export interface AuditedItem {
@@ -68,15 +68,16 @@ export interface ReceivingItem {
     uniqueId: number;
     barcode: string;
     name: string;
-    costPrice: number;
+    costPrice: number; // 입고 시점의 매입가
     sellingPrice: number;
+    // FIX: Add missing quantity property to ReceivingItem type.
     quantity: number;
-    isNew?: boolean;
+    isNew?: boolean; // 새로 추가된 항목인지 여부
 }
 
 export interface ReceivingBatch {
-    id: number;
-    date: string;
+    id: number; // Timestamp-based ID
+    date: string; // YYYY-MM-DD
     supplier: Customer;
     items: ReceivingItem[];
     itemCount: number;
@@ -85,6 +86,7 @@ export interface ReceivingBatch {
     sentAt?: string;
 }
 
+// FIX: Add AddItemModalPayload and EditItemModalPayload types to be used in AppContext.
 export interface AddItemModalPayload {
     product: Product;
     existingItem: OrderItem | null;
@@ -115,6 +117,7 @@ export interface EditItemModalPayload {
 
 export type ScannerContext = 'new-order' | 'modal' | 'product-inquiry' | 'inventory-audit' | null;
 
+// New interface for Scanner Options
 export interface ScannerOptions {
     continuous: boolean;
     useHighPrecision?: boolean;
@@ -160,16 +163,13 @@ export interface SyncSettings {
 
 export interface DeviceSettings {
     selectedCameraId: string | null;
-    selectedCameraLabel?: string;
+    selectedCameraLabel?: string; // 카메라 이름 저장 (ID 변경 대응)
     scanSettings: {
         soundOnScan: boolean;
-        useScannerButton: boolean;
-        scanResolution: '480p' | '720p';
-        scanFps: 24 | 30 | 60 | 'auto';
-        enableDownscaling?: boolean;
-        // 네이티브 전용 설정
-        nativeZoomLevel?: number;
-        nativeTorch?: boolean;
+        useScannerButton: boolean; // Added: Manual scan button toggle
+        scanResolution: '480p' | '720p'; // Added: Resolution selection
+        scanFps: 24 | 30 | 60 | 'auto'; // Modified: Added 'auto' for true variable fps
+        enableDownscaling?: boolean; // [New] 분석 이미지 다운스케일링 여부
     };
     logRetentionDays: number;
     googleDriveSyncSettings: {
@@ -181,7 +181,7 @@ export interface DeviceSettings {
         productInquiry: 'offline' | 'online';
         autoSwitch: boolean;
     };
-    allowDestructiveQueries: boolean;
+    allowDestructiveQueries: boolean; // SQL Runner Safety Setting
     uiFeedback: {
         vibrateOnPress: boolean;
         soundOnPress: boolean;
@@ -202,11 +202,11 @@ export interface BOM {
     pcode: string;
     ccode: string;
     qty: number;
-    id?: string;
+    id?: string; // Composite key helper for IndexedDB
 }
 
 export interface Category {
-    id: string;
+    id: string; // Unique key (e.g., "1-01", "2-01-02")
     level: 1 | 2 | 3;
     code1: string;
     code2?: string;

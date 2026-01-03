@@ -1,13 +1,9 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { DevicePhoneMobileIcon, LogoutIcon, DatabaseIcon, SpinnerIcon, CloudArrowDownIcon, HistoryIcon, UndoIcon, XMarkIcon, ChevronDownIcon, CheckCircleIcon, SparklesIcon } from '../components/Icons';
+import { DevicePhoneMobileIcon, LogoutIcon, DatabaseIcon, SpinnerIcon, CloudArrowDownIcon, HistoryIcon, UndoIcon, XMarkIcon, ChevronDownIcon } from '../components/Icons';
 import ToggleSwitch from '../components/ToggleSwitch';
 import SyncHistoryModal from '../components/SyncHistoryModal';
-
-// Capacitor 플랫폼 체크 (안전하게 window 객체 확인)
-const isNative = window.hasOwnProperty('Capacitor') && (window as any).Capacitor.isNativePlatform();
 
 interface SettingsPageProps {
     isActive: boolean;
@@ -33,9 +29,9 @@ const SettingsRow: React.FC<{
         onClick={onClick}
         className={`flex items-center justify-between p-2.5 ${onClick ? 'cursor-pointer active:bg-gray-50' : ''}`}
     >
-        <div className="flex flex-col pr-2">
+        <div className="flex flex-col">
             <span className={`text-[12px] font-bold ${isDestructive ? 'text-red-600' : 'text-gray-700'}`}>{label}</span>
-            {subLabel && <span className="text-[9px] text-gray-400 mt-0.5 leading-tight whitespace-pre-wrap">{subLabel}</span>}
+            {subLabel && <span className="text-[9px] text-gray-400 mt-0.5 leading-tight">{subLabel}</span>}
         </div>
         <div className="flex-shrink-0 ml-2">
             {children}
@@ -71,13 +67,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
 
     const refreshCameras = useCallback(async () => {
         if (!navigator.mediaDevices?.enumerateDevices) return;
-        
         setIsRefreshingCamera(true);
         try {
             let devices = await navigator.mediaDevices.enumerateDevices();
             let videoDevices = devices.filter(device => device.kind === 'videoinput');
             const hasLabels = videoDevices.some(d => d.label && d.label.length > 0);
-            
             if (videoDevices.length === 0 || !hasLabels) {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -104,7 +98,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         const cameraId = event.target.value;
         const selectedDevice = cameras.find(c => c.deviceId === cameraId);
         await setSelectedCameraId(cameraId === 'default' ? null : cameraId, selectedDevice?.label);
-        showToast('기본 카메라가 설정되었습니다.', 'success');
+        showToast('설정 저장됨', 'success');
     };
 
     const handleReset = (type: 'customers' | 'products') => {
@@ -124,37 +118,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
         <div className="h-full flex flex-col bg-gray-50">
             <div className="scrollable-content p-2.5">
                 <div className="max-w-xl mx-auto w-full">
-                    <div className="px-2 mb-4 flex items-center gap-2">
-                        {isNative ? (
-                            <span className="bg-indigo-600 text-white text-[10px] font-black px-2 py-1 rounded-full flex items-center gap-1 shadow-sm animate-pulse">
-                                <SparklesIcon className="w-3 h-3"/> APK NATIVE MODE
-                            </span>
-                        ) : (
-                            <span className="bg-emerald-500 text-white text-[10px] font-black px-2 py-1 rounded-full flex items-center gap-1 shadow-sm">
-                                <DatabaseIcon className="w-3 h-3"/> PWA WEB MODE
-                            </span>
-                        )}
-                        <span className="text-[10px] text-gray-400 font-bold uppercase tabular-nums">KJ-MART V4.0</span>
-                    </div>
-
-                    {isNative && (
-                        <SettingsSection title="하드웨어 엔진 (APK 전용)">
-                            <SettingsRow label="카메라 확대 배율" subLabel={`현재: ${scanSettings.nativeZoomLevel?.toFixed(1)}x`}>
-                                <div className="flex items-center gap-2 w-32">
-                                    <input 
-                                        type="range" 
-                                        min="1.0" 
-                                        max="5.0" 
-                                        step="0.1" 
-                                        value={scanSettings.nativeZoomLevel || 1.0} 
-                                        onChange={(e) => setScanSettings({ nativeZoomLevel: parseFloat(e.target.value) })}
-                                        className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                                    />
-                                </div>
-                            </SettingsRow>
-                        </SettingsSection>
-                    )}
-
                     <SettingsSection title="스캔 최적화">
                         <SettingsRow label="기본 카메라">
                             <div className="flex gap-1.5 items-center justify-end w-full max-w-[170px]">
@@ -183,33 +146,34 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                             </div>
                         </SettingsRow>
 
-                        {!isNative && (
-                            <div className="p-2 bg-slate-50 border-t border-b border-gray-100">
-                                <div className="grid grid-cols-3 gap-1.5">
-                                    <button 
-                                        onClick={() => setScanSettings({ scanResolution: '720p', scanFps: 30, enableDownscaling: true })}
-                                        className={`relative flex flex-col items-center py-1.5 rounded-lg border-2 transition-all ${scanSettings.scanResolution === '720p' && scanSettings.scanFps === 30 && scanSettings.enableDownscaling ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-50' : 'bg-gray-100 border-transparent opacity-60'}`}
-                                    >
-                                        <div className="absolute -top-1.5 -right-0.5">
-                                            <div className="bg-emerald-600 text-white text-[6px] font-black px-1 py-0.5 rounded-full shadow-sm animate-pulse">BEST</div>
-                                        </div>
-                                        <span className="text-[11px] font-black text-slate-800">에코 모드</span>
-                                    </button>
-                                    <button 
-                                        onClick={() => setScanSettings({ scanResolution: '720p', scanFps: 'auto', enableDownscaling: false })}
-                                        className={`relative flex flex-col items-center py-1.5 rounded-lg border-2 transition-all ${scanSettings.scanResolution === '720p' && scanSettings.scanFps === 'auto' && !scanSettings.enableDownscaling ? 'bg-white border-indigo-600 shadow-sm ring-1 ring-indigo-50' : 'bg-gray-100 border-transparent opacity-60'}`}
-                                    >
-                                        <span className="text-[11px] font-black text-slate-800">가변 모드</span>
-                                    </button>
-                                    <button 
-                                        onClick={() => setScanSettings({ scanResolution: '720p', scanFps: 30, enableDownscaling: false })}
-                                        className={`flex flex-col items-center py-1.5 rounded-lg border-2 transition-all ${scanSettings.scanResolution === '720p' && scanSettings.scanFps === 30 && !scanSettings.enableDownscaling ? 'bg-white border-blue-500 shadow-sm ring-1 ring-blue-50' : 'bg-gray-100 border-transparent opacity-60'}`}
-                                    >
-                                        <span className="text-[11px] font-black text-slate-800">정밀 모드</span>
-                                    </button>
-                                </div>
+                        <div className="p-2 bg-slate-50 border-t border-b border-gray-100">
+                            <div className="grid grid-cols-3 gap-1.5">
+                                <button 
+                                    onClick={() => setScanSettings({ scanResolution: '720p', scanFps: 30, enableDownscaling: true })}
+                                    className={`relative flex flex-col items-center py-1.5 rounded-lg border-2 transition-all ${scanSettings.scanResolution === '720p' && scanSettings.scanFps === 30 && scanSettings.enableDownscaling ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-50' : 'bg-gray-100 border-transparent opacity-60'}`}
+                                >
+                                    <div className="absolute -top-1.5 -right-0.5">
+                                        <div className="bg-emerald-600 text-white text-[6px] font-black px-1 py-0.5 rounded-full shadow-sm animate-pulse">BEST</div>
+                                    </div>
+                                    <span className="text-[11px] font-black text-slate-800">에코 모드</span>
+                                    <span className="text-[8px] font-bold text-emerald-600 mt-0.5 uppercase tracking-tighter">연산 68%↓</span>
+                                </button>
+                                <button 
+                                    onClick={() => setScanSettings({ scanResolution: '720p', scanFps: 'auto', enableDownscaling: false })}
+                                    className={`relative flex flex-col items-center py-1.5 rounded-lg border-2 transition-all ${scanSettings.scanResolution === '720p' && scanSettings.scanFps === 'auto' && !scanSettings.enableDownscaling ? 'bg-white border-indigo-600 shadow-sm ring-1 ring-indigo-50' : 'bg-gray-100 border-transparent opacity-60'}`}
+                                >
+                                    <span className="text-[11px] font-black text-slate-800">가변 모드</span>
+                                    <span className="text-[8px] font-bold text-indigo-600 mt-0.5 uppercase tracking-tighter">ML Kit 기반</span>
+                                </button>
+                                <button 
+                                    onClick={() => setScanSettings({ scanResolution: '720p', scanFps: 30, enableDownscaling: false })}
+                                    className={`flex flex-col items-center py-1.5 rounded-lg border-2 transition-all ${scanSettings.scanResolution === '720p' && scanSettings.scanFps === 30 && !scanSettings.enableDownscaling ? 'bg-white border-blue-500 shadow-sm ring-1 ring-blue-50' : 'bg-gray-100 border-transparent opacity-60'}`}
+                                >
+                                    <span className="text-[11px] font-black text-slate-800">정밀 모드</span>
+                                    <span className="text-[8px] font-bold text-blue-500 mt-0.5 uppercase tracking-tighter">Full Data</span>
+                                </button>
                             </div>
-                        )}
+                        </div>
 
                         <SettingsRow label="스캔 알림음">
                             <ToggleSwitch id="sound-scan" label="" checked={scanSettings.soundOnScan} onChange={(checked) => setScanSettings({ soundOnScan: checked })} />
@@ -277,7 +241,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                         <SettingsRow label="SQL 쓰기 권한">
                             <ToggleSwitch id="allow-destructive" label="" checked={allowDestructiveQueries} onChange={setAllowDestructiveQueries} color="red" />
                         </SettingsRow>
-                        {isInstallPromptAvailable && !isNative && (
+                        {isInstallPromptAvailable && (
                             <SettingsRow label="앱 설치" onClick={triggerInstallPrompt}><DevicePhoneMobileIcon className="w-5 h-5 text-blue-600" /></SettingsRow>
                         )}
                         <SettingsRow label="로그아웃" subLabel={user?.email || ''} onClick={handleLogout} isDestructive={true}>

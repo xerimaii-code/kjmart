@@ -67,7 +67,7 @@ const ActionModal: React.FC<ActionModalProps> = ({
 
     return createPortal(
         <div 
-            className={`fixed inset-0 bg-black ${zIndexClass} transition-opacity duration-300 app-modal ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}
+            className={`fixed inset-0 bg-black ${zIndexClass} transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`}
             onClick={onClose}
             onDoubleClick={onClose} // 배경 더블 클릭 시 닫기 추가
             role="dialog"

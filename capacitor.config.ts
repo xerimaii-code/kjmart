@@ -5,16 +5,13 @@ const config: CapacitorConfig = {
   appId: 'com.kjmart.app',
   appName: 'KJ Mart',
   webDir: 'dist',
-  backgroundColor: '#00000000', // 네이티브 레벨 투명화
   server: {
     androidScheme: 'https',
     cleartext: true
   },
   plugins: {
-    CapacitorHttp: {
-      enabled: true,
-    },
-  },
+    // 필요한 경우 플러그인 설정 추가
+  }
 };
 
 export default config;

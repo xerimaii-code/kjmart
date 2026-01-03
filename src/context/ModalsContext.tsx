@@ -1,9 +1,5 @@
-
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
 import { Order, AddItemModalPayload, EditItemModalPayload, ScannerContext as ScannerContextType, ScannerOptions } from '../types';
-
-// Capacitor 플랫폼 체크 상수
-const isNative = window.hasOwnProperty('Capacitor');
 
 // --- TYPE DEFINITIONS ---
 export interface ModalsState {
@@ -38,6 +34,7 @@ export interface ModalsActions {
 }
 
 // --- CONTEXTS ---
+// We can use a single context as state and actions are often used together in modal logic.
 const ModalsContext = createContext<(ModalsState & ModalsActions) | undefined>(undefined);
 
 // --- INITIAL STATE ---
@@ -61,7 +58,7 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const [modalsState, setModalsState] = useState<ModalsState>(initialModalsState);
     const navLock = useRef(false);
 
-    // --- History Management ---
+    // --- History Management for ALL Modals ---
     useEffect(() => {
         const handlePopState = (event: PopStateEvent) => {
             const modalState = event.state?.modal;
@@ -73,7 +70,7 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 if (prev.isDeliveryModalOpen && modalState !== 'delivery') {
                     next.isDeliveryModalOpen = false; next.orderToExport = null;
                 }
-                if (prev.addItemModalProps && !['addItem', 'scanner'].includes(modalState)) {
+                if (prev.addItemModalProps && !['addItem', 'scanner'].includes(modalState)) { // Keep open if scanner is active
                     next.addItemModalProps = null;
                 }
                 if (prev.editItemModalProps && modalState !== 'editItem') {
@@ -119,19 +116,8 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         closeEditItemModal: () => closeModalWithHistory('editItem', () => setModalsState(p => ({ ...p, editItemModalProps: null }))),
         openClearHistoryModal: () => setModalsState(p => ({ ...p, isClearHistoryModalOpen: true })),
         closeClearHistoryModal: () => setModalsState(p => ({ ...p, isClearHistoryModalOpen: false })),
-        
-        // 스캐너 오픈 (네이티브 감지 포함)
-        openScanner: (context: ScannerContextType, onScan: (b: string) => void, opts: boolean | ScannerOptions) => {
-            // [중요] 네이티브 환경인 경우 별도 로직을 탈 수 있도록 상태만 설정
-            // 실제 분기는 AppContent 레이어에서 ScannerModal 대신 NativeScannerModal을 렌더링함으로써 수행
-            openModalWithHistory('scanner', () => setModalsState(p => ({ 
-                ...p, 
-                isScannerOpen: true, 
-                scannerContext: context, 
-                onScanSuccess: onScan, 
-                options: typeof opts === 'boolean' ? { continuous: opts, useHighPrecision: false } : opts 
-            })));
-        },
+        // Scanner actions integrated
+        openScanner: (context: ScannerContextType, onScan: (b: string) => void, opts: boolean | ScannerOptions) => openModalWithHistory('scanner', () => setModalsState(p => ({ ...p, isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, options: typeof opts === 'boolean' ? { continuous: opts, useHighPrecision: false } : opts }))),
         closeScanner: () => closeModalWithHistory('scanner', () => setModalsState(p => ({ ...p, isScannerOpen: false }))),
     }), [openModalWithHistory, closeModalWithHistory]);
 
@@ -144,6 +130,7 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     );
 };
 
+// --- HOOK ---
 export const useModals = () => {
     const context = useContext(ModalsContext);
     if (context === undefined) throw new Error('useModals must be used within ModalsProvider');

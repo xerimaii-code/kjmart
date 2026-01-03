@@ -46,7 +46,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         if (!uiFeedback?.soundOnPress) return;
         const audioCtx = audioCtxRef.current;
         if (!audioCtx) return;
+        
+        // Ensure AudioContext is running
         if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        
         try {
             const oscillator = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
@@ -98,7 +101,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                 if (!disabled && !isSubmitting) onClick(); 
             }} 
             disabled={disabled || isSubmitting} 
-            className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm ${className} ${disabled || isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm whitespace-nowrap ${className} ${disabled || isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
             {children}
         </button>
@@ -126,16 +129,16 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                 {trigger === 'scan' ? (
                     <>
                         <div className="grid grid-cols-2 gap-1">
-                            <ActionButton onClick={() => { closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-sm"><XCircleIcon className="w-4 h-4 mr-1" />취소</ActionButton>
-                            <ActionButton onClick={() => { onClose(); if (onNextScan) setTimeout(onNextScan, 200); }} className="bg-white border border-gray-300 text-gray-600 h-11 text-sm"><ChevronRightIcon className="w-4 h-4 mr-1" />스킵</ActionButton>
+                            <ActionButton onClick={() => { closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm"><XCircleIcon className="w-4 h-4 mr-1" />취소</ActionButton>
+                            <ActionButton onClick={() => { onClose(); if (onNextScan) setTimeout(onNextScan, 200); }} className="bg-white border border-gray-300 text-gray-600 h-11 text-xs sm:text-sm"><ChevronRightIcon className="w-4 h-4 mr-1" />스킵</ActionButton>
                         </div>
-                        <ActionButton onClick={() => { onAdd({ quantity: finalQuantity, unit, memo: memo.trim() }); closeScanner(); onClose(); }} disabled={!isQuantityValid} className="bg-white border border-blue-200 text-blue-700 font-bold py-2.5 text-sm h-11"><SaveIcon className="w-4 h-4 mr-1" />저장 & 종료</ActionButton>
-                        <ActionButton onClick={() => { onAdd({ quantity: finalQuantity, unit, memo: memo.trim() }); onClose(); if (onNextScan) setTimeout(onNextScan, 200); }} disabled={!isQuantityValid} className="w-full shadow-md bg-blue-600 text-white py-3 text-lg font-extrabold h-14"><BarcodeScannerIcon className="w-6 h-6 mr-1.5" />추가 & 스캔</ActionButton>
+                        <ActionButton onClick={() => { onAdd({ quantity: finalQuantity, unit, memo: memo.trim() }); closeScanner(); onClose(); }} disabled={!isQuantityValid} className="bg-white border border-blue-200 text-blue-700 font-bold py-2.5 text-xs sm:text-sm h-11"><SaveIcon className="w-4 h-4 mr-1" />저장 & 종료</ActionButton>
+                        <ActionButton onClick={() => { onAdd({ quantity: finalQuantity, unit, memo: memo.trim() }); onClose(); if (onNextScan) setTimeout(onNextScan, 200); }} disabled={!isQuantityValid} className="w-full shadow-md bg-blue-600 text-white py-3 text-sm sm:text-lg font-extrabold h-14"><BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />추가 & 스캔</ActionButton>
                     </>
                 ) : (
                     <div className="flex flex-col gap-1">
-                        <ActionButton onClick={onClose} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-sm"><XCircleIcon className="w-4 h-4 mr-1" />취소</ActionButton>
-                        <ActionButton onClick={() => { onAdd({ quantity: finalQuantity, unit, memo: memo.trim() }); onClose(); }} disabled={!isQuantityValid} className="bg-blue-600 text-white hover:bg-blue-700 font-extrabold h-16 text-xl shadow-md"><SaveIcon className="w-6 h-6 mr-1.5" />확인</ActionButton>
+                        <ActionButton onClick={onClose} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm"><XCircleIcon className="w-4 h-4 mr-1" />취소</ActionButton>
+                        <ActionButton onClick={() => { onAdd({ quantity: finalQuantity, unit, memo: memo.trim() }); onClose(); }} disabled={!isQuantityValid} className="bg-blue-600 text-white hover:bg-blue-700 font-extrabold h-16 text-lg sm:text-xl shadow-md"><SaveIcon className="w-6 h-6 mr-1.5" />확인</ActionButton>
                     </div>
                 )}
             </div>
@@ -200,11 +203,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         </div>
     );
 
-    // [수정] 배경 전환 애니메이션 제거 (깜박임 방지)
-    const backdropClass = 'bg-black/[0.98]';
+    const backdropClass = trigger === 'scan' ? 'bg-transparent' : 'bg-black bg-opacity-50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={() => { closeScanner(); onClose(); }} role="dialog" aria-modal="true">
+        <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={() => { closeScanner(); onClose(); }} role="dialog" aria-modal="true">
             <KeypadLayout layoutId="add_item_modal_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body

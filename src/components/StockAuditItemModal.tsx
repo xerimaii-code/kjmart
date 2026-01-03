@@ -93,7 +93,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
         <button 
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); playBeep(); if(!disabled) onClick(); }} 
             disabled={disabled}
-            className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm ${className} ${disabled ? 'opacity-50' : ''}`}
+            className={`active:scale-95 transition-transform flex items-center justify-center font-bold rounded-lg shadow-sm whitespace-nowrap ${className} ${disabled ? 'opacity-50' : ''}`}
         >
             {children}
         </button>
@@ -107,7 +107,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
             <div className="flex flex-col gap-1 flex-shrink-0 mb-1">
                 {/* 1행: 취소 | 스킵 (스캔 모드일 때만 스킵 표시) */}
                 <div className="grid grid-cols-2 gap-1">
-                    <ActionButton onClick={() => { closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs font-bold">
+                    <ActionButton onClick={() => { closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm font-bold">
                         <XCircleIcon className="w-4 h-4 mr-1" />취소
                     </ActionButton>
                     <ActionButton 
@@ -116,7 +116,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                             else if (trigger === 'scan') onConfirm(Number(qtyStr), true); 
                             else onClose(); 
                         }} 
-                        className="bg-white border border-gray-300 text-gray-500 h-11 text-xs font-bold"
+                        className="bg-white border border-gray-300 text-gray-500 h-11 text-xs sm:text-sm font-bold"
                     >
                         <ChevronRightIcon className="w-4 h-4 mr-1" />스킵
                     </ActionButton>
@@ -125,7 +125,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                 {/* 2행: 적용/저장 & 종료 */}
                 <ActionButton 
                     onClick={() => onConfirm(Number(qtyStr), false)} 
-                    className="bg-white border-2 border-indigo-100 text-indigo-600 h-12 text-sm font-black shadow-sm"
+                    className="bg-white border-2 border-indigo-100 text-indigo-600 h-12 text-xs sm:text-sm font-black shadow-sm"
                 >
                     <SaveIcon className="w-4 h-4 mr-1.5" />{actionLabel}&종료
                 </ActionButton>
@@ -134,16 +134,16 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                 {trigger === 'scan' ? (
                     <ActionButton 
                         onClick={() => onConfirm(Number(qtyStr), true)} 
-                        className="bg-indigo-600 text-white h-16 text-xl shadow-lg font-black"
+                        className="bg-indigo-600 text-white h-16 text-base sm:text-xl shadow-lg font-black"
                     >
-                        <BarcodeScannerIcon className="w-7 h-7 mr-2" />{actionLabel}후스캔
+                        <BarcodeScannerIcon className="w-5 h-5 sm:w-7 sm:h-7 mr-2" />{actionLabel}후스캔
                     </ActionButton>
                 ) : (
                     <ActionButton 
                         onClick={() => onConfirm(Number(qtyStr), false)} 
-                        className="bg-indigo-600 text-white h-16 text-xl shadow-lg font-black"
+                        className="bg-indigo-600 text-white h-16 text-base sm:text-xl shadow-lg font-black"
                     >
-                        <CheckCircleIcon className="w-7 h-7 mr-2" />{isImmediate ? '즉시 적용' : '확인'}
+                        <CheckCircleIcon className="w-5 h-5 sm:w-7 sm:h-7 mr-2" />{isImmediate ? '즉시 적용' : '확인'}
                     </ActionButton>
                 )}
             </div>
@@ -206,9 +206,8 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
         </div>
     );
 
-    // [수정] 배경 전환 애니메이션 제거 (깜박임 방지)
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${isVisible ? 'bg-black/[0.98]' : 'bg-transparent'}`} onPointerDown={(e) => { if(e.target === e.currentTarget) onClose(); }}>
+        <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? 'bg-black bg-opacity-50' : 'bg-transparent'}`} onPointerDown={(e) => { if(e.target === e.currentTarget) onClose(); }}>
             <KeypadLayout layoutId="audit_keypad_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body

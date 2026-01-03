@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useDataState, useAlert, useMiscUI, useScanner } from '../context/AppContext';
 import { ReceivingBatch, ReceivingItem, Product, Customer, ReceivingDraft } from '../types';
@@ -232,8 +233,17 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         return () => unsubscribe();
     }, [isActive, refreshLocalBatches]);
 
+    // [검색 로직 수정] 2글자 이상일 때만 검색 실행 (바코드 제외)
     useEffect(() => {
-        searchProduct(debouncedProductSearch);
+        const term = debouncedProductSearch.trim();
+        const isBarcode = /^\d+$/.test(term);
+        
+        if (term.length >= 2 || (isBarcode && term.length > 0)) {
+            searchProduct(term);
+        } else if (term.length === 0) {
+            // 검색어 비우면 결과 초기화 (useProductSearch 내부 로직이 처리)
+            searchProduct('');
+        }
     }, [debouncedProductSearch, searchProduct]);
 
     const handleSend = async () => {

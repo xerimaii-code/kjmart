@@ -110,7 +110,7 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
                 <div className="grid grid-cols-2 gap-1">
                      <button 
                         onClick={(e) => handleFinalAction(onClose, e)} 
-                        className="bg-gray-100 text-gray-500 border border-gray-200 h-12 text-sm font-bold rounded-lg shadow-sm active:scale-95 flex items-center justify-center gap-1 transition-transform"
+                        className="bg-gray-100 text-gray-500 border border-gray-200 h-12 text-xs sm:text-sm font-bold rounded-lg shadow-sm active:scale-95 flex items-center justify-center gap-1 transition-transform whitespace-nowrap"
                     >
                         <XCircleIcon className="w-4 h-4" />취소
                     </button>
@@ -120,7 +120,7 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
                             onClose(); 
                         }, e)} 
                         disabled={!isQuantityValid}
-                        className="bg-blue-600 text-white font-bold h-12 text-lg rounded-lg shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-transform"
+                        className="bg-blue-600 text-white font-bold h-12 text-sm sm:text-lg rounded-lg shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-transform whitespace-nowrap"
                     >
                         <SaveIcon className="w-5 h-5" />저장
                     </button>
@@ -129,9 +129,9 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
                     <button 
                         onClick={(e) => handleFinalAction(handleSaveAndScan, e)}
                         disabled={!isQuantityValid}
-                        className="bg-blue-600 text-white font-extrabold h-16 text-xl rounded-lg shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-transform"
+                        className="bg-blue-600 text-white font-extrabold h-16 text-base sm:text-xl rounded-lg shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-transform whitespace-nowrap"
                     >
-                        <BarcodeScannerIcon className="w-6 h-6 mr-1.5" />저장 & 스캔
+                        <BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />저장 & 스캔
                     </button>
                 )}
             </div>
