@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAlert, useDeviceSettings } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
-import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon, ReturnBoxIcon, WarningIcon } from './Icons';
+import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon, ReturnBoxIcon } from './Icons';
 import './ScannerModal.css';
 
 declare const ZXing: any;
@@ -11,7 +11,6 @@ declare const BarcodeDetector: any;
 
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
 const SCAN_TIMEOUT_MS = 30000; 
-// [감도 유지] 분석 간격을 100ms로 유지 (초당 10회 분석)
 const ANALYSIS_INTERVAL_MS = 100; 
 
 let sharedAudioCtx: AudioContext | null = null;
@@ -254,39 +253,66 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             if (Date.now() - lastActionTimeRef.current > SCAN_TIMEOUT_MS) {
                 setIsScanningActive(false); setIsAutoSleeping(true); stopCamera(); return;
             }
+            
             try {
                 const video = videoRef.current;
+                const guide = guideBoxRef.current;
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                
                 if (!ctx || video.videoWidth === 0) return;
 
+                // 1. 실제 비디오 스트림 해상도
+                const vw = video.videoWidth;
+                const vh = video.videoHeight;
+
+                // 2. 화면에 표시된 비디오 요소의 크기 (CSS 적용 후)
                 const vRect = video.getBoundingClientRect();
-                const gRect = guideBoxRef.current.getBoundingClientRect();
-                const scaleX = video.videoWidth / vRect.width;
-                const scaleY = video.videoHeight / vRect.height;
-                const scale = Math.max(scaleX, scaleY); 
-                const renderWidth = video.videoWidth / scale;
-                const renderHeight = video.videoHeight / scale;
-                const offsetX = (vRect.width - renderWidth) / 2;
-                const offsetY = (vRect.height - renderHeight) / 2;
+                // 3. 화면에 표시된 가이드 박스의 크기와 위치
+                const gRect = guide.getBoundingClientRect();
+
+                // 4. 'object-fit: cover' 스케일 계산
+                // 화면 요소 대비 비디오 원본의 비율을 구함
+                // 가로 비율과 세로 비율 중 '더 작은' 쪽이 cover의 기준이 됨 (즉, 화면을 꽉 채우기 위해 더 많이 확대된 비율)
+                // Math.max를 사용해야 함: 요소(vRect)에 맞추기 위해 비디오(vw, vh)가 얼마나 줄어들었는지 역산
+                // scale = 비디오 원본 크기 / 화면 표시 크기 (이 값이 작을수록 비디오가 많이 축소된 것)
+                // object-fit: cover는 가로/세로 중 비율이 '더 큰' 쪽을 기준으로 맞춤 (즉, 덜 축소되는 쪽)
                 
-                const STRICT_PADDING_W = 10; 
-                const STRICT_PADDING_H = 5; 
-                const safeWidth = Math.max(0, gRect.width - STRICT_PADDING_W * 2);
-                const safeHeight = Math.max(0, gRect.height - STRICT_PADDING_H * 2);
+                const ratioX = vw / vRect.width;
+                const ratioY = vh / vRect.height;
+                const scale = Math.min(ratioX, ratioY); // 원본 좌표로 변환하기 위한 스케일
 
-                const sx = Math.floor((gRect.left - vRect.left - offsetX + STRICT_PADDING_W) * scale);
-                const sy = Math.floor((gRect.top - vRect.top - offsetY + STRICT_PADDING_H) * scale);
-                const sw = Math.floor(safeWidth * scale);
-                const sh = Math.floor(safeHeight * scale);
-
-                if (sx < 0 || sy < 0 || sw <= 0 || sh <= 0 || sx + sw > video.videoWidth || sy + sh > video.videoHeight) return;
-
-                canvas.width = sw;
-                canvas.height = sh;
-                ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+                // 5. 비디오 내에서 보이는 영역(Visible Area)의 좌상단 좌표 계산
+                // 화면 요소의 가로세로 비율과 비디오의 가로세로 비율 차이로 인해 잘려나간 부분 계산
+                const visibleW = vRect.width * scale;
+                const visibleH = vRect.height * scale;
                 
-                if (!isNativeSupported) enhanceImage(ctx, sw, sh);
+                const startX = (vw - visibleW) / 2;
+                const startY = (vh - visibleH) / 2;
+
+                // 6. 가이드 박스의 상대 위치를 비디오 원본 좌표로 변환
+                // (가이드박스 좌측 - 비디오요소 좌측) * 스케일 + 잘려나간 X길이
+                const guideX = (gRect.left - vRect.left) * scale + startX;
+                const guideY = (gRect.top - vRect.top) * scale + startY;
+                const guideW = gRect.width * scale;
+                const guideH = gRect.height * scale;
+
+                // 7. [핵심] 분석 영역(ROI) 설정
+                // 가이드 박스의 가로폭은 100% 사용하되, 높이는 중앙 25%만 사용하여 위아래 바코드 간섭 차단
+                const cropH = guideH * 0.25;
+                const cropY = guideY + (guideH - cropH) / 2;
+
+                // 8. 캔버스 크기 설정 및 그리기
+                canvas.width = guideW;
+                canvas.height = cropH;
+
+                ctx.drawImage(
+                    video, 
+                    guideX, cropY, guideW, cropH, // Source (Video)
+                    0, 0, guideW, cropH           // Destination (Canvas)
+                );
+                
+                if (!isNativeSupported) enhanceImage(ctx, guideW, cropH);
 
                 if (isNativeSupported && detectorRef.current) {
                     const barcodes = await detectorRef.current.detect(canvas);
@@ -335,7 +361,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                                 {res.toUpperCase()} / {isNativeSupported ? 'GPU' : 'CPU'} / HIGH-SENSITIVITY
                             </p>
                             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-shadow">
-                                {isAutoSleeping ? "절전 모드" : (isScanningActive ? "바코드를 비추세요" : "대기 중")}
+                                {isAutoSleeping ? "절전 모드" : (isScanningActive ? "중앙 가이드에 맞춰주세요" : "대기 중")}
                             </p>
                         </div>
                         <div ref={guideBoxRef} className={`scanner-guide-hole w-full ${(isScanningActive && !isPaused) ? 'active' : ''} ${isPaused ? 'paused-overlay' : ''} ${isAutoSleeping ? 'opacity-20' : ''}`} />
