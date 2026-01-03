@@ -43,9 +43,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const isMountedRef = useRef(false);
     const lastActionTimeRef = useRef<number>(Date.now());
     
-    const longPressTimer = useRef<any>(null);
-    const isLongPressTriggered = useRef(false);
-
+    // 버튼 제어용 타이머 제거 (즉시 반응형으로 변경)
+    
     const { selectedCameraId, selectedCameraLabel, scanSettings, setSelectedCameraId } = useDeviceSettings();
     const { showToast } = useAlert();
     
@@ -113,6 +112,18 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }
     }, [isOpen]);
 
+    // 모달이 열리거나(Pause) 닫힐 때(Resume) 상태 관리
+    useEffect(() => {
+        if (isPaused) {
+            // 입력 모달이 열리면 스캔 중지 및 대기 상태로 전환
+            stopDetection();
+            setIsScanningActive(false); 
+        } else if (isOpen && isStreamReady) {
+            // 입력 모달이 닫히면 카메라는 켜두되, 스캔은 '대기' 상태로 시작 (버튼 눌러야 함)
+            startDetection(); 
+        }
+    }, [isPaused, isOpen, isStreamReady]);
+
     const unlockAudio = useCallback(() => {
         const ctx = getAudioContext();
         if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -175,7 +186,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
         try {
             const res = scanSettings.scanResolution || '480p';
-            // Default 720p for better recognition if supported
             const widthIdeal = res === '720p' ? 1280 : 640;
             const heightIdeal = res === '720p' ? 720 : 480;
 
@@ -186,7 +196,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 advanced: [{ focusMode: 'continuous' } as any]
             };
 
-            // Camera selection logic
             let constraints = { video: baseConstraints };
             if (selectedCameraId) {
                 constraints.video = { ...baseConstraints, deviceId: { exact: selectedCameraId } };
@@ -196,7 +205,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             try {
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
             } catch(e) {
-                // Fallback to any environment camera if specific ID fails
                 if (selectedCameraId) {
                     stream = await navigator.mediaDevices.getUserMedia({ video: baseConstraints });
                 } else {
@@ -212,7 +220,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             mediaStreamRef.current = stream;
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
-                // Important: wait for play to ensure dimensions are ready
                 await videoRef.current.play();
                 
                 triggerRefocus();
@@ -240,14 +247,19 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         
         playBeep();
         
+        // [중요] 성공 시 무조건 스캔을 멈추고 대기 상태로 전환 (입력 모달이 뜨는 동안 분석 방지)
+        if (scanSettings.useScannerButton) {
+            setIsScanningActive(false);
+        }
+
         if (continuous) {
             onScanSuccess(barcode);
-            // Debounce for continuous scanning
+            // 연속 스캔 모드여도 버튼식일 경우 사용자가 다시 눌러야 함 (입력 모달 종료 후)
             setTimeout(() => {
                 if (isMountedRef.current && !isPaused) {
                     isHandlingResult.current = false;
                 }
-            }, 1500);
+            }, 1000);
         } else {
             stopDetection();
             stopCamera();
@@ -257,28 +269,17 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     };
 
     // [Image Enhancement Logic - CPU Intensive]
-    // 하드웨어 가속을 쓸 수 없을 때(ZXing)만 사용하여 인식률을 높임
     const enhanceImage = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
         try {
             const imageData = ctx.getImageData(0, 0, width, height);
             const data = imageData.data;
-            
-            // Simple Contrast Stretch + Grayscale
-            const mid = 128;
-            const factor = 1.3;
-
+            const mid = 128; const factor = 1.3;
             for (let i = 0; i < data.length; i += 4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
+                const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
                 const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-                
                 let val = (gray - mid) * factor + mid;
                 val = Math.max(0, Math.min(255, val));
-
-                data[i] = val;
-                data[i+1] = val;
-                data[i+2] = val;
+                data[i] = val; data[i+1] = val; data[i+2] = val;
             }
             ctx.putImageData(imageData, 0, 0);
         } catch (e) { }
@@ -287,10 +288,18 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const startDetection = () => {
         stopDetection();
         if (!isStreamReady || isPaused || isAutoSleeping) return;
-        if (scanSettings.useScannerButton && !isScanningActive) return;
+        
+        // 버튼 사용 모드일 때 active가 아니면 루프 자체를 시작하지 않거나, 루프 내부에서 즉시 리턴
+        // 여기서는 루프를 돌리되 내부에서 컷트하여 '반응성'을 유지함
 
         scanIntervalRef.current = setInterval(async () => {
             if (!videoRef.current || !guideBoxRef.current || !canvasRef.current || isPaused || !isMountedRef.current || isAutoSleeping) return;
+            
+            // [핵심 로직] 버튼식 스캔 모드에서 사용자가 버튼을 누르지 않았다면(Active false) CPU 연산 절대 금지
+            if (scanSettings.useScannerButton && !isScanningActive) {
+                return;
+            }
+
             if (Date.now() - lastActionTimeRef.current > SCAN_TIMEOUT_MS) {
                 setIsScanningActive(false);
                 setIsAutoSleeping(true);
@@ -318,7 +327,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 const offsetX = (vRect.width - renderWidth) / 2;
                 const offsetY = (vRect.height - renderHeight) / 2;
                 
-                // 박스 내부만 인식하도록 Padding 추가
                 const STRICT_PADDING = 15; 
                 const safeWidth = Math.max(0, gRect.width - STRICT_PADDING * 2);
                 const safeHeight = Math.max(0, gRect.height - STRICT_PADDING * 2);
@@ -332,7 +340,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     return;
                 }
 
-                // 분석용 캔버스 크기 (다운스케일링 적용)
+                // 분석용 캔버스 크기 (다운스케일링)
                 let destW = sw;
                 let destH = sh;
                 if (scanSettings.enableDownscaling && destW > 640) {
@@ -346,9 +354,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 
                 ctx.drawImage(video, sx, sy, sw, sh, 0, 0, destW, destH);
                 
-                // [배터리 최적화 핵심 로직]
-                // 하드웨어 가속(Native)이 지원되면 CPU를 사용하는 이미지 강화(enhanceImage)를 건너뜁니다.
-                // Native API는 원본 이미지에서도 충분히 잘 인식하며, 불필요한 루프를 제거하여 배터리를 아낍니다.
+                // [배터리 최적화] Native 지원 시 CPU 이미지 강화 건너뜀
                 if (!isNativeSupported) {
                     enhanceImage(ctx, destW, destH);
                 }
@@ -362,7 +368,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         }
                     } catch(e) { /* ignore */ }
                 } else if (detectorRef.current) {
-                    // ZXing Fallback (CPU Only)
                     try {
                         const result = await detectorRef.current.decodeFromCanvas(canvas);
                         if (result) handleSuccess(result.getText());
@@ -375,31 +380,29 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
     useEffect(() => {
         if (isStreamReady && !isHandlingResult.current && !isLibraryLoading && !isAutoSleeping) {
-            if (!scanSettings.useScannerButton) { if (!isScanningActive) setIsScanningActive(true); }
+            // 버튼 미사용(자동스캔) 모드일 때는 항상 Active
+            if (!scanSettings.useScannerButton) { 
+                if (!isScanningActive) setIsScanningActive(true); 
+            }
             startDetection();
         } else stopDetection();
     }, [isStreamReady, isScanningActive, isPaused, isAutoSleeping, isLibraryLoading, scanSettings.useScannerButton]);
 
-    const handleScanButtonTouchStart = (e: React.SyntheticEvent) => {
+    // [버튼 액션] 터치 시 분석 시작
+    const handleActivateScan = (e: React.SyntheticEvent) => {
         e.preventDefault(); e.stopPropagation(); 
+        if (isAutoSleeping) { 
+            startCamera(); 
+            return; 
+        }
+        
         unlockAudio();
-        triggerRefocus(); 
-        if (isAutoSleeping) { startCamera(); return; }
+        triggerRefocus();
         lastActionTimeRef.current = Date.now();
-        isLongPressTriggered.current = false;
-        longPressTimer.current = setTimeout(() => {
-            isLongPressTriggered.current = true;
-            setIsScanningActive(false);
-            showToast("스캔 일시정지", "success");
-        }, 600);
-    };
-
-    const handleScanButtonTouchEnd = (e: React.SyntheticEvent) => {
-        e.preventDefault(); e.stopPropagation();
-        if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-        if (isLongPressTriggered.current || isAutoSleeping) return;
-        if (isScanningActive) lastActionTimeRef.current = Date.now(); 
-        else setIsScanningActive(true);
+        
+        // 버튼을 누르면 무조건 스캔 모드 활성화 (토글 아님, 누르면 시작)
+        // 이미 켜져있어도 시간 갱신을 위해 true로 설정
+        setIsScanningActive(true);
     };
 
     if (!isOpen) return null;
@@ -423,19 +426,23 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                             {res.toUpperCase()} / {isNativeSupported ? 'NATIVE(GPU)' : 'ZXING(CPU)'} / ECO
                             </p>
                             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-shadow">
-                                {isAutoSleeping ? "절전 모드 활성화됨" : (isScanningActive ? "박스 영역에 바코드를 맞추세요" : "대기 중 (터치하여 스캔 시작)")}
+                                {isAutoSleeping ? "절전 모드" : (isScanningActive ? "바코드를 비추세요" : "대기 중 (버튼을 눌러 스캔)")}
                             </p>
                         </div>
                         
-                        <div ref={guideBoxRef} className={`scanner-guide-hole w-full ${(isScanningActive || isPaused) ? 'active' : ''} ${isPaused ? 'paused-overlay' : ''} ${isAutoSleeping ? 'opacity-20' : ''}`} />
+                        {/* isScanningActive가 false이면 테두리 사라짐 (대기) */}
+                        <div ref={guideBoxRef} className={`scanner-guide-hole w-full ${(isScanningActive && !isPaused) ? 'active' : ''} ${isPaused ? 'paused-overlay' : ''} ${isAutoSleeping ? 'opacity-20' : ''}`} />
                     </div>
 
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[84px] pointer-events-auto z-[300]">
                         {!isPaused && (isStreamReady || isAutoSleeping) && (
-                            <button onPointerDown={handleScanButtonTouchStart} onPointerUp={handleScanButtonTouchEnd} onPointerLeave={handleScanButtonTouchEnd} onContextMenu={(e) => e.preventDefault()} className={`w-full h-full rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] active:scale-[0.97] transition-all border-2 ${isAutoSleeping ? 'bg-amber-600 border-white/30 text-white' : (isScanningActive ? 'bg-indigo-600 border-white/50 text-white' : 'bg-white/95 border-transparent text-slate-900')}`}>
+                            <button 
+                                onPointerDown={handleActivateScan} 
+                                className={`w-full h-full rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] active:scale-[0.97] transition-all border-2 ${isAutoSleeping ? 'bg-amber-600 border-white/30 text-white' : (isScanningActive ? 'bg-indigo-600 border-white/50 text-white' : 'bg-white/95 border-transparent text-slate-900')}`}
+                            >
                                 <div className="flex items-center gap-3">
                                     {isAutoSleeping ? (
-                                        <><BarcodeScannerIcon className="w-10 h-10" /><span className="font-black text-2xl tracking-tighter uppercase">Resume Scan</span></>
+                                        <><BarcodeScannerIcon className="w-10 h-10" /><span className="font-black text-2xl tracking-tighter uppercase">Resume</span></>
                                     ) : isScanningActive ? (
                                         <div className="flex flex-col items-center">
                                             <div className="flex items-center gap-3">
@@ -458,8 +465,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     <div className="absolute top-[48px] w-full flex flex-col items-center pt-2">
                         <div className={`mt-2 flex flex-col items-center gap-1 transition-opacity duration-300 z-[500] ${isPaused || cameraError ? 'opacity-0' : 'opacity-100'}`}>
                             <p className="text-slate-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 text-shadow">
-                                {isAutoSleeping ? (<><WarningIcon className="w-3 h-3 text-amber-500" /> 배터리 보호를 위해 카메라를 종료했습니다</>) : (<><span className={`w-1.5 h-1.5 rounded-full ${isScanningActive ? 'bg-indigo-400 animate-ping' : 'bg-slate-600'}`}></span>
-                                    {isScanningActive ? (isNativeSupported ? "하드웨어 가속(GPU) 사용 중" : "CPU 이미지 강화 모드 가동 중") : "절전 모드: 프로세스 대기"}</>)}
+                                {isAutoSleeping ? (<><WarningIcon className="w-3 h-3 text-amber-500" /> 카메라 대기 모드</>) : (<><span className={`w-1.5 h-1.5 rounded-full ${isScanningActive ? 'bg-indigo-400 animate-ping' : 'bg-slate-600'}`}></span>
+                                    {isScanningActive ? (isNativeSupported ? "고속 스캔 작동 중" : "정밀 분석 모드 작동 중") : "대기 모드 (배터리 보호)"}</>)}
                             </p>
                         </div>
                     </div>
