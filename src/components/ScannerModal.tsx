@@ -44,8 +44,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const isHandlingResult = useRef(false);
     const isMountedRef = useRef(false);
     
-    // selectedCameraLabel 추가 가져오기
-    const { selectedCameraId, selectedCameraLabel, scanSettings } = useDeviceSettings();
+    // selectedCameraLabel 추가 가져오기 & ID 업데이트 함수 가져오기
+    const { selectedCameraId, selectedCameraLabel, scanSettings, setSelectedCameraId } = useDeviceSettings();
     const { showToast } = useAlert();
     
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
@@ -213,9 +213,25 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             // 저장된 카메라 ID가 있을 때, 실제 유효한지 확인하고 없으면 라벨로 찾음
             if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
                 try {
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    let devices = await navigator.mediaDevices.enumerateDevices();
+                    let videoDevices = devices.filter(d => d.kind === 'videoinput');
                     
+                    // [중요 수정] 레이블이 없는 경우(권한 초기 상태), 
+                    // 가장 단순한 요청({ video: true })으로 권한을 먼저 확실히 확보 (Warm-up)
+                    // baseConstraints를 쓰면 해상도 지원 여부에 따라 실패할 수 있으므로 단순 요청 사용
+                    if (videoDevices.length > 0 && !videoDevices[0].label) {
+                        try {
+                            const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                            tempStream.getTracks().forEach(t => t.stop());
+                            
+                            // 권한 획득 후 다시 목록 조회 (이제 레이블이 보여야 함)
+                            devices = await navigator.mediaDevices.enumerateDevices();
+                            videoDevices = devices.filter(d => d.kind === 'videoinput');
+                        } catch (permErr) {
+                            console.warn("Warm-up permission request failed", permErr);
+                        }
+                    }
+
                     // 선택된 카메라가 있는데, 목록에 없다면 이름으로 찾기 시도
                     if (selectedCameraId && videoDevices.length > 0) {
                         const exactMatch = videoDevices.find(d => d.deviceId === selectedCameraId);
@@ -226,6 +242,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                             if (labelMatch) {
                                 console.log(`Camera ID mismatch detected. Restoring by label: ${selectedCameraLabel}`);
                                 finalCameraId = labelMatch.deviceId;
+                                
+                                // [중요] 복구된 올바른 ID를 설정에 저장 (다음번엔 바로 연결되도록)
+                                setSelectedCameraId(finalCameraId, selectedCameraLabel).catch(() => {});
                             }
                         }
                     }

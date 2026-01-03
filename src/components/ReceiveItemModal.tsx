@@ -250,7 +250,8 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
         </div>
     );
 
-    const backdropClass = onScanNext ? 'bg-transparent' : 'bg-black bg-opacity-50';
+    // 스캔 후 모달이 뜰 때는 95% 블랙 배경으로 설정 (집중도 향상 및 스캔 화면 가림)
+    const backdropClass = onScanNext ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
         <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-modal="true">
