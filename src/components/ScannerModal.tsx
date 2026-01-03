@@ -16,8 +16,8 @@ const ANALYSIS_INTERVAL_MS = 150;
 
 let sharedAudioCtx: AudioContext | null = null;
 const getAudioContext = () => {
-    if (!sharedAudioCtx) {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
         if (AudioContextClass) sharedAudioCtx = new AudioContextClass();
     }
     return sharedAudioCtx;
@@ -43,8 +43,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const isMountedRef = useRef(false);
     const lastActionTimeRef = useRef<number>(Date.now());
     
-    // 버튼 제어용 타이머 제거 (즉시 반응형으로 변경)
-    
     const { selectedCameraId, selectedCameraLabel, scanSettings, setSelectedCameraId } = useDeviceSettings();
     const { showToast } = useAlert();
     
@@ -56,6 +54,30 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const [isAutoSleeping, setIsAutoSleeping] = useState(false);
     const [isRefocusing, setIsRefocusing] = useState(false);
     const [isRendered, setIsRendered] = useState(false);
+
+    // [Fix] 백그라운드 감지 및 복구
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                // 백그라운드 진입 시 카메라 중지
+                stopCamera();
+                stopDetection();
+            } else {
+                // 포그라운드 복귀 시 카메라 재시작 (OS가 카메라 권한을 돌려줄 때까지 약간의 지연 필요)
+                if (isOpen && !isPaused && !isAutoSleeping) {
+                    setTimeout(() => {
+                        unlockAudio();
+                        startCamera();
+                    }, 300);
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [isOpen, isPaused, isAutoSleeping]);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -118,7 +140,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             // 입력 모달이 열리면 스캔 중지 및 대기 상태로 전환
             stopDetection();
             setIsScanningActive(false); 
-        } else if (isOpen && isStreamReady) {
+        } else if (isOpen && isStreamReady && !document.hidden) {
             // 입력 모달이 닫히면 카메라는 켜두되, 스캔은 '대기' 상태로 시작 (버튼 눌러야 함)
             startDetection(); 
         }
@@ -126,14 +148,21 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
     const unlockAudio = useCallback(() => {
         const ctx = getAudioContext();
-        if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+        if (ctx && (ctx.state === 'suspended' || (ctx.state as string) === 'interrupted')) {
+            ctx.resume().catch(() => {});
+        }
     }, []);
 
     const playBeep = useCallback(() => {
         if (!scanSettings.soundOnScan) return;
+        
+        // [Fix] 매번 오디오 컨텍스트 상태 확인 및 재생성
         const ctx = getAudioContext();
         if (!ctx) return;
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        
+        if (ctx.state === 'suspended' || (ctx.state as string) === 'interrupted') {
+            ctx.resume().catch(() => {});
+        }
 
         try {
             const osc = ctx.createOscillator();
@@ -155,7 +184,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             videoRef.current.srcObject = null;
         }
         if (mediaStreamRef.current) {
-            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current.getTracks().forEach(track => {
+                try { track.stop(); } catch(e){}
+            });
             mediaStreamRef.current = null;
         }
         setIsStreamReady(false);
@@ -163,23 +194,25 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
     const triggerRefocus = async () => {
         if (!mediaStreamRef.current) return;
-        const track = mediaStreamRef.current.getVideoTracks()[0];
-        if (!track) return;
-        const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
-        if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-            setIsRefocusing(true);
-            try {
+        try {
+            const track = mediaStreamRef.current.getVideoTracks()[0];
+            if (!track) return;
+            const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+            if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+                setIsRefocusing(true);
                 await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as any);
-            } catch (e) {
-            } finally {
-                setTimeout(() => isMountedRef.current && setIsRefocusing(false), 300);
             }
+        } catch (e) {
+        } finally {
+            setTimeout(() => isMountedRef.current && setIsRefocusing(false), 300);
         }
     };
 
     const startCamera = async (retryCount = 0) => {
         if (!isMountedRef.current) return;
+        // 기존 스트림 정리
         stopCamera();
+        
         setCameraError(null);
         setIsAutoSleeping(false);
         if (retryCount > 0) await new Promise(r => setTimeout(r, 300));
@@ -220,6 +253,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             mediaStreamRef.current = stream;
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
+                // onloadedmetadata 대신 promise await 사용이 더 안정적
                 await videoRef.current.play();
                 
                 triggerRefocus();
@@ -228,8 +262,14 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             }
         } catch (err: any) {
             console.error("Camera Error:", err);
-            if (retryCount < 1) startCamera(retryCount + 1);
-            else setCameraError("카메라를 실행할 수 없습니다. 권한을 확인해주세요.");
+            // NotAllowedError는 사용자 거부이므로 재시도하지 않음
+            if (err.name === 'NotAllowedError') {
+                setCameraError("카메라 권한이 거부되었습니다. 설정에서 권한을 허용해주세요.");
+            } else if (retryCount < 1) {
+                startCamera(retryCount + 1);
+            } else {
+                setCameraError("카메라를 실행할 수 없습니다. 다른 앱이 사용 중인지 확인하세요.");
+            }
         }
     };
 
@@ -287,11 +327,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
     const startDetection = () => {
         stopDetection();
-        if (!isStreamReady || isPaused || isAutoSleeping) return;
+        if (!isStreamReady || isPaused || isAutoSleeping || document.hidden) return;
         
-        // 버튼 사용 모드일 때 active가 아니면 루프 자체를 시작하지 않거나, 루프 내부에서 즉시 리턴
-        // 여기서는 루프를 돌리되 내부에서 컷트하여 '반응성'을 유지함
-
         scanIntervalRef.current = setInterval(async () => {
             if (!videoRef.current || !guideBoxRef.current || !canvasRef.current || isPaused || !isMountedRef.current || isAutoSleeping) return;
             

@@ -31,32 +31,41 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, onSave, onC
     const product = useMemo(() => activeItem ? products.find(p => p.barcode === activeItem.barcode) : null, [activeItem, products]);
     
     const audioCtxRef = useRef<AudioContext | null>(null);
-    useEffect(() => {
-        try {
-            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            if (AudioContextClass && !audioCtxRef.current) audioCtxRef.current = new AudioContextClass();
-        } catch (e) { }
+
+    // [Fix] AudioContext 안전한 재사용 로직
+    const getAudioCtx = useCallback(() => {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) return null;
+
+        if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+            audioCtxRef.current = new AudioContextClass();
+        }
+        return audioCtxRef.current;
     }, []);
 
     const playKeypadBeep = useCallback(() => {
         if (!uiFeedback?.soundOnPress) return;
-        const audioCtx = audioCtxRef.current;
-        if (!audioCtx) return;
-        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        const ctx = getAudioCtx();
+        if (!ctx) return;
+        
+        if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+            ctx.resume().catch(() => {});
+        }
+
         try {
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
             oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
+            gainNode.connect(ctx.destination);
             oscillator.type = 'square';
-            oscillator.frequency.setValueAtTime(2400, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(0.8, audioCtx.currentTime + 0.005);
-            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.12);
-            oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 0.15);
+            oscillator.frequency.setValueAtTime(2400, ctx.currentTime);
+            gainNode.gain.setValueAtTime(0, ctx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.8, ctx.currentTime + 0.005);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + 0.15);
         } catch (e) {}
-    }, [uiFeedback?.soundOnPress]);
+    }, [uiFeedback?.soundOnPress, getAudioCtx]);
 
     useEffect(() => { if (item) setActiveItem(item); }, [item]);
     useEffect(() => {

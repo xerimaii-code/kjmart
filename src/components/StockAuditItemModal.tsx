@@ -33,18 +33,27 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
     const isFirstInputRef = useRef(true);
 
     const audioCtxRef = useRef<AudioContext | null>(null);
-    useEffect(() => {
-        try {
-            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            if (AudioContextClass && !audioCtxRef.current) audioCtxRef.current = new AudioContextClass();
-        } catch (e) { }
+
+    // [Fix] AudioContext 안전한 재사용 로직
+    const getAudioCtx = useCallback(() => {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) return null;
+
+        if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+            audioCtxRef.current = new AudioContextClass();
+        }
+        return audioCtxRef.current;
     }, []);
 
     const playBeep = useCallback(() => {
         if (!uiFeedback?.soundOnPress) return;
-        const ctx = audioCtxRef.current;
+        const ctx = getAudioCtx();
         if (!ctx) return;
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        
+        if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+            ctx.resume().catch(() => {});
+        }
+
         try {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
@@ -55,7 +64,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
             gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
             osc.start(); osc.stop(ctx.currentTime + 0.15);
         } catch (e) {}
-    }, [uiFeedback?.soundOnPress]);
+    }, [uiFeedback?.soundOnPress, getAudioCtx]);
 
     useEffect(() => {
         if (isOpen) {
