@@ -1,3 +1,4 @@
+
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
 import { DeviceSettings, SyncSettings } from '../types';
 import * as db from '../services/dbService';
@@ -73,7 +74,17 @@ export const DeviceSettingsProvider: React.FC<{ children: ReactNode }> = ({ chil
                 setSettings(curr => {
                     let merged: DeviceSettings;
                     if (loadedFromLocalRef.current) {
-                        merged = { ...commonSettings, ...savedSettings, ...curr };
+                        // [중요] 카메라 설정(ID/라벨)은 로컬 우선입니다.
+                        // 기기마다 카메라 ID 체계가 다르므로 서버에서 덮어쓰지 않도록 보호합니다.
+                        merged = { 
+                            ...commonSettings, 
+                            ...savedSettings, 
+                            ...curr,
+                            selectedCameraId: curr.selectedCameraId || savedSettings.selectedCameraId,
+                            selectedCameraLabel: curr.selectedCameraLabel || savedSettings.selectedCameraLabel
+                        };
+                        
+                        // 서버와 다르면 서버도 업데이트 (백업용)
                         if (JSON.stringify(merged) !== JSON.stringify(savedSettings)) {
                             db.setDeviceSettings(deviceId, merged).catch(() => {});
                         }

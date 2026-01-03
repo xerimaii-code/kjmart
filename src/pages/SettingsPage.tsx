@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useDeviceSettings, useDataActions, useAlert, usePWAInstall, useModals, useSyncState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -72,6 +73,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
             let devices = await navigator.mediaDevices.enumerateDevices();
             let videoDevices = devices.filter(device => device.kind === 'videoinput');
             const hasLabels = videoDevices.some(d => d.label && d.label.length > 0);
+            
+            // If labels are missing, try to get permission briefly
             if (videoDevices.length === 0 || !hasLabels) {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -83,12 +86,27 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                 }
             }
             setCameras(videoDevices);
+
+            // [Auto-Correction Logic]
+            // If a camera ID is selected but not found in the current list,
+            // try to find it by LABEL and update the ID automatically.
+            if (selectedCameraId && selectedCameraLabel) {
+                const idExists = videoDevices.some(d => d.deviceId === selectedCameraId);
+                if (!idExists) {
+                    const labelMatch = videoDevices.find(d => d.label === selectedCameraLabel);
+                    if (labelMatch) {
+                        console.log(`Auto-healing camera ID based on label: ${selectedCameraLabel}`);
+                        await setSelectedCameraId(labelMatch.deviceId, labelMatch.label);
+                    }
+                }
+            }
+
         } catch (err) { 
             console.warn("Camera enumeration failed:", err); 
         } finally {
             setIsRefreshingCamera(false);
         }
-    }, []);
+    }, [selectedCameraId, selectedCameraLabel, setSelectedCameraId]);
 
     useEffect(() => {
         if (isActive) refreshCameras();
@@ -124,11 +142,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ isActive }) => {
                                 <select 
                                     value={selectedCameraId || 'default'} 
                                     onChange={handleCameraChange}
-                                    className="flex-grow p-1 text-[10px] font-black border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 min-w-0 truncate text-gray-700"
+                                    className="flex-grow p-1 text-[12px] font-black border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-blue-500 min-w-0 truncate text-gray-700"
                                 >
                                     <option value="default">기본 (후면)</option>
                                     {(!isSelectedCameraInList && selectedCameraId) && (
-                                        <option value={selectedCameraId}>{selectedCameraLabel ? `${selectedCameraLabel}` : '저장됨'}</option>
+                                        <option value={selectedCameraId}>{selectedCameraLabel ? `${selectedCameraLabel} (연결불가)` : '저장된 카메라 (연결불가)'}</option>
                                     )}
                                     {cameras.map((camera, index) => (
                                         <option key={camera.deviceId} value={camera.deviceId}>

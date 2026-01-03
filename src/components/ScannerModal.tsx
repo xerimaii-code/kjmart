@@ -3,15 +3,15 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAlert, useDeviceSettings } from '../context/AppContext';
 import { loadScript } from '../services/dataService';
-import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon, ReturnBoxIcon } from './Icons';
+import { SpinnerIcon, BarcodeScannerIcon, XCircleIcon, ReturnBoxIcon, SearchIcon } from './Icons';
 import './ScannerModal.css';
 
 declare const ZXing: any;
 declare const BarcodeDetector: any;
 
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js";
-const SCAN_TIMEOUT_MS = 30000; 
-const ANALYSIS_INTERVAL_MS = 100; 
+const SCAN_DURATION_MS = 5000; // 5초 스캔 제한
+const ANALYSIS_INTERVAL_MS = 100; // 0.1초 간격 분석
 
 let sharedAudioCtx: AudioContext | null = null;
 const getAudioContext = () => {
@@ -36,31 +36,42 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const guideBoxRef = useRef<HTMLDivElement>(null); 
     const mediaStreamRef = useRef<MediaStream | null>(null);
     
-    const scanIntervalRef = useRef<any>(null); 
+    const scanIntervalRef = useRef<any>(null);
+    const timeoutRef = useRef<any>(null); 
+    const longPressTimerRef = useRef<any>(null); 
+
     const detectorRef = useRef<any>(null); 
     const isHandlingResult = useRef(false);
     const isMountedRef = useRef(false);
-    const lastActionTimeRef = useRef<number>(Date.now());
     
-    const { selectedCameraId, scanSettings } = useDeviceSettings();
+    // selectedCameraLabel 추가 가져오기
+    const { selectedCameraId, selectedCameraLabel, scanSettings } = useDeviceSettings();
     const { showToast } = useAlert();
     
     const [isLibraryLoading, setIsLibraryLoading] = useState(true);
     const [isNativeSupported, setIsNativeSupported] = useState(false);
     const [isStreamReady, setIsStreamReady] = useState(false);
-    const [isScanningActive, setIsScanningActive] = useState(false);
+    
+    // 상태 관리: 'idle'(대기) | 'scanning'(분석중)
+    const [scanState, setScanState] = useState<'idle' | 'scanning'>('idle');
+    const scanStateRef = useRef<'idle' | 'scanning'>('idle');
+    
+    // 시각적 피드백용 성공 상태
+    const [isProcessingSuccess, setIsProcessingSuccess] = useState(false);
+
     const [cameraError, setCameraError] = useState<string | null>(null);
-    const [isAutoSleeping, setIsAutoSleeping] = useState(false);
     const [isRefocusing, setIsRefocusing] = useState(false);
     const [isRendered, setIsRendered] = useState(false);
+
+    useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
 
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.hidden) {
                 stopCamera();
-                stopDetection();
+                stopScanningLoop();
             } else {
-                if (isOpen && !isPaused && !isAutoSleeping) {
+                if (isOpen && !isPaused) {
                     setTimeout(() => {
                         unlockAudio();
                         startCamera();
@@ -70,7 +81,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-    }, [isOpen, isPaused, isAutoSleeping]);
+    }, [isOpen, isPaused]);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -96,29 +107,32 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             });
         };
         initLibrary();
-        return () => { isMountedRef.current = false; stopCamera(); stopDetection(); };
+        return () => { isMountedRef.current = false; stopCamera(); stopScanningLoop(); };
     }, []);
 
     useEffect(() => {
         if (isOpen) {
             setTimeout(() => setIsRendered(true), 10);
             isHandlingResult.current = false;
-            lastActionTimeRef.current = Date.now();
+            setScanState('idle'); 
+            setIsProcessingSuccess(false);
             unlockAudio();
             startCamera();
         } else {
             setIsRendered(false);
             stopCamera();
-            stopDetection();
+            stopScanningLoop();
         }
     }, [isOpen]);
 
     useEffect(() => {
         if (isPaused) {
-            stopDetection();
-            setIsScanningActive(false); 
+            stopScanningLoop(); 
+            setScanState('idle'); 
+            setIsProcessingSuccess(false);
         } else if (isOpen && isStreamReady && !document.hidden) {
-            startDetection(); 
+            setScanState('idle'); 
+            setIsProcessingSuccess(false);
         }
     }, [isPaused, isOpen, isStreamReady]);
 
@@ -162,23 +176,27 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         try {
             const track = mediaStreamRef.current.getVideoTracks()[0];
             if (!track) return;
+            
+            setIsRefocusing(true);
+            setTimeout(() => isMountedRef.current && setIsRefocusing(false), 500);
+
             const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
             if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-                setIsRefocusing(true);
-                await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as any);
+                await track.applyConstraints({ advanced: [{ focusMode: 'auto' }] } as any);
+                setTimeout(async () => {
+                    if (isMountedRef.current) await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as any);
+                }, 200);
             }
-        } catch (e) { } finally {
-            setTimeout(() => isMountedRef.current && setIsRefocusing(false), 300);
-        }
+        } catch (e) { } 
     };
 
     const startCamera = async (retryCount = 0) => {
         if (!isMountedRef.current) return;
         stopCamera();
         setCameraError(null);
-        setIsAutoSleeping(false);
         if (retryCount > 0) await new Promise(r => setTimeout(r, 300));
         try {
+            // 1. 카메라 해상도 설정
             const res = scanSettings.scanResolution || '720p';
             const widthIdeal = res === '720p' ? 1280 : 640;
             const heightIdeal = res === '720p' ? 720 : 480;
@@ -188,21 +206,62 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 facingMode: 'environment',
                 advanced: [{ focusMode: 'continuous' } as any]
             };
+
+            // 2. 스마트 카메라 ID 복구 로직 (재시작 시 ID 변경 대응)
+            let finalCameraId = selectedCameraId;
+
+            // 저장된 카메라 ID가 있을 때, 실제 유효한지 확인하고 없으면 라벨로 찾음
+            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    
+                    // 선택된 카메라가 있는데, 목록에 없다면 이름으로 찾기 시도
+                    if (selectedCameraId && videoDevices.length > 0) {
+                        const exactMatch = videoDevices.find(d => d.deviceId === selectedCameraId);
+                        
+                        if (!exactMatch && selectedCameraLabel) {
+                            // ID가 바뀌었지만 이름(Label)이 같은 카메라를 찾음
+                            const labelMatch = videoDevices.find(d => d.label === selectedCameraLabel);
+                            if (labelMatch) {
+                                console.log(`Camera ID mismatch detected. Restoring by label: ${selectedCameraLabel}`);
+                                finalCameraId = labelMatch.deviceId;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Failed to enumerate devices for ID check", e);
+                }
+            }
+
             let constraints = { video: baseConstraints };
-            if (selectedCameraId) { constraints.video = { ...baseConstraints, deviceId: { exact: selectedCameraId } }; }
+            // 찾은 ID가 있다면 그걸 사용
+            if (finalCameraId) { constraints.video = { ...baseConstraints, deviceId: { exact: finalCameraId } }; }
+            
             let stream = null;
-            try { stream = await navigator.mediaDevices.getUserMedia(constraints); } catch(e) {
-                if (selectedCameraId) stream = await navigator.mediaDevices.getUserMedia({ video: baseConstraints });
+            try { 
+                stream = await navigator.mediaDevices.getUserMedia(constraints); 
+            } catch(e) {
+                // 특정 ID로 실패 시 기본 카메라로 재시도
+                if (finalCameraId) {
+                    console.warn("Failed to get specific camera, falling back to default.");
+                    stream = await navigator.mediaDevices.getUserMedia({ video: baseConstraints });
+                }
                 else throw e;
             }
+
             if (!isMountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
             mediaStreamRef.current = stream;
+            
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
-                await videoRef.current.play();
-                triggerRefocus();
-                setIsStreamReady(true);
-                lastActionTimeRef.current = Date.now();
+                videoRef.current.onloadedmetadata = async () => {
+                    try {
+                        await videoRef.current?.play();
+                        setIsStreamReady(true);
+                        triggerRefocus();
+                    } catch(e) { console.error(e); }
+                };
             }
         } catch (err: any) {
             if (err.name === 'NotAllowedError') setCameraError("카메라 권한이 거부되었습니다.");
@@ -211,22 +270,34 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }
     };
 
-    const stopDetection = () => {
+    const stopScanningLoop = () => {
         if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
+        if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
     };
 
     const handleSuccess = (barcode: string) => {
         if (isHandlingResult.current) return;
         isHandlingResult.current = true;
-        lastActionTimeRef.current = Date.now(); 
+        
         playBeep();
-        if (scanSettings.useScannerButton) setIsScanningActive(false);
-        if (continuous) {
-            onScanSuccess(barcode);
-            setTimeout(() => { if (isMountedRef.current && !isPaused) isHandlingResult.current = false; }, 800);
-        } else {
-            stopDetection(); stopCamera(); onScanSuccess(barcode); onClose();
-        }
+        
+        // [시각 효과] 성공 시 즉시 'Success' 상태로 변경 (배경 95% 암전)
+        setIsProcessingSuccess(true);
+        stopScanningLoop();
+        
+        // 잠시 후 실제 처리 및 닫기
+        setTimeout(() => {
+            setScanState('idle'); 
+            setIsProcessingSuccess(false);
+
+            if (continuous) {
+                onScanSuccess(barcode);
+                setTimeout(() => { if (isMountedRef.current && !isPaused) isHandlingResult.current = false; }, 800);
+            } else {
+                onScanSuccess(barcode);
+                onClose();
+            }
+        }, 150); // 짧은 딜레이로 암전 효과 인지시킴
     };
 
     const enhanceImage = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -244,16 +315,28 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         } catch (e) { }
     };
 
-    const startDetection = () => {
-        stopDetection();
-        if (!isStreamReady || isPaused || isAutoSleeping || document.hidden) return;
-        scanIntervalRef.current = setInterval(async () => {
-            if (!videoRef.current || !guideBoxRef.current || !canvasRef.current || isPaused || !isMountedRef.current || isAutoSleeping) return;
-            if (scanSettings.useScannerButton && !isScanningActive) return;
-            if (Date.now() - lastActionTimeRef.current > SCAN_TIMEOUT_MS) {
-                setIsScanningActive(false); setIsAutoSleeping(true); stopCamera(); return;
+    const startScanningSession = () => {
+        if (!isStreamReady || isPaused || document.hidden) return;
+        
+        stopScanningLoop(); 
+        setScanState('scanning');
+        setIsProcessingSuccess(false);
+        isHandlingResult.current = false;
+        unlockAudio();
+        triggerRefocus(); 
+
+        timeoutRef.current = setTimeout(() => {
+            if (scanStateRef.current === 'scanning') {
+                stopScanningLoop();
+                setScanState('idle');
+                showToast("바코드를 찾지 못했습니다.", "error");
             }
-            
+        }, SCAN_DURATION_MS);
+
+        scanIntervalRef.current = setInterval(async () => {
+            if (!videoRef.current || !guideBoxRef.current || !canvasRef.current || isPaused || !isMountedRef.current) return;
+            if (scanStateRef.current !== 'scanning') return;
+
             try {
                 const video = videoRef.current;
                 const guide = guideBoxRef.current;
@@ -262,57 +345,36 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 
                 if (!ctx || video.videoWidth === 0) return;
 
-                // 1. 실제 비디오 스트림 해상도
                 const vw = video.videoWidth;
                 const vh = video.videoHeight;
+                const cw = video.clientWidth;
+                const ch = video.clientHeight;
 
-                // 2. 화면에 표시된 비디오 요소의 크기 (CSS 적용 후)
-                const vRect = video.getBoundingClientRect();
-                // 3. 화면에 표시된 가이드 박스의 크기와 위치
-                const gRect = guide.getBoundingClientRect();
+                const scale = Math.max(cw / vw, ch / vh);
+                const renderedW = vw * scale;
+                const renderedH = vh * scale;
+                const offsetX = (renderedW - cw) / 2; 
+                const offsetY = (renderedH - ch) / 2; 
 
-                // 4. 'object-fit: cover' 스케일 계산
-                // 화면 요소 대비 비디오 원본의 비율을 구함
-                // 가로 비율과 세로 비율 중 '더 작은' 쪽이 cover의 기준이 됨 (즉, 화면을 꽉 채우기 위해 더 많이 확대된 비율)
-                // Math.max를 사용해야 함: 요소(vRect)에 맞추기 위해 비디오(vw, vh)가 얼마나 줄어들었는지 역산
-                // scale = 비디오 원본 크기 / 화면 표시 크기 (이 값이 작을수록 비디오가 많이 축소된 것)
-                // object-fit: cover는 가로/세로 중 비율이 '더 큰' 쪽을 기준으로 맞춤 (즉, 덜 축소되는 쪽)
+                const guideRect = guide.getBoundingClientRect();
+                const videoRect = video.getBoundingClientRect();
+
+                const guideX_dom = guideRect.left - videoRect.left;
+                const guideY_dom = guideRect.top - videoRect.top;
+                const guideW_dom = guideRect.width;
+                const guideH_dom = guideRect.height;
+
+                const sx = (guideX_dom + offsetX) / scale;
+                const sy = (guideY_dom + offsetY) / scale;
+                const sWidth = guideW_dom / scale;
+                const sHeight = guideH_dom / scale;
+
+                canvas.width = sWidth;
+                canvas.height = sHeight;
+
+                ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight);
                 
-                const ratioX = vw / vRect.width;
-                const ratioY = vh / vRect.height;
-                const scale = Math.min(ratioX, ratioY); // 원본 좌표로 변환하기 위한 스케일
-
-                // 5. 비디오 내에서 보이는 영역(Visible Area)의 좌상단 좌표 계산
-                // 화면 요소의 가로세로 비율과 비디오의 가로세로 비율 차이로 인해 잘려나간 부분 계산
-                const visibleW = vRect.width * scale;
-                const visibleH = vRect.height * scale;
-                
-                const startX = (vw - visibleW) / 2;
-                const startY = (vh - visibleH) / 2;
-
-                // 6. 가이드 박스의 상대 위치를 비디오 원본 좌표로 변환
-                // (가이드박스 좌측 - 비디오요소 좌측) * 스케일 + 잘려나간 X길이
-                const guideX = (gRect.left - vRect.left) * scale + startX;
-                const guideY = (gRect.top - vRect.top) * scale + startY;
-                const guideW = gRect.width * scale;
-                const guideH = gRect.height * scale;
-
-                // 7. [핵심] 분석 영역(ROI) 설정
-                // 가이드 박스의 가로폭은 100% 사용하되, 높이는 중앙 25%만 사용하여 위아래 바코드 간섭 차단
-                const cropH = guideH * 0.25;
-                const cropY = guideY + (guideH - cropH) / 2;
-
-                // 8. 캔버스 크기 설정 및 그리기
-                canvas.width = guideW;
-                canvas.height = cropH;
-
-                ctx.drawImage(
-                    video, 
-                    guideX, cropY, guideW, cropH, // Source (Video)
-                    0, 0, guideW, cropH           // Destination (Canvas)
-                );
-                
-                if (!isNativeSupported) enhanceImage(ctx, guideW, cropH);
+                if (!isNativeSupported) enhanceImage(ctx, sWidth, sHeight);
 
                 if (isNativeSupported && detectorRef.current) {
                     const barcodes = await detectorRef.current.detect(canvas);
@@ -327,27 +389,63 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }, ANALYSIS_INTERVAL_MS);
     };
 
-    useEffect(() => {
-        if (isStreamReady && !isHandlingResult.current && !isLibraryLoading && !isAutoSleeping) {
-            if (!scanSettings.useScannerButton && !isScanningActive) setIsScanningActive(true); 
-            startDetection();
-        } else stopDetection();
-    }, [isStreamReady, isScanningActive, isPaused, isAutoSleeping, isLibraryLoading, scanSettings.useScannerButton]);
+    const handleButtonDown = (e: React.PointerEvent) => {
+        e.preventDefault(); e.stopPropagation();
+        
+        longPressTimerRef.current = setTimeout(() => {
+            stopScanningLoop();
+            setScanState('idle');
+            showToast("스캔 취소", "error");
+            longPressTimerRef.current = null;
+        }, 600);
+    };
 
-    const handleActivateScan = (e: React.SyntheticEvent) => {
-        e.preventDefault(); e.stopPropagation(); 
-        if (isAutoSleeping) { startCamera(); return; }
-        unlockAudio(); triggerRefocus();
-        lastActionTimeRef.current = Date.now();
-        setIsScanningActive(true);
+    const handleButtonUp = (e: React.PointerEvent) => {
+        e.preventDefault(); e.stopPropagation();
+
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+
+            if (scanState === 'idle') {
+                startScanningSession();
+            } else {
+                triggerRefocus();
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
+                timeoutRef.current = setTimeout(() => {
+                    if (scanStateRef.current === 'scanning') {
+                        stopScanningLoop();
+                        setScanState('idle');
+                        showToast("시간 초과", "error");
+                    }
+                }, SCAN_DURATION_MS);
+                showToast("초점 재설정", "success");
+            }
+        }
+    };
+
+    const handleButtonLeave = () => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
     };
 
     if (!isOpen) return null;
     const res = scanSettings.scanResolution || '480p';
     
+    // 상태에 따른 가이드 박스 클래스 결정
+    // isProcessingSuccess(성공 95%) > scanning(활성 85%) > idle(대기 75%)
+    let guideBoxClass = 'idle';
+    if (isProcessingSuccess) guideBoxClass = 'success';
+    else if (scanState === 'scanning') guideBoxClass = 'scanning';
+
     return createPortal(
         <div className={`fixed inset-0 bg-black z-[130] flex flex-col items-center justify-center transition-opacity duration-150 ${isRendered ? 'opacity-100' : 'opacity-0'}`}>
-            <video ref={videoRef} className={`absolute top-0 left-0 w-full h-full object-cover transition-opacity duration-300 ${isStreamReady ? 'opacity-100' : 'opacity-0'}`} playsInline muted />
+            {/* 비디오 영역 */}
+            <div className="absolute inset-0 w-full h-full overflow-hidden">
+                <video ref={videoRef} className={`w-full h-full object-cover transition-opacity duration-300 ${isStreamReady ? 'opacity-100' : 'opacity-0'}`} playsInline muted />
+            </div>
             
             <button onClick={(e) => { e.stopPropagation(); onClose(); }} className={`absolute top-4 right-4 p-4 bg-black/40 text-white rounded-full backdrop-blur-md border border-white/10 z-[400] active:scale-95 ${isPaused ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{ top: 'max(1rem, env(safe-area-inset-top) + 1rem)' }}>
                 <XCircleIcon className="w-8 h-8" />
@@ -355,33 +453,47 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
 
             <div className="absolute inset-0 z-10 pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[85%] max-w-[22rem] h-0 flex flex-col items-center">
+                    
                     <div className="absolute bottom-[60px] w-full flex flex-col items-center">
-                        <div className={`text-center px-4 transition-opacity duration-300 z-[500] mb-4 ${isPaused || cameraError ? 'opacity-0' : 'opacity-100'}`}>
-                            <p className="text-white/40 text-[10px] font-black tracking-widest mb-1 uppercase text-shadow">
-                                {res.toUpperCase()} / {isNativeSupported ? 'GPU' : 'CPU'} / HIGH-SENSITIVITY
+                        {/* 텍스트와 가이드 박스 사이 간격을 mb-1로 줄임 */}
+                        <div className={`text-center px-4 transition-opacity duration-300 z-[500] mb-1 ${isPaused || cameraError ? 'opacity-0' : 'opacity-100'}`}>
+                            <p className="text-white/60 text-[10px] font-black tracking-widest mb-0.5 uppercase text-shadow">
+                                {res.toUpperCase()} / PRECISE-ROI / {scanState === 'scanning' ? "SCANNING" : "STANDBY"}
                             </p>
-                            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-shadow">
-                                {isAutoSleeping ? "절전 모드" : (isScanningActive ? "중앙 가이드에 맞춰주세요" : "대기 중")}
+                            <p className={`text-[12px] font-black uppercase tracking-widest text-shadow transition-colors ${scanState === 'scanning' ? 'text-green-400' : 'text-slate-400'}`}>
+                                {isProcessingSuccess ? "스캔 성공!" : (scanState === 'scanning' ? "박스 안에 바코드를 맞추세요" : "버튼을 눌러 스캔하세요")}
                             </p>
                         </div>
-                        <div ref={guideBoxRef} className={`scanner-guide-hole w-full ${(isScanningActive && !isPaused) ? 'active' : ''} ${isPaused ? 'paused-overlay' : ''} ${isAutoSleeping ? 'opacity-20' : ''}`} />
+                        {/* 상태 기반 클래스 적용 */}
+                        <div ref={guideBoxRef} className={`scanner-guide-hole w-full transition-all duration-300 ${guideBoxClass}`} />
                     </div>
 
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[84px] pointer-events-auto z-[300]">
-                        {!isPaused && (isStreamReady || isAutoSleeping) && (
-                            <button onPointerDown={handleActivateScan} className={`w-full h-full rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] active:scale-[0.97] transition-all border-2 ${isAutoSleeping ? 'bg-amber-600 border-white/30 text-white' : (isScanningActive ? 'bg-indigo-600 border-white/50 text-white' : 'bg-white/95 border-transparent text-slate-900')}`}>
+                        {!isPaused && isStreamReady && (
+                            <button 
+                                onPointerDown={handleButtonDown}
+                                onPointerUp={handleButtonUp}
+                                onPointerLeave={handleButtonLeave}
+                                className={`w-full h-full rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] active:scale-[0.97] transition-all border-2 ${
+                                    scanState === 'scanning' 
+                                        ? 'bg-indigo-600/90 border-white/50 text-white' 
+                                        : 'bg-white/90 border-transparent text-slate-900'
+                                }`}
+                            >
                                 <div className="flex items-center gap-3">
-                                    {isAutoSleeping ? (
-                                        <><BarcodeScannerIcon className="w-10 h-10" /><span className="font-black text-2xl tracking-tighter uppercase">Resume</span></>
-                                    ) : isScanningActive ? (
+                                    {scanState === 'scanning' ? (
                                         <div className="flex flex-col items-center">
                                             <div className="flex items-center gap-3">
-                                                {isRefocusing ? <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <div className="w-6 h-6 bg-rose-500 rounded-md animate-pulse shadow-[0_0_15px_rgba(244,63,94,0.6)]"></div>}
+                                                {isRefocusing ? <SpinnerIcon className="w-6 h-6 animate-spin text-white" /> : <SearchIcon className="w-6 h-6 animate-pulse" />}
                                                 <span className="font-black text-2xl tracking-tighter uppercase italic">Scanning...</span>
                                             </div>
+                                            <span className="text-[9px] font-medium opacity-80 mt-1">탭: 초점 / 길게: 중지</span>
                                         </div>
                                     ) : (
-                                        <><BarcodeScannerIcon className="w-10 h-10" /><span className="font-black text-2xl tracking-tighter uppercase">Touch to Scan</span></>
+                                        <>
+                                            <BarcodeScannerIcon className="w-10 h-10" />
+                                            <span className="font-black text-2xl tracking-tighter uppercase">Touch to Scan</span>
+                                        </>
                                     )}
                                 </div>
                             </button>
@@ -390,7 +502,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 </div>
             </div>
 
-            {cameraError && !isAutoSleeping && (
+            {cameraError && (
                 <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center p-6 text-center z-[160]">
                     <ReturnBoxIcon className="w-16 h-16 text-rose-500 mb-6" />
                     <h4 className="text-white font-black text-xl mb-2">카메라 오류</h4>
@@ -398,7 +510,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     <button onClick={() => startCamera(0)} className="px-10 py-4 bg-white text-slate-900 rounded-2xl font-black text-lg active:scale-95 transition-all">다시 시도</button>
                 </div>
             )}
-            {((isLibraryLoading && !isNativeSupported) || (!isStreamReady && !cameraError && !isAutoSleeping)) && (
+            {((isLibraryLoading && !isNativeSupported) || (!isStreamReady && !cameraError)) && (
                 <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center z-[170]">
                     <SpinnerIcon className="w-12 h-12 text-white mb-4" />
                     <p className="text-white font-black tracking-widest uppercase text-xs opacity-60">Initializing Scanner...</p>

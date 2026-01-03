@@ -4,12 +4,13 @@
 .scanner-guide-hole {
     position: relative;
     width: 100%;
-    height: 60px; /* 높이 약간 상향 (글자 간섭 방지) */
-    border-radius: 12px;
+    height: 45px; /* 높이 45px로 조정 */
+    border-radius: 8px; /* 높이가 줄었으므로 반경도 약간 조정 */
+    /* 기본(Fallback): 75% 블랙 */
     box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75); 
-    border: 2px solid rgba(255, 255, 255, 0.5);
+    border: 2px solid rgba(255, 255, 255, 0.3);
     background-color: transparent;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: box-shadow 0.2s ease-out, border-color 0.2s ease-out; /* 부드러운 전환 */
     z-index: 5;
     display: flex;
     align-items: center;
@@ -17,15 +18,27 @@
     overflow: hidden;
 }
 
-/* 스캔 활성화 시 테두리 흰색 강조 및 배경 98% 암전 */
-.scanner-guide-hole.active {
-    border: 3px solid rgba(255, 255, 255, 0.9);
-    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.98); 
+/* 1. 대기 상태 (Idle): 75% 블랙 */
+.scanner-guide-hole.idle {
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 2. 스캔 중 (Scanning): 85% 블랙 (집중도 향상) */
+.scanner-guide-hole.scanning {
+    border: 3px solid rgba(0, 255, 128, 0.8);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.85); 
+}
+
+/* 3. 스캔 성공 (Success): 95% 블랙 (결과 처리 중 암전 효과) */
+.scanner-guide-hole.success {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.95);
 }
 
 .scanner-guide-hole.paused-overlay {
     border-color: rgba(255, 255, 255, 0.05);
-    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.98);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.98); 
     opacity: 1; 
 }
 
