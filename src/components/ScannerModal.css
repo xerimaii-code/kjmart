@@ -1,0 +1,94 @@
+
+/* src/components/ScannerModal.css */
+
+/* 1. 스캐너 가이드라인 (버튼 상단 끝에서 정확히 10px 위에 배치) */
+.scanner-guide-hole {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    /* 계산: 화면 중앙(50%) + 버튼높이절반(48px) + 여백(10px) = 58px */
+    bottom: calc(50% + 58px);
+    width: 85%;
+    max-width: 22rem;
+    height: 50px; 
+    border-radius: 12px;
+    background-color: transparent !important; 
+    /* 스캔 대기 시: 75% 블랙 레이어 */
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75); 
+    border: 1px solid rgba(255, 255, 255, 0.3); 
+    z-index: 100;
+    transition: all 0.25s ease;
+}
+
+/* 스캔 작동 중: 98% 블랙 레이어로 강화 */
+.scanner-guide-hole.active {
+    border: 1.5px solid #4f46e5; 
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.98);
+    animation: guide-blink 0.8s infinite ease-in-out;
+}
+
+@keyframes guide-blink {
+    0% { opacity: 0.4; border-color: #4f46e5; }
+    50% { opacity: 1; border-color: #818cf8; }
+    100% { opacity: 0.4; border-color: #4f46e5; }
+}
+
+/* 2. [초강력] 네이티브 카메라 노출을 위한 UI 제거 설정 */
+html.barcode-scanner-active,
+html.barcode-scanner-active body {
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+/* 
+   [수정] 스캐너 UI를 제외한 모든 요소를 숨기되, 
+   모달(role="dialog")과 토스트 메시지는 제외하여 입력창이 보이도록 함.
+   단, .app-modal (페이지 역할을 하는 모달)은 숨겨서 카메라가 보이도록 함.
+*/
+body.barcode-scanner-active > *:not(.barcode-scanner-ui-layer):not([role="dialog"]):not([class*="fixed"]) {
+    display: none !important;
+}
+
+/* 페이지형 모달(ActionModal)은 스캔 중 숨김 처리하여 카메라가 보이게 함 */
+body.barcode-scanner-active .app-modal {
+    display: none !important;
+}
+
+/* 3. 스캐너 UI 전용 독립 레이어 (모든 레이어 위, 하지만 모달보다는 아래) */
+/* 기존 99999999에서 40으로 조정하여 z-[50] 이상의 모달이 위에 오도록 함 */
+.barcode-scanner-ui-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 40 !important; 
+    background: transparent !important;
+    pointer-events: none;
+    display: block !important; 
+}
+
+.text-shadow {
+    text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+
+/* 안내 문구 위치 */
+.scanner-info-text {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    left: 0;
+    bottom: calc(50% + 120px); 
+    z-index: 110;
+}
+
+.scanner-cancel-text {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    left: 0;
+    top: calc(50% + 60px);
+    z-index: 110;
+}
+
+/* [추가] 입력 모달 활성화 시 Body 배경 강제 암전 (깜박임 방지) */
+body.input-modal-active {
+    background-color: #000000 !important;
+}
