@@ -330,10 +330,14 @@ export const addOrder = async (
     if (!db) throw DB_UNAVAILABLE_ERROR;
     const newOrderId = Date.now();
     const now = new Date().toISOString();
-    const newOrder: Omit<Order, 'items'> = {
+    
+    // items 배열을 제거한 순수 주문 객체 생성 (any 타입 캐스팅을 통해 삭제 허용)
+    const newOrder: any = {
         ...orderData, id: newOrderId, date: now, createdAt: now, updatedAt: now,
         itemCount: items.length, completedAt: null, completionDetails: null,
     };
+    delete newOrder.items; // 중복 저장 방지를 위해 명시적 삭제
+
     const updates: { [key: string]: any } = {};
     updates[`/orders/${newOrderId}`] = cleanForFirebase(newOrder);
     updates[`/order-items/${newOrderId}`] = cleanForFirebase(items);
@@ -345,7 +349,7 @@ export const updateOrder = (order: Order, items: OrderItem[]): Promise<void> => 
     if (!db) return Promise.reject(DB_UNAVAILABLE_ERROR);
     const now = new Date().toISOString();
     const updatedOrderData = { ...order, itemCount: items.length, updatedAt: now, date: now };
-    delete updatedOrderData.items;
+    delete updatedOrderData.items; // 중복 저장 방지
     const updates: { [key: string]: any } = {};
     updates[`/orders/${order.id}`] = cleanForFirebase(updatedOrderData);
     updates[`/order-items/${order.id}`] = cleanForFirebase(items);
