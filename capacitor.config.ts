@@ -10,7 +10,11 @@ const config: CapacitorConfig = {
     cleartext: true
   },
   plugins: {
-    // 필요한 경우 플러그인 설정 추가
+    Filesystem: {
+      android: {
+        permissions: ["android.permission.WRITE_EXTERNAL_STORAGE"]
+      }
+    }
   }
 };
 

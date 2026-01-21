@@ -1,5 +1,7 @@
 
 import { Customer, Order, Product, OrderItem } from "../types";
+import { Capacitor } from '@capacitor/core';
+import { saveFileNatively } from './nativeFileService';
 
 // Assuming these libraries are loaded from CDN
 declare const XLSX: any;
@@ -56,6 +58,7 @@ export const loadScript = (src: string): Promise<void> => {
         const script = document.createElement('script');
         script.src = src;
         script.async = true;
+        script.defer = true;
         script.onload = () => {
             resolve();
         };
@@ -125,7 +128,7 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
         throw new Error("엑셀 내보내기 라이브러리를 로드하는 데 실패했습니다. 인터넷 연결을 확인해주세요.");
     }
 
-    const fileName = `발주서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.xls`;
+    const fileName = `발주서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
     // --- Default Export Logic ---
     const workbook = XLSX.utils.book_new();
@@ -233,7 +236,15 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
     }
     
     XLSX.utils.book_append_sheet(workbook, worksheet, "발주서");
-    XLSX.writeFile(workbook, fileName);
+
+    // [MODIFIED] Platform-specific file saving
+    if (Capacitor.isNativePlatform()) {
+        const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        await saveFileNatively(blob, fileName);
+    } else {
+        XLSX.writeFile(workbook, fileName.replace('.xlsx', '.xls'));
+    }
 };
 
 
@@ -368,9 +379,17 @@ export const exportReturnToPDF = async (order: Order): Promise<{ file: File, blo
         const fileName = `반품서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.pdf`;
         const pdfBlob = doc.output('blob');
         const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-        const blobUrl = URL.createObjectURL(file);
         
-        return { file, blobUrl };
+        // [MODIFIED] Platform-specific file saving
+        if (Capacitor.isNativePlatform()) {
+            await saveFileNatively(pdfBlob, fileName);
+            // For native, we don't need to return a blobUrl for download attribute.
+            // Return a dummy URL to satisfy the type signature.
+            return { file, blobUrl: '' };
+        } else {
+            const blobUrl = URL.createObjectURL(file);
+            return { file, blobUrl };
+        }
 
     } catch (error) {
         console.error("PDF 생성 중 오류 발생:", error);
