@@ -1,5 +1,7 @@
 
 import { Customer, Order, Product, OrderItem } from "../types";
+import { Capacitor } from '@capacitor/core';
+import { saveFileNatively } from './nativeFileService';
 
 // Assuming these libraries are loaded from CDN
 declare const XLSX: any;
@@ -233,7 +235,20 @@ export const exportToXLS = async (order: Order, deliveryType: '일반배송' | '
     }
     
     XLSX.utils.book_append_sheet(workbook, worksheet, "발주서");
-    XLSX.writeFile(workbook, fileName);
+
+    // [MODIFIED] Platform-specific file saving
+    if (Capacitor.isNativePlatform()) {
+        const wbout = XLSX.write(workbook, { bookType: 'biff8', type: 'array' });
+        const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
+        // Direct Save (Permissions handled inside saveFileNatively)
+        try {
+            await saveFileNatively(blob, fileName);
+        } catch(e: any) {
+            throw e;
+        }
+    } else {
+        XLSX.writeFile(workbook, fileName);
+    }
 };
 
 
@@ -368,9 +383,20 @@ export const exportReturnToPDF = async (order: Order): Promise<{ file: File, blo
         const fileName = `반품서_${order.customer.name}_${new Date().toISOString().slice(0, 10)}.pdf`;
         const pdfBlob = doc.output('blob');
         const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-        const blobUrl = URL.createObjectURL(file);
         
-        return { file, blobUrl };
+        // [MODIFIED] Platform-specific file saving
+        if (Capacitor.isNativePlatform()) {
+            try {
+                await saveFileNatively(pdfBlob, fileName);
+                return { file, blobUrl: '' };
+            } catch (e: any) {
+                // Re-throw to be caught by UI
+                throw e;
+            }
+        } else {
+            const blobUrl = URL.createObjectURL(file);
+            return { file, blobUrl };
+        }
 
     } catch (error) {
         console.error("PDF 생성 중 오류 발생:", error);
