@@ -31,6 +31,7 @@ interface MiscUIState {
     checkSql: () => Promise<boolean>;
     receivingBadgeCount: number;
     hasActiveReceivingDraft: boolean;
+    refreshReceivingState: () => Promise<void>;
 }
 const MiscUIContext = createContext<MiscUIState | undefined>(undefined);
 
@@ -215,7 +216,7 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }, [user, initialSyncCompleted, refreshReceivingState]);
 
     // --- Memoized Context Values ---
-    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId, sqlStatus, checkSql, receivingBadgeCount, hasActiveReceivingDraft }), [lastModifiedOrderId, activeMenuOrderId, sqlStatus, checkSql, receivingBadgeCount, hasActiveReceivingDraft]);
+    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId, sqlStatus, checkSql, receivingBadgeCount, hasActiveReceivingDraft, refreshReceivingState }), [lastModifiedOrderId, activeMenuOrderId, sqlStatus, checkSql, receivingBadgeCount, hasActiveReceivingDraft, refreshReceivingState]);
     const scannerValue = useMemo(() => ({ isScannerOpen, scannerContext, onScanSuccess, options, openScanner, closeScanner, selectedCameraId, scanSettings }), [isScannerOpen, scannerContext, onScanSuccess, options, openScanner, closeScanner, selectedCameraId, scanSettings]);
     const pwaValue = useMemo(() => ({ isInstallPromptAvailable, triggerInstallPrompt }), [isInstallPromptAvailable, triggerInstallPrompt]);
 

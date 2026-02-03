@@ -68,7 +68,7 @@ ReceiveListItem.displayName = 'ReceiveListItem';
 const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClose }) => {
     const { customers, products } = useDataState();
     const { showAlert, showToast } = useAlert();
-    const { sqlStatus, checkSql } = useMiscUI();
+    const { sqlStatus, checkSql, refreshReceivingState } = useMiscUI();
     const { openScanner } = useScanner();
     
     const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -477,6 +477,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             if (!editingBatch) removeDraft();
             showToast('저장되었습니다.', 'success');
             closeEditor();
+            await refreshReceivingState();
             setTimeout(() => refreshLocalBatches(true), 50);
         } catch (e: any) { showAlert(`저장에 실패했습니다. (${e.message})`); }
     };
