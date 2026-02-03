@@ -1,0 +1,61 @@
+
+/* src/components/ScannerModal.css */
+
+.scanner-guide-hole {
+    position: relative;
+    width: 100%;
+    height: 45px; 
+    border-radius: 12px;
+    /* 바깥쪽 어두운 레이어 (화면 중앙 집중 효과) */
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75); 
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    background-color: transparent;
+    /* 최적화: box-shadow는 애니메이션에서 제외하고 border-color만 부드럽게 변경 */
+    transition: border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    /* 하드웨어 가속 힌트 */
+    will-change: border-color;
+}
+
+/* 1. 대기 상태 (Idle) */
+.scanner-guide-hole.idle {
+    /* 배경색 변경 최소화 (성능 유지) */
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* 2. 스캔 중 (Scanning) */
+.scanner-guide-hole.scanning {
+    border: 2px solid rgba(0, 255, 128, 0.8);
+    /* box-shadow 변경 제거 또는 고정하여 리렌더링 방지 */
+}
+
+/* 3. 스캔 성공 (Success) */
+.scanner-guide-hole.success {
+    border-color: rgba(0, 255, 128, 1);
+    /* 성공 시에만 살짝 더 어둡게 (애니메이션 없이 즉시 적용됨) */
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.85);
+    background-color: rgba(0, 255, 128, 0.05);
+}
+
+.text-shadow {
+    text-shadow: 0 2px 4px rgba(0,0,0,0.8); /* 그림자 범위 축소 */
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-15px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-down {
+  animation: fadeInDown 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* 하드웨어 가속 */
+video {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    /* perspective 제거 (불필요한 3D 컨텍스트 생성 방지) */
+}
