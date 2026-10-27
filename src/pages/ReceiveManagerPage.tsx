@@ -126,6 +126,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
 
     const openItemModal = (props: typeof addItemModalProps) => {
         setAddItemModalProps({ ...props, scanTimestamp: Date.now() });
+        // 스캔 모드일 때는 이미 'scanner' 히스토리가 열려 있으므로 중복 히스토리 푸시로 인한 popstate 깜빡임 방지
+        if (props.source === 'scan') return;
         if (navLock.current) return;
         if (window.history.state?.modal !== 'receiveItem') {
             navLock.current = true;
@@ -589,6 +591,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     };
 
     const handleScanButtonClick = useCallback(() => {
+        isProcessingScanRef.current = false;
+        setAddItemModalProps(prev => (prev.isOpen ? { ...prev, isOpen: false } : prev));
         openScanner('modal', onScanDetected, {
             continuous: true,
             onSaveAndExit: handleSaveBatch,

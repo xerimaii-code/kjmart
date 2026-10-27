@@ -70,6 +70,7 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     next.isDeliveryModalOpen = false; next.orderToExport = null;
                 }
                 if (prev.addItemModalProps && !['addItem', 'scanner'].includes(modalState)) {
+                    prev.addItemModalProps.onClose?.();
                     next.addItemModalProps = null;
                 }
                 if (prev.editItemModalProps && modalState !== 'editItem') {
@@ -114,9 +115,9 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         closeEditItemModal: () => closeModalWithHistory('editItem', () => setModalsState(p => ({ ...p, editItemModalProps: null }))),
         openClearHistoryModal: () => setModalsState(p => ({ ...p, isClearHistoryModalOpen: true })),
         closeClearHistoryModal: () => setModalsState(p => ({ ...p, isClearHistoryModalOpen: false })),
-        // Scanner actions integrated
-        openScanner: (context: ScannerContextType, onScan: (b: string) => void, opts: boolean | ScannerOptions) => openModalWithHistory('scanner', () => setModalsState(p => ({ ...p, isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, options: typeof opts === 'boolean' ? { continuous: opts, useHighPrecision: false } : opts }))),
-        closeScanner: () => closeModalWithHistory('scanner', () => setModalsState(p => ({ ...p, isScannerOpen: false }))),
+        // 스캐너를 열거나 닫을 때 혹시 남아 있을 수 있는 수량 입력창 상태(addItemModalProps)도 함께 정리하여 중복/잔상 팝업 방지
+        openScanner: (context: ScannerContextType, onScan: (b: string) => void, opts: boolean | ScannerOptions) => openModalWithHistory('scanner', () => setModalsState(p => ({ ...p, addItemModalProps: null, isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, options: typeof opts === 'boolean' ? { continuous: opts, useHighPrecision: false } : opts }))),
+        closeScanner: () => closeModalWithHistory('scanner', () => setModalsState(p => ({ ...p, addItemModalProps: null, isScannerOpen: false }))),
     }), [openModalWithHistory, closeModalWithHistory]);
 
     const contextValue = useMemo(() => ({ ...modalsState, ...actions }), [modalsState, actions]);

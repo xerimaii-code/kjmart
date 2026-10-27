@@ -312,6 +312,7 @@ const OrderDetailModal: React.FC = () => {
     }, [activeOrder, dataSourceSettings.newOrder, products, sqlStatus, searchByBarcode, updateOrder, showToast, closeDetailModal, showAlert]);
 
     const handleOpenScanner = useCallback(() => {
+        isProcessingScanRef.current = false;
         const onScan = async (barcode: string) => {
             if (isProcessingScanRef.current) return;
             isProcessingScanRef.current = true;

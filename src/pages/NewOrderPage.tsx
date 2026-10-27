@@ -329,6 +329,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, [openAddItemModal, addOrUpdateItem, isBoxUnitDefault, setProductSearch]);
 
     const handleOpenScanner = useCallback(() => {
+        isProcessingScanRef.current = false;
         if (!selectedCustomerRef.current) { showAlert("먼저 거래처를 선택해주세요."); return; }
     
         const onScan = async (barcode: string) => {

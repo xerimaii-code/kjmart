@@ -71,6 +71,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     const autoStopTimerRef = useRef<any>(null); 
     const countdownIntervalRef = useRef<any>(null);
     const longPressTimerRef = useRef<any>(null);
+    const resumeDelayTimerRef = useRef<any>(null);
     
     const scanLoopTimeoutRef = useRef<any>(null);
     const scanSessionStartTimeRef = useRef<number>(0);
@@ -81,7 +82,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     const isHandlingResult = useRef(false); 
     const isMountedRef = useRef(false);
     const isLongPressRef = useRef(false);
+    const isPausedRef = useRef(isPaused);
+    isPausedRef.current = isPaused;
+
     const lastCandidateRef = useRef<{ code: string; time: number } | null>(null);
+    // 방금 스캔 처리된 바코드가 모달이 닫히는 순간 잔상 프레임으로 즉시 재인식되는 현상 방지
+    const lastAcceptedScanRef = useRef<{ code: string; time: number } | null>(null);
     
     const [engineMode, setEngineMode] = useState<'gpu' | 'zxing' | 'checking'>('checking');
     const [isStreamReady, setIsStreamReady] = useState(false);
@@ -98,6 +104,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         barcode: string;
         reason: string;
     }>({ isOpen: false, barcode: '', reason: '' });
+    const invalidScanAlertOpenRef = useRef(false);
+    invalidScanAlertOpenRef.current = invalidScanAlert.isOpen;
 
     useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
 
@@ -121,6 +129,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         initEngines();
         return () => {
             isMountedRef.current = false;
+            if (resumeDelayTimerRef.current) clearTimeout(resumeDelayTimerRef.current);
             stopScanningLoop();
             stopCamera();
         };
@@ -130,6 +139,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         if (isOpen) {
             setTimeout(() => setIsRendered(true), 10);
             isHandlingResult.current = false;
+            lastCandidateRef.current = null;
+            lastAcceptedScanRef.current = null;
             setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
             setScanState('idle'); 
             scanStateRef.current = 'idle'; 
@@ -138,17 +149,44 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
             startCamera();
         } else {
             setIsRendered(false);
+            if (resumeDelayTimerRef.current) clearTimeout(resumeDelayTimerRef.current);
             setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
             stopCamera();
             stopScanningLoop();
         }
     }, [isOpen]);
 
+    // 수량 입력창(AddItemModal / ReceiveItemModal) 또는 알림창이 열릴 때(isPaused=true) 스캔 루프를 즉시 중단하고,
+    // 수량 입력창이 닫힐 때(isPaused=false) 잔상 프레임이 재인식되지 않도록 캔버스를 비운 뒤 대기 상태로 복귀
     useEffect(() => {
-        if (isOpen && isStreamReady && !scanSettings.useScannerButton && scanState === 'idle' && !isPaused && !invalidScanAlert.isOpen) {
-            startScanningSession();
+        if (resumeDelayTimerRef.current) {
+            clearTimeout(resumeDelayTimerRef.current);
+            resumeDelayTimerRef.current = null;
         }
-    }, [isOpen, isStreamReady, scanSettings.useScannerButton, isPaused, invalidScanAlert.isOpen]);
+
+        if (isPaused) {
+            stopScanningLoop();
+            setIsProcessingSuccess(false);
+            lastCandidateRef.current = null;
+            return;
+        }
+
+        if (isOpen && isStreamReady && !invalidScanAlert.isOpen) {
+            // 캔버스 버퍼 초기화 (이전 프레임 잔상 제거)
+            canvasRef.current.width = 0;
+            canvasRef.current.height = 0;
+            lastCandidateRef.current = null;
+
+            resumeDelayTimerRef.current = setTimeout(() => {
+                if (!isMountedRef.current || isPausedRef.current || invalidScanAlertOpenRef.current) return;
+                isHandlingResult.current = false;
+                setIsProcessingSuccess(false);
+                if (!scanSettings.useScannerButton && scanStateRef.current === 'idle') {
+                    startScanningSession();
+                }
+            }, 350);
+        }
+    }, [isOpen, isStreamReady, isPaused, invalidScanAlert.isOpen, scanSettings.useScannerButton]);
 
     const playBeep = useCallback((isError = false) => {
         if (!scanSettings.soundOnScan) return;
@@ -283,23 +321,28 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
 
     const acceptValidBarcode = (barcode: string) => {
         setIsProcessingSuccess(true);
+        lastAcceptedScanRef.current = { code: barcode, time: Date.now() };
+        // 캔버스 버퍼를 즉시 비워 잔상 재인식 원천 차단
+        canvasRef.current.width = 0;
+        canvasRef.current.height = 0;
+
         onScanSuccess(barcode);
         
         if (!continuous) {
             setTimeout(() => { if (isMountedRef.current) onClose(); }, 150);
         } else {
+            // 연속 스캔 모드에서는 수량 입력 모달(AddItemModal / ReceiveItemModal)이 열렸다가 닫힐 때
+            // 상단 isPaused useEffect에서 안전하게 스캔 대기 상태로 복구하므로 백그라운드에서 조기 재시작하지 않음
             setTimeout(() => {
                 if (isMountedRef.current) {
                     setIsProcessingSuccess(false);
-                    setTimeout(() => { if (isMountedRef.current) isHandlingResult.current = false; }, 650); 
-                    if (!scanSettings.useScannerButton && !invalidScanAlert.isOpen) startScanningSession();
                 }
-            }, 100);
+            }, 250);
         }
     };
 
     const handleScanResult = (rawBarcode: string) => {
-        if (isHandlingResult.current || invalidScanAlert.isOpen) return;
+        if (isHandlingResult.current || isPausedRef.current || invalidScanAlertOpenRef.current) return;
         const barcode = (rawBarcode || '').trim();
         if (!barcode) return;
 
@@ -336,7 +379,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
         isHandlingResult.current = false;
         setTimeout(() => {
-            if (isMountedRef.current) {
+            if (isMountedRef.current && !isPausedRef.current) {
                 startScanningSession();
             }
         }, 80);
@@ -386,7 +429,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         const video = videoRef.current;
         const guide = guideRef.current;
         
-        if (!video || isPaused || invalidScanAlert.isOpen || isHandlingResult.current || scanStateRef.current !== 'scanning' || !guide) return;
+        if (!video || isPausedRef.current || invalidScanAlertOpenRef.current || isHandlingResult.current || scanStateRef.current !== 'scanning' || !guide) return;
 
         try {
             const videoWidth = video.videoWidth;
@@ -414,24 +457,28 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                 const cropW = Math.min(videoWidth - cropX, gW / scale);
                 const cropH = Math.min(videoHeight - cropY, gH / scale);
 
-                const canvas = canvasRef.current;
-                canvas.width = cropW;
-                canvas.height = cropH;
-                const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
-                if (ctx) {
-                    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-                    
-                    if (engineMode === 'gpu' && gpuDetectorRef.current) {
-                        const barcodes = await gpuDetectorRef.current.detect(canvas);
-                        if (barcodes.length > 0) {
-                            handleScanResult(barcodes[0].rawValue);
-                            return;
-                        }
-                    } else if (zxingReaderRef.current) {
-                        const result = await zxingReaderRef.current.decodeFromCanvas(canvas);
-                        if (result) {
-                            handleScanResult(result.text);
-                            return;
+                if (cropW > 10 && cropH > 10) {
+                    const canvas = canvasRef.current;
+                    canvas.width = cropW;
+                    canvas.height = cropH;
+                    const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+                    if (ctx) {
+                        ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                        
+                        if (engineMode === 'gpu' && gpuDetectorRef.current) {
+                            const barcodes = await gpuDetectorRef.current.detect(canvas);
+                            if (isPausedRef.current || isHandlingResult.current || scanStateRef.current !== 'scanning') return;
+                            if (barcodes.length > 0) {
+                                handleScanResult(barcodes[0].rawValue);
+                                return;
+                            }
+                        } else if (zxingReaderRef.current) {
+                            const result = await zxingReaderRef.current.decodeFromCanvas(canvas);
+                            if (isPausedRef.current || isHandlingResult.current || scanStateRef.current !== 'scanning') return;
+                            if (result) {
+                                handleScanResult(result.text);
+                                return;
+                            }
                         }
                     }
                 }
@@ -442,7 +489,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     };
 
     const scheduleNextScan = () => {
-        if (scanStateRef.current !== 'scanning' || isHandlingResult.current || invalidScanAlert.isOpen) return;
+        if (scanStateRef.current !== 'scanning' || isPausedRef.current || isHandlingResult.current || invalidScanAlertOpenRef.current) return;
 
         const now = Date.now();
         const elapsed = now - scanSessionStartTimeRef.current;
@@ -456,7 +503,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     };
 
     const startScanningSession = () => {
-        if (!isStreamReady || isPaused || invalidScanAlert.isOpen) return;
+        if (!isStreamReady || isPausedRef.current || invalidScanAlertOpenRef.current) return;
         
         if (autoStopTimerRef.current) clearTimeout(autoStopTimerRef.current); 
         if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
@@ -494,7 +541,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     };
 
     const handlePointerDown = (e: React.PointerEvent) => {
-        if (!scanSettings.useScannerButton || invalidScanAlert.isOpen) return;
+        if (!scanSettings.useScannerButton || isPausedRef.current || invalidScanAlertOpenRef.current) return;
         e.preventDefault();
         e.stopPropagation();
         
@@ -586,7 +633,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                 </div>
             </div>
 
-            {/* 카메라 스캔 모드에서만 하단 중앙에 표시되는 소형 [저장 & 종료] 버튼 (메인 Touch to Scan 버튼보다 작고 아담한 크기) */}
+            {/* 카메라 스캔 모드에서만 하단 중앙에 표시되는 소형 [저장 & 종료] 버튼 */}
             {onSaveAndExit && !isPaused && !invalidScanAlert.isOpen && (
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[2400] pointer-events-auto safe-area-pb">
                     <button
