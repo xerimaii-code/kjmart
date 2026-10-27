@@ -32,9 +32,8 @@
   "start_url": "/",
   "id": "/",
   "orientation": "portrait-primary",
-  "display": "fullscreen",
+  "display": "standalone",
   "display_override": [
-    "fullscreen",
     "standalone",
     "minimal-ui"
   ],
