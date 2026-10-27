@@ -1,25 +1,74 @@
 import React, { useState, useEffect } from 'react';
 import { useFullscreenStatus } from '../hooks/useFullscreenStatus';
-import { ExitFullscreenIcon, ArrowsPointingOutIcon } from './Icons';
+import { ExitFullscreenIcon, ArrowsPointingOutIcon, CloudArrowDownIcon } from './Icons';
 
 const Header: React.FC = () => {
     const isFullscreen = useFullscreenStatus();
     const [currentTime, setCurrentTime] = useState(new Date());
-    const isStandalone = typeof window !== 'undefined' && (
-        window.matchMedia('(display-mode: fullscreen)').matches ||
-        window.matchMedia('(display-mode: standalone)').matches ||
-        (window.navigator as any).standalone === true
-    );
+    const [installPrompt, setInstallPrompt] = useState<any>(() => (window as any).__deferredInstallPrompt || null);
+    const [isStandalone, setIsStandalone] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        return (
+            window.matchMedia('(display-mode: fullscreen)').matches ||
+            window.matchMedia('(display-mode: standalone)').matches ||
+            (window.navigator as any).standalone === true
+        );
+    });
 
     useEffect(() => {
         const timeTimerId = setInterval(() => setCurrentTime(new Date()), 10000);
 
+        const syncInstallPrompt = () => {
+            setInstallPrompt((window as any).__deferredInstallPrompt || null);
+        };
+        const handleBeforeInstallPrompt = (e: Event) => {
+            e.preventDefault();
+            (window as any).__deferredInstallPrompt = e;
+            setInstallPrompt(e);
+        };
+        const handleAppInstalled = () => {
+            (window as any).__deferredInstallPrompt = null;
+            setInstallPrompt(null);
+            setIsStandalone(true);
+        };
+        const standaloneMedia = window.matchMedia('(display-mode: standalone)');
+        const handleDisplayModeChange = (e: MediaQueryListEvent) => {
+            setIsStandalone(e.matches);
+        };
+
+        window.addEventListener('kjmart-install-available', syncInstallPrompt);
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.addEventListener('appinstalled', handleAppInstalled);
+        window.addEventListener('kjmart-app-installed', handleAppInstalled);
+        standaloneMedia.addEventListener?.('change', handleDisplayModeChange);
+
         return () => {
             clearInterval(timeTimerId);
+            window.removeEventListener('kjmart-install-available', syncInstallPrompt);
+            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+            window.removeEventListener('appinstalled', handleAppInstalled);
+            window.removeEventListener('kjmart-app-installed', handleAppInstalled);
+            standaloneMedia.removeEventListener?.('change', handleDisplayModeChange);
         };
     }, []);
 
+    const handleInstallApp = async () => {
+        const promptEvent = installPrompt || (window as any).__deferredInstallPrompt;
+        if (!promptEvent) return;
+        try {
+            promptEvent.prompt();
+            const choiceResult = await promptEvent.userChoice;
+            if (choiceResult && choiceResult.outcome === 'accepted') {
+                (window as any).__deferredInstallPrompt = null;
+                setInstallPrompt(null);
+            }
+        } catch (e) {
+            console.warn('PWA install prompt error:', e);
+        }
+    };
+
     const handleEnterFullscreen = async () => {
+        (window as any).__userExitedFullscreen = false;
         const docEl = document.documentElement as any;
         const requestFullscreen =
             docEl.requestFullscreen ||
@@ -41,6 +90,7 @@ const Header: React.FC = () => {
     };
 
     const handleExitFullscreen = async () => {
+        (window as any).__userExitedFullscreen = true;
         const exitFullscreen =
             document.exitFullscreen ||
             (document as any).webkitExitFullscreen ||
@@ -58,8 +108,19 @@ const Header: React.FC = () => {
 
     return (
         <header id="app-header" className="bg-white px-4 flex justify-between items-center h-14 flex-shrink-0 border-b border-gray-200 sticky top-0 z-30">
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0">
                 <h1 className="text-xl font-extrabold text-slate-800 tracking-tight flex-shrink-0">KJ Mart</h1>
+                {!isStandalone && installPrompt && (
+                    <button
+                        type="button"
+                        onClick={handleInstallApp}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-sm active:scale-95 transition-transform"
+                        title="주소창 없는 전체화면 앱으로 설치"
+                    >
+                        <CloudArrowDownIcon className="w-3.5 h-3.5" />
+                        <span>앱 설치</span>
+                    </button>
+                )}
             </div>
             
             <div className="flex items-center space-x-2">

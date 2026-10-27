@@ -78,7 +78,7 @@ BEGIN TRY
                @TargetStart = startday, 
                @TargetEnd = endday
         FROM sale_mast WITH(UPDLOCK, ROWLOCK) 
-        WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+        WHERE junno = LTRIM(RTRIM(@Junno))
 
         IF ISNULL(@SaleName, '') = ''
         BEGIN
@@ -99,7 +99,7 @@ BEGIN TRY
         SET @OrgPriceToUse = ISNULL(
             (SELECT TOP 1 r.salemoney1 
              FROM sale_ready r JOIN sale_mast m ON r.junno = m.junno
-             WHERE r.barcode = @Barcode AND LTRIM(RTRIM(m.junno)) <> LTRIM(RTRIM(@Junno))
+             WHERE r.barcode = @Barcode AND m.junno <> LTRIM(RTRIM(@Junno))
              ORDER BY m.endday DESC, m.startday DESC),
             (SELECT money1 FROM parts WHERE barcode = @Barcode)
         );
@@ -111,7 +111,7 @@ BEGIN TRY
             SET @MarginRate = FLOOR(((CAST(@SalePrice AS DECIMAL) - CAST(@SaleCost AS DECIMAL)) / CAST(@SalePrice AS DECIMAL)) * 100)
 
         -- [5] 데이터 저장 (UPSERT: 있으면 수정, 없으면 추가)
-        IF EXISTS (SELECT 1 FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode)
+        IF EXISTS (SELECT 1 FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode)
         BEGIN
             -- 이미 등록된 경우: UPDATE
             UPDATE sale_ready
@@ -125,7 +125,7 @@ BEGIN TRY
                 starttime  = @Today,      
                 endtime    = '-'          
                 
-            WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode
+            WHERE junno = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode
         END
         ELSE
         BEGIN
@@ -133,7 +133,7 @@ BEGIN TRY
             -- 일련번호 생성 (junno_serial)
             SELECT @NextSerial = RIGHT('00000' + CAST(ISNULL(COUNT(*), 0) + 1 AS VARCHAR), 5)
             FROM sale_ready 
-            WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+            WHERE junno = LTRIM(RTRIM(@Junno))
 
             SET @JunnoSerial = @Junno + '_' + @NextSerial
 
@@ -161,12 +161,12 @@ BEGIN TRY
         
         -- [6] 마스터 테이블 요약 정보(품목 수, 평균 마진율) 자동 업데이트
         UPDATE sale_mast 
-        SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))),
-            avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)))
-        WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+        SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno))),
+            avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno)))
+        WHERE junno = LTRIM(RTRIM(@Junno))
         
         -- [7] [추가] 행사 마스터가 '진행중'이고, 현재 품목도 '적용'으로 저장될 때만 parts 즉시 업데이트
-        IF @IsAppl = '1' AND EXISTS(SELECT 1 FROM sale_mast WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl = '1')
+        IF @IsAppl = '1' AND EXISTS(SELECT 1 FROM sale_mast WHERE junno = LTRIM(RTRIM(@Junno)) AND isappl = '1')
         BEGIN
             UPDATE parts
             SET money1comp = @SalePrice,
@@ -203,7 +203,7 @@ BEGIN TRY
     BEGIN TRANSACTION;
 
         -- 1. 현재 상태와 새로운 상태 결정
-        SELECT @OldStatus = isappl FROM sale_mast WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate));
+        SELECT @OldStatus = isappl FROM sale_mast WHERE junno = LTRIM(RTRIM(@JunnoToUpdate));
 
         SET @NewStatus = CASE 
                             WHEN @NewStartDay > @Today THEN '0' -- 미래: 대기
@@ -212,21 +212,21 @@ BEGIN TRY
                          END;
 
         -- 2. 날짜 및 상태 업데이트
-        UPDATE sale_mast SET startday = @NewStartDay, endday = @NewEndDay, isappl = @NewStatus WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate));
-        UPDATE sale_ready SET startday = @NewStartDay, endday = @NewEndDay WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate));
+        UPDATE sale_mast SET startday = @NewStartDay, endday = @NewEndDay, isappl = @NewStatus WHERE junno = LTRIM(RTRIM(@JunnoToUpdate));
+        UPDATE sale_ready SET startday = @NewStartDay, endday = @NewEndDay WHERE junno = LTRIM(RTRIM(@JunnoToUpdate));
         
         -- 3. 상태 변경에 따른 소속 상품(sale_ready) 상태 업데이트 ('D' 상태는 제외)
         IF @NewStatus = '0' -- 대기 상태로 변경 시
         BEGIN
-            UPDATE sale_ready SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
+            UPDATE sale_ready SET isappl = '0' WHERE junno = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
         END
         ELSE IF @NewStatus = '1' -- 진행 상태로 변경 시
         BEGIN
-            UPDATE sale_ready SET isappl = '1' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
+            UPDATE sale_ready SET isappl = '1' WHERE junno = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
         END
         ELSE IF @NewStatus = '2' -- 종료 상태로 변경 시
         BEGIN
-            UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
+            UPDATE sale_ready SET isappl = 'D' WHERE junno = LTRIM(RTRIM(@JunnoToUpdate)) AND isappl <> 'D';
         END
 
         -- 4. 상태 변경에 따른 Parts 테이블 업데이트
@@ -242,10 +242,10 @@ BEGIN TRY
             OUTER APPLY (
                 SELECT TOP 1 r2.salemoney1, r2.salemoney0, m2.startday, m2.endday
                 FROM sale_ready r2 JOIN sale_mast m2 ON r2.junno = m2.junno
-                WHERE r2.barcode = p.barcode AND m2.isappl = '1' AND LTRIM(RTRIM(m2.junno)) <> LTRIM(RTRIM(@JunnoToUpdate))
+                WHERE r2.barcode = p.barcode AND m2.isappl = '1' AND m2.junno <> LTRIM(RTRIM(@JunnoToUpdate))
                 ORDER BY m2.startday DESC
             ) AS ne
-            WHERE LTRIM(RTRIM(r.junno)) = LTRIM(RTRIM(@JunnoToUpdate));
+            WHERE r.junno = LTRIM(RTRIM(@JunnoToUpdate));
         END
         else if @OldStatus <> '1' AND @NewStatus = '1'
         BEGIN
@@ -256,7 +256,7 @@ BEGIN TRY
                 p.salestartday = @NewStartDay,
                 p.saleendday = @NewEndDay
             FROM parts p JOIN sale_ready r ON p.barcode = r.barcode
-            WHERE LTRIM(RTRIM(r.junno)) = LTRIM(RTRIM(@JunnoToUpdate)) AND r.isappl = '1';
+            WHERE r.junno = LTRIM(RTRIM(@JunnoToUpdate)) AND r.isappl = '1';
         END
 
     COMMIT TRANSACTION;
@@ -532,12 +532,12 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     SET NOCOUNT ON; SET XACT_ABORT ON;
                     BEGIN TRY
                         BEGIN TRANSACTION;
-                        UPDATE sale_mast SET isappl = '1' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
-                        UPDATE sale_ready SET isappl = '1' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';
+                        UPDATE sale_mast SET isappl = '1' WHERE junno = LTRIM(RTRIM(@Junno));
+                        UPDATE sale_ready SET isappl = '1' WHERE junno = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';
 
                         UPDATE p SET p.money1comp = r.salemoney1, p.salemoney0 = r.salemoney0, p.salestartday = m.startday, p.saleendday = m.endday 
                         FROM parts p JOIN sale_ready r ON p.barcode = r.barcode JOIN sale_mast m ON r.junno = m.junno 
-                        WHERE LTRIM(RTRIM(m.junno)) = LTRIM(RTRIM(@Junno)) AND r.isappl = '1';
+                        WHERE m.junno = LTRIM(RTRIM(@Junno)) AND r.isappl = '1';
                         COMMIT TRANSACTION;
                     END TRY
                     BEGIN CATCH
@@ -574,11 +574,11 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         BEGIN TRY
                             BEGIN TRANSACTION;
                                 ${targetStatus === '0' ? 
-                                    `UPDATE sale_mast SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
-                                     UPDATE sale_ready SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';` 
+                                    `UPDATE sale_mast SET isappl = '0' WHERE junno = LTRIM(RTRIM(@Junno));
+                                     UPDATE sale_ready SET isappl = '0' WHERE junno = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';` 
                                     : 
-                                    `UPDATE sale_mast SET isappl = '2' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
-                                     UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';`
+                                    `UPDATE sale_mast SET isappl = '2' WHERE junno = LTRIM(RTRIM(@Junno));
+                                     UPDATE sale_ready SET isappl = 'D' WHERE junno = LTRIM(RTRIM(@Junno)) AND isappl <> 'D';`
                                 }
     
                                 UPDATE p
@@ -591,10 +591,10 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                 OUTER APPLY (
                                     SELECT TOP 1 r_other.salemoney1, r_other.salemoney0, m_other.startday, m_other.endday
                                     FROM sale_ready r_other WITH(NOLOCK) JOIN sale_mast m_other WITH(NOLOCK) ON r_other.junno = m_other.junno
-                                    WHERE r_other.barcode = p.barcode AND m_other.isappl = '1' AND LTRIM(RTRIM(m_other.junno)) <> LTRIM(RTRIM(@Junno))
+                                    WHERE r_other.barcode = p.barcode AND m_other.isappl = '1' AND m_other.junno <> LTRIM(RTRIM(@Junno))
                                     ORDER BY m_other.startday DESC
                                 ) AS next_event
-                                WHERE LTRIM(RTRIM(r_stopped.junno)) = LTRIM(RTRIM(@Junno));
+                                WHERE r_stopped.junno = LTRIM(RTRIM(@Junno));
                             COMMIT TRANSACTION;
                         END TRY
                         BEGIN CATCH
@@ -630,7 +630,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         showAlert(`'${event.salename}' 행사를 완전히 삭제하시겠습니까?`, async () => {
             setIsProcessing(true);
             try {
-                const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)); DELETE FROM sale_mast WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
+                const deleteSql = `DELETE FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno)); DELETE FROM sale_mast WHERE junno = LTRIM(RTRIM(@Junno));`;
                 await executeUserQuery('행사_삭제', { Junno: event.junno.trim() }, deleteSql);
                 showToast('행사가 삭제되었습니다.', 'success');
                 handleSearch(true);
@@ -670,7 +670,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                         DECLARE @JunnoToStop VARCHAR(20) = @Junno; DECLARE @BarcodeToStop VARCHAR(20) = @Barcode;
                         BEGIN TRY
                             BEGIN TRANSACTION;
-                                UPDATE sale_ready SET isappl = 'D' WHERE LTRIM(RTRIM(junno)) = @JunnoToStop AND barcode = @BarcodeToStop;
+                                UPDATE sale_ready SET isappl = 'D' WHERE junno = LTRIM(RTRIM(@JunnoToStop)) AND barcode = @BarcodeToStop;
                                 
                                 DECLARE @NextBestSalePrice DECIMAL(18,0), @NextBestSaleCost DECIMAL(18,0), @NextBestStart VARCHAR(10), @NextBestEnd VARCHAR(10);
                                 SELECT TOP 1 
@@ -678,7 +678,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                                     @NextBestStart = m.startday, @NextBestEnd = m.endday 
                                 FROM sale_ready r WITH(NOLOCK) 
                                 JOIN sale_mast m WITH(NOLOCK) ON r.junno = m.junno 
-                                WHERE r.barcode = @BarcodeToStop AND m.isappl = '1' AND LTRIM(RTRIM(m.junno)) <> LTRIM(RTRIM(@JunnoToStop)) 
+                                WHERE r.barcode = @BarcodeToStop AND m.isappl = '1' AND m.junno <> LTRIM(RTRIM(@JunnoToStop)) 
                                 ORDER BY m.startday DESC;
                                 
                                 IF @@ROWCOUNT > 0
@@ -695,7 +695,7 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     await executeUserQuery('행사상품_개별중지_및_Parts업데이트', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, stopSql);
                 }
                 
-                const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))) WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
+                const deleteSql = `DELETE FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno))) WHERE junno = LTRIM(RTRIM(@Junno));`;
                 await executeUserQuery('행사상품_개별삭제', { Junno: selectedEvent.junno.trim(), Barcode: barcode }, deleteSql);
                 
                 showToast(isItemApplied ? '중지 및 삭제되었습니다.' : '상품을 삭제했습니다.', 'success');

@@ -49,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
-    const { type, query, params, userQuery, naturalLanguagePrompt, lastSyncDate, schema, context, userCurrentDate, searchTerm, limit } = req.body;
+    const { type, name, query, params, userQuery, naturalLanguagePrompt, lastSyncDate, schema, context, userCurrentDate, searchTerm, limit } = req.body;
 
     try {
         if (type === 'connect') {
@@ -70,6 +70,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const activePool = await getPool();
+
+        if (type === 'syncCategories') {
+            const [r1, r2, r3] = await Promise.all([
+                activePool.request().query("SELECT gubun1, gubun1x FROM gubun1 WITH(NOLOCK) WHERE isuse <> '0'"),
+                activePool.request().query("SELECT gubun1, gubun2, gubun2x FROM gubun2 WITH(NOLOCK) WHERE isuse <> '0'"),
+                activePool.request().query("SELECT gubun1, gubun2, gubun3, gubun3x FROM gubun3 WITH(NOLOCK) WHERE isuse <> '0'"),
+            ]);
+            return res.status(200).json({
+                gubun1: { recordset: r1.recordset },
+                gubun2: { recordset: r2.recordset },
+                gubun3: { recordset: r3.recordset },
+            });
+        }
+
         const request = activePool.request();
 
         if (params && typeof params === 'object') {
@@ -93,13 +107,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         
         if (type === 'getDatabaseSchema') {
             finalQuery = "SELECT t.TABLE_NAME as tableName, c.COLUMN_NAME as columnName, c.DATA_TYPE as dataType FROM INFORMATION_SCHEMA.TABLES t JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME WHERE t.TABLE_TYPE = 'BASE TABLE' ORDER BY t.TABLE_NAME, c.ORDINAL_POSITION";
-        } else if (type === 'syncCustomers') {
+        } else if (type === 'syncCustomers' || (type === 'executeUserQuery' && !finalQuery && name === 'getSuppliers')) {
             finalQuery = "SELECT comcode, comname FROM comp WITH(NOLOCK) WHERE isuse <> '0'";
+        } else if (type === 'syncBOM') {
+            finalQuery = "SELECT parebar AS pcode, childbar AS ccode, childcount AS qty, childcount FROM bom WITH(NOLOCK)";
         } else if (type === 'syncProductsIncrementally') {
             request.input('lastDate', sql.VarChar, lastSyncDate || '1900-01-01');
-            // [단일화된 통합 상품 마스터 동기화 쿼리]
-            // 온라인 조회(searchProductsOnline)와 100% 동일한 스키마(거래처명, 행사정보, 규격, BOM여부 포함)로 반환하여
-            // 로컬(IndexedDB)과 서버 조회 데이터를 단일 포맷으로 일원화합니다.
+            // [단일화된 통합 상품 마스터 동기화 쿼리 - OUTER APPLY 인덱스 최적화]
+            // 온라인 조회(searchProductsOnline)와 100% 동일한 스키마로 반환하며,
+            // 중복 행사 등록 시에도 상품당 1행만 보장하고 인덱스 Seek로 빠르게 조회합니다.
             finalQuery = `
                 DECLARE @Today VARCHAR(10) = CONVERT(VARCHAR(10), GETDATE(), 120);
 
@@ -112,12 +128,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       p.money1 AS [판매가],
                       ISNULL(p.curjago, 0) AS [재고수량],
                       CASE WHEN p.ispack = '1' THEN '묶음' ELSE '일반' END AS [BOM여부],
-                      CASE WHEN (s.barcode IS NOT NULL AND m.junno IS NOT NULL) THEN 'Y' ELSE 'N' END AS [행사유무],
-                      ISNULL(CASE WHEN m.junno IS NOT NULL THEN s.salemoney0 ELSE 0 END, 0) AS [행사매입가],
-                      ISNULL(CASE WHEN m.junno IS NOT NULL THEN s.salemoney1 ELSE 0 END, 0) AS [행사판매가],
-                      ISNULL(m.salename, '') AS [행사명],
-                      m.startday AS [행사시작일],
-                      m.endday AS [행사종료일],
+                      CASE WHEN ev.junno IS NOT NULL THEN 'Y' ELSE 'N' END AS [행사유무],
+                      ISNULL(ev.salemoney0, 0) AS [행사매입가],
+                      ISNULL(ev.salemoney1, 0) AS [행사판매가],
+                      ISNULL(ev.salename, '') AS [행사명],
+                      ev.startday AS [행사시작일],
+                      ev.endday AS [행사종료일],
                       p.comcode AS [거래처코드],
                       ISNULL(c.comname, '') AS [거래처명],
                       p.gubun1,
@@ -130,24 +146,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       p.upday1
                 FROM parts AS p WITH(NOLOCK)
                 LEFT JOIN comp AS c WITH(NOLOCK) ON p.comcode = c.comcode
-                LEFT JOIN sale_ready AS s WITH(NOLOCK) ON p.barcode = s.barcode AND s.isappl = '1'
-                LEFT JOIN sale_mast AS m WITH(NOLOCK) ON s.junno = m.junno AND m.isappl = '1' AND (@Today BETWEEN m.startday AND m.endday)
+                OUTER APPLY (
+                    SELECT TOP 1
+                        s.salemoney0,
+                        s.salemoney1,
+                        m.junno,
+                        m.salename,
+                        m.startday,
+                        m.endday
+                    FROM sale_ready AS s WITH(NOLOCK)
+                    INNER JOIN sale_mast AS m WITH(NOLOCK) ON s.junno = m.junno
+                    WHERE s.barcode = p.barcode
+                      AND s.isappl = '1'
+                      AND m.isappl = '1'
+                      AND (@Today BETWEEN m.startday AND m.endday)
+                    ORDER BY m.endday DESC, m.startday DESC, m.junno DESC
+                ) AS ev
                 WHERE (@lastDate = '1900-01-01' AND p.isuse <> '0')
                    OR (@lastDate <> '1900-01-01' AND (
                         p.upday1 >= @lastDate
-                        OR (m.junno IS NOT NULL AND (m.startday >= @lastDate OR s.inpday >= @lastDate))
+                        OR EXISTS (
+                            SELECT 1
+                            FROM sale_ready AS s2 WITH(NOLOCK)
+                            INNER JOIN sale_mast AS m2 WITH(NOLOCK) ON s2.junno = m2.junno
+                            WHERE s2.barcode = p.barcode
+                              AND (m2.startday >= @lastDate OR s2.inpday >= @lastDate)
+                        )
                    ))
             `;
         } else if (type === 'searchProductsOnline' || type === 'searchProductsForEdit') {
             const kw = searchTerm || '';
+            const topLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
             request.input('kw', sql.NVarChar, kw);
             request.input('kwLike', sql.NVarChar, `%${kw}%`);
             
-            // [통합 상품조회 쿼리 - 행사정보 sale_ready 조인 포함]
+            // [통합 상품조회 쿼리 - OUTER APPLY 인덱스 최적화]
+            // 전체 sale_ready 테이블 조인 대신 검색된 상위 50개 상품에 대해서만 인덱스로 최신 진행 행사를 즉시 결합합니다.
             finalQuery = `
                 DECLARE @Today VARCHAR(10) = CONVERT(VARCHAR(10), GETDATE(), 120);
 
-                SELECT TOP 50
+                SELECT TOP (${topLimit})
                       p.barcode AS [바코드],
                       p.descr AS [상품명],
                       p.spec AS [규격],
@@ -156,12 +194,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       p.money1 AS [판매가],
                       ISNULL(p.curjago, 0) AS [재고수량],
                       CASE WHEN p.ispack = '1' THEN '묶음' ELSE '일반' END AS [BOM여부],
-                      CASE WHEN s.barcode IS NOT NULL THEN 'Y' ELSE 'N' END AS [행사유무],
-                      ISNULL(s.salemoney0, 0) AS [행사매입가],
-                      ISNULL(s.salemoney1, 0) AS [행사판매가],
-                      ISNULL(m.salename, '') AS [행사명],
-                      m.startday AS [행사시작일],
-                      m.endday AS [행사종료일],
+                      CASE WHEN ev.junno IS NOT NULL THEN 'Y' ELSE 'N' END AS [행사유무],
+                      ISNULL(ev.salemoney0, 0) AS [행사매입가],
+                      ISNULL(ev.salemoney1, 0) AS [행사판매가],
+                      ISNULL(ev.salename, '') AS [행사명],
+                      ev.startday AS [행사시작일],
+                      ev.endday AS [행사종료일],
                       p.comcode AS [거래처코드],
                       ISNULL(c.comname, '') AS [거래처명],
                       p.gubun1,
@@ -174,8 +212,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       p.upday1
                 FROM parts AS p WITH(NOLOCK)
                 LEFT JOIN comp AS c WITH(NOLOCK) ON p.comcode = c.comcode
-                LEFT JOIN sale_ready AS s WITH(NOLOCK) ON p.barcode = s.barcode AND s.isappl = '1'
-                LEFT JOIN sale_mast AS m WITH(NOLOCK) ON s.junno = m.junno AND m.isappl = '1' AND (@Today BETWEEN m.startday AND m.endday)
+                OUTER APPLY (
+                    SELECT TOP 1
+                        s.salemoney0,
+                        s.salemoney1,
+                        m.junno,
+                        m.salename,
+                        m.startday,
+                        m.endday
+                    FROM sale_ready AS s WITH(NOLOCK)
+                    INNER JOIN sale_mast AS m WITH(NOLOCK) ON s.junno = m.junno
+                    WHERE s.barcode = p.barcode
+                      AND s.isappl = '1'
+                      AND m.isappl = '1'
+                      AND (@Today BETWEEN m.startday AND m.endday)
+                    ORDER BY m.endday DESC, m.startday DESC, m.junno DESC
+                ) AS ev
                 WHERE p.barcode = @kw OR p.descr LIKE @kwLike
                 ORDER BY (CASE WHEN p.barcode = @kw THEN 0 ELSE 1 END), p.descr
             `;

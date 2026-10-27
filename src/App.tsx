@@ -188,7 +188,7 @@ const App: React.FC = () => {
 
         const isPreview = window.location.hostname.includes('usercontent.goog');
         if ('serviceWorker' in navigator && !IS_DEVELOPER_MODE && !isPreview) {
-            window.addEventListener('load', () => {
+            const registerSW = () => {
                 navigator.serviceWorker.register('/service-worker.js').then(reg => {
                     setRegistration(reg);
                     if (reg.waiting) {
@@ -204,8 +204,18 @@ const App: React.FC = () => {
                             });
                         }
                     });
+                }).catch(err => {
+                    console.warn('ServiceWorker registration failed:', err);
                 });
-            });
+            };
+
+            // React 18 마운트 시점에 이미 window.onload가 지나간 경우 즉시 등록하여 PWA 설치 요건 누락 방지
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                registerSW();
+            } else {
+                window.addEventListener('load', registerSW, { once: true });
+            }
+
             let refreshing = false;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
                 if (!refreshing) {

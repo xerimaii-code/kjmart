@@ -75,12 +75,12 @@ BEGIN TRY
     BEGIN TRANSACTION;
 
     -- 1. 중지 상태로 변경 (0)
-    UPDATE sale_mast SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
-    UPDATE sale_ready SET isappl = '0' WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
+    UPDATE sale_mast SET isappl = '0' WHERE junno = LTRIM(RTRIM(@Junno));
+    UPDATE sale_ready SET isappl = '0' WHERE junno = LTRIM(RTRIM(@Junno));
     
     -- 2. 관련 데이터 삭제
-    DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
-    DELETE FROM sale_mast WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));
+    DELETE FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno));
+    DELETE FROM sale_mast WHERE junno = LTRIM(RTRIM(@Junno));
 
     COMMIT TRANSACTION;
     SELECT 'SUCCESS' AS RESULT, '행사가 취소 및 삭제되었습니다.' AS MSG;
@@ -140,7 +140,7 @@ BEGIN TRY
                @TargetStart = startday, 
                @TargetEnd = endday
         FROM sale_mast WITH(UPDLOCK, ROWLOCK) 
-        WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+        WHERE junno = LTRIM(RTRIM(@Junno))
 
         IF ISNULL(@SaleName, '') = ''
         BEGIN
@@ -161,7 +161,7 @@ BEGIN TRY
         SET @OrgPriceToUse = ISNULL(
             (SELECT TOP 1 r.salemoney1 
              FROM sale_ready r JOIN sale_mast m ON r.junno = m.junno
-             WHERE r.barcode = @Barcode AND LTRIM(RTRIM(m.junno)) <> LTRIM(RTRIM(@Junno))
+             WHERE r.barcode = @Barcode AND m.junno <> LTRIM(RTRIM(@Junno))
              ORDER BY m.endday DESC, m.startday DESC),
             (SELECT money1 FROM parts WHERE barcode = @Barcode)
         );
@@ -173,7 +173,7 @@ BEGIN TRY
             SET @MarginRate = FLOOR(((CAST(@SalePrice AS DECIMAL) - CAST(@SaleCost AS DECIMAL)) / CAST(@SalePrice AS DECIMAL)) * 100)
 
         -- [5] 데이터 저장 (UPSERT: 있으면 수정, 없으면 추가)
-        IF EXISTS (SELECT 1 FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode)
+        IF EXISTS (SELECT 1 FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode)
         BEGIN
             -- 이미 등록된 경우: UPDATE
             UPDATE sale_ready
@@ -187,7 +187,7 @@ BEGIN TRY
                 starttime  = @Today,
                 endtime    = '-'
                 
-            WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode
+            WHERE junno = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode
         END
         ELSE
         BEGIN
@@ -195,7 +195,7 @@ BEGIN TRY
             -- 일련번호 생성 (junno_serial)
             SELECT @NextSerial = RIGHT('00000' + CAST(ISNULL(COUNT(*), 0) + 1 AS VARCHAR), 5)
             FROM sale_ready 
-            WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+            WHERE junno = LTRIM(RTRIM(@Junno))
 
             SET @JunnoSerial = @Junno + '_' + @NextSerial
 
@@ -223,9 +223,9 @@ BEGIN TRY
         
         -- [6] 마스터 테이블 요약 정보(품목 수, 평균 마진율) 자동 업데이트
         UPDATE sale_mast 
-        SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))),
-            avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)))
-        WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))
+        SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno))),
+            avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno)))
+        WHERE junno = LTRIM(RTRIM(@Junno))
 
     COMMIT TRANSACTION;
     SELECT 'SUCCESS' AS RESULT, '저장되었습니다.' AS MSG
@@ -416,7 +416,7 @@ const EventRegistrationPage: React.FC<EventRegistrationPageProps> = ({ isActive,
     const handleDeleteItem = (barcode: string) => {
         showAlert(`목록에서 삭제하시겠습니까?`, async () => {
             try {
-                const deleteSql = `DELETE FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno))) WHERE LTRIM(RTRIM(junno)) = LTRIM(RTRIM(@Junno));`;
+                const deleteSql = `DELETE FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno)) AND barcode = @Barcode; UPDATE sale_mast SET itemcount = (SELECT COUNT(*) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno))), avgmgrate = (SELECT ISNULL(AVG(salecount), 0) FROM sale_ready WHERE junno = LTRIM(RTRIM(@Junno))) WHERE junno = LTRIM(RTRIM(@Junno));`;
                 await executeUserQuery('행사상품_개별삭제', { Junno: junno.trim(), Barcode: barcode }, deleteSql);
                 showToast('삭제되었습니다.', 'success');
                 await fetchAddedItems(junno);
