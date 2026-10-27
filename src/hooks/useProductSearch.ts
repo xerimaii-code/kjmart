@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { Product } from '../types';
 import { useDataState, useDeviceSettings, useMiscUI } from '../context/AppContext';
@@ -19,7 +18,7 @@ interface UseProductSearchReturn {
 export function useProductSearch(
     sourceSettingKey: 'newOrder' | 'productInquiry', 
     maxResults: number = 50,
-    specificQueryName?: string, // Optional: Force a specific user query
+    specificQueryName?: string,
     options?: { forceOnline?: boolean }
 ): UseProductSearchReturn {
     const { products, userQueries } = useDataState();
@@ -34,114 +33,114 @@ export function useProductSearch(
     const search = useCallback(async (manualTerm?: string) => {
         const term = (manualTerm !== undefined ? manualTerm : searchTerm).trim();
         
-        if (!term || term.length < 1) { // Allow single character search for speed
+        if (!term || term.length < 1) {
             setResults([]);
             setSearchSource('none');
             setIsSearching(false);
             return;
         }
 
-        setIsSearching(true);
+        const preferredSource = dataSourceSettings[sourceSettingKey];
+        const canGoOnline = sqlStatus === 'connected';
+        // 'productInquiry'(상품조회, 재고실사, 행사관리 등) 또는 forceOnline인 경우 SQL이 켜져 있으면 무조건 서버 접속
+        // 'newOrder'(발주, 입고)인 경우 설정이 'online'(서버)이고 SQL이 켜져 있을 때만 서버 접속 ('offline'(로컬) 설정 시 로컬 데이터만 사용)
+        const isInquiryOrForced = sourceSettingKey === 'productInquiry' || !!options?.forceOnline;
+        const useOnline = canGoOnline && (isInquiryOrForced || preferredSource === 'online');
 
-        // 1. Perform local search first for instant results
+        // 1. 로컬 데이터 즉시 검색 (오프라인이거나, 온라인 응답 전 빠른 피드백용)
         const lowercasedFilter = term.toLowerCase();
         const localResults = products.filter(p => 
             (p.name && p.name.toLowerCase().includes(lowercasedFilter)) || 
             (p.barcode && p.barcode.includes(lowercasedFilter)) ||
             (p.spec && p.spec.toLowerCase().includes(lowercasedFilter))
         );
+
+        if (!useOnline) {
+            // 로컬 전용 모드이거나 SQL 서버가 꺼져 있는 경우: SQL 접속 없이 로컬 데이터로만 즉시 처리 완료
+            setResults(localResults.slice(0, maxResults));
+            setSearchSource('offline');
+            setIsSearching(false);
+            return;
+        }
+
+        // 2. 온라인(서버) 검색 실행
+        setIsSearching(true);
         setResults(localResults.slice(0, maxResults));
-        setSearchSource('offline'); // Initially, we are showing offline results
+        setSearchSource('offline');
 
-        // 2. Determine if an online search should follow
-        const preferredSource = dataSourceSettings[sourceSettingKey];
-        const canGoOnline = sqlStatus === 'connected';
-        const isProductInquiry = sourceSettingKey === 'productInquiry';
-        const useOnline = (isProductInquiry && canGoOnline) || (options?.forceOnline && canGoOnline) || (preferredSource === 'online' && canGoOnline);
-        
-        if (useOnline) {
-            try {
-                // 3. Perform online search in the background
-                let onlineData;
-                const userSearchQuery = specificQueryName ? userQueries.find(q => q.name === specificQueryName) : userQueries.find(q => q.name === '상품조회');
+        try {
+            let onlineData;
+            const userSearchQuery = specificQueryName
+                ? (userQueries.find(q => q.name === specificQueryName) || userQueries.find(q => q.name === '상품조회'))
+                : userQueries.find(q => q.name === '상품조회');
 
-                if (userSearchQuery && userSearchQuery.query) {
-                    const params = { kw: term, keyword: term, search: term, limit: maxResults, barcode: term };
-                    const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
-                    onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
-                } else {
-                    if (specificQueryName) {
-                        console.warn(`User query '${specificQueryName}' not found or empty for '${sourceSettingKey}'. Falling back to default online search.`);
-                    }
-                    onlineData = await searchProductsOnline(term, maxResults);
-                }
-                
-                // 4. Update results with fresh data from the server
-                const mappedResults = onlineData.map(mapSqlResultToProduct);
-                setResults(mappedResults);
-                setSearchSource('online');
-
-            } catch (e) {
-                console.error("Online search fallback failed, showing local results:", e);
-                // If online fails, the user still sees the local results. The source remains 'offline'.
-            } finally {
-                setIsSearching(false);
+            if (userSearchQuery && userSearchQuery.query) {
+                const params = { kw: term, keyword: term, search: term, limit: maxResults, barcode: term };
+                const dynamicParams = extractParamsForQuery(userSearchQuery.query, params);
+                onlineData = await executeUserQuery(userSearchQuery.name, dynamicParams, userSearchQuery.query);
+            } else {
+                onlineData = await searchProductsOnline(term, maxResults);
             }
-        } else {
-            // If not going online, the local search is all we do.
+            
+            const mappedResults = onlineData.map(mapSqlResultToProduct);
+            setResults(mappedResults);
+            setSearchSource('online');
+        } catch (e) {
+            console.error("Online search failed, keeping local results:", e);
+            // 서버 오류 시 이미 표시된 로컬 결과 유지
+        } finally {
             setIsSearching(false);
         }
     }, [searchTerm, products, userQueries, dataSourceSettings, sourceSettingKey, sqlStatus, maxResults, specificQueryName, options]);
 
     const searchByBarcode = useCallback(async (barcode: string): Promise<Product | null> => {
-        const localMatch = products.find(p => p.barcode === barcode);
+        const cleanBarcode = barcode.trim();
+        const localMatch = products.find(p => p.barcode === cleanBarcode) || null;
         const preferredSource = dataSourceSettings[sourceSettingKey];
         const canGoOnline = sqlStatus === 'connected';
+        const isInquiryOrForced = sourceSettingKey === 'productInquiry' || !!options?.forceOnline;
 
-        // 1. Local Mode Logic (Offline Preference)
-        // If settings prefer offline, try local match first.
-        if (preferredSource === 'offline' && !options?.forceOnline) {
-            // Found locally? Return immediately for speed.
-            if (localMatch) return localMatch;
-            
-            // Not found locally? 
-            // If disconnected, we can't do anything else.
-            if (!canGoOnline) return null;
-            
-            // If connected, proceed to Online Search (fallback for unregistered items).
-        } 
-        
-        // 2. Online Mode Logic (or Local Mode Fallback)
-        // If we are physically offline, return local match (if any) or null.
+        // 1. 발주/입고('newOrder')에서 '로컬'('offline')로 설정된 경우:
+        //    - 로컬에 데이터가 있으면 SQL 접속 없이 즉시 로컬 데이터 반환
+        //    - 로컬에 데이터가 없으면: 서버가 켜져 있을 때만(canGoOnline) 스캔 시 서버 접속, 서버가 꺼져 있으면 서버 접속 안 함
+        if (!isInquiryOrForced && preferredSource === 'offline') {
+            if (localMatch) {
+                return localMatch;
+            }
+            if (!canGoOnline) {
+                return null;
+            }
+            // 로컬에 없고 SQL 서버가 켜져 있는 경우에만 아래 온라인 스캔 조회로 진행
+        }
+
+        // 2. SQL 서버가 꺼져 있는 경우: 서버 접속 시도 없이 로컬 매칭 결과(또는 null) 즉시 반환
         if (!canGoOnline) {
-            return localMatch || null;
+            return localMatch;
         }
         
-        // 3. Online Search Execution
+        // 3. 온라인(서버) 바코드 조회 (서버 모드이거나, 상품조회/재고실사 메뉴이거나, 로컬 모드에서 미등록 바코드를 스캔한 경우)
         try {
-            const params = { barcode: barcode };
+            const params = { barcode: cleanBarcode, kw: cleanBarcode };
             const scanQuery = userQueries.find(q => q.name === 'productScan' || q.name === '상품스캔');
             
             let onlineData;
             if (scanQuery && scanQuery.query) {
-                onlineData = await executeUserQuery(scanQuery.name, params, scanQuery.query);
+                const dynamicParams = extractParamsForQuery(scanQuery.query, params);
+                onlineData = await executeUserQuery(scanQuery.name, dynamicParams, scanQuery.query);
             } else {
-                onlineData = await searchProductsOnline(barcode, 5);
+                onlineData = await searchProductsOnline(cleanBarcode, 5);
             }
 
             if (onlineData && onlineData.length > 0) {
-                const exactMatch = onlineData.find(p => String(p.바코드 || p.barcode || '').trim() === barcode);
+                const exactMatch = onlineData.find(p => String(p.바코드 || p.barcode || '').trim() === cleanBarcode);
                 if (exactMatch) return mapSqlResultToProduct(exactMatch);
                 return mapSqlResultToProduct(onlineData[0]);
             }
         } catch (e) {
             console.error("Online barcode search failed, falling back to local:", e);
-            // Fallback to local on error is handled below
         }
 
-        // 4. Final Fallback to Local (if online search returned nothing or failed)
-        return localMatch || null;
-
+        return localMatch;
     }, [sqlStatus, products, userQueries, dataSourceSettings, sourceSettingKey, options]);
 
     const clear = useCallback(() => {

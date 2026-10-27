@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Product, OrderItem } from '../types';
@@ -7,6 +6,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useDeviceSettings, useScanner } from '../context/AppContext';
 import { BarcodeScannerIcon, XCircleIcon, SaveIcon, ChevronRightIcon, ChatBubbleLeftIcon } from './Icons';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
+import { formatProductDisplayName } from '../utils/mapper';
 
 // Global Singleton AudioContext for zero-latency feedback
 let globalAudioCtx: AudioContext | null = null;
@@ -39,7 +39,6 @@ const playBeep = (enabled: boolean) => {
         osc.type = 'sine';
         const now = ctx.currentTime;
         
-        // High pitched, short beep for keypad
         osc.frequency.setValueAtTime(2200, now);
         gain.gain.setValueAtTime(0.5, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
@@ -90,7 +89,6 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
             setMemo(existingItem?.memo || '');
             setUnit(initialSettings?.unit ?? existingItem?.unit ?? '개');
             isFirstInputRef.current = true;
-            // Pre-warm audio context
             initAudio();
             
             const timer = setTimeout(() => setIsVisible(true), 10);
@@ -101,8 +99,8 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     if (!isMounted || !product) return null;
 
     const isQuantityValid = quantityStr !== '' && !isNaN(Number(quantityStr)) && Number(quantityStr) !== 0;
+    const displayName = formatProductDisplayName(product.name, product.spec);
 
-    // Safe close handler for Cancel button
     const handleSafeClose = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
@@ -114,7 +112,6 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         }, 300);
     };
 
-    // Safe close for Skip action
     const handleSafeSkip = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
@@ -123,7 +120,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         setTimeout(() => {
             if (isMounted) {
                 onClose();
-                if (onNextScan) setTimeout(onNextScan, 50); // Small additional delay before reopening scanner
+                if (onNextScan) setTimeout(onNextScan, 50);
             }
         }, 300);
     };
@@ -133,8 +130,6 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         setIsSubmitting(true);
         setIsVisible(false);
 
-        // Calculate if we need to wait for animation. 
-        // If we are opening scanner immediately, we can be faster, but let's be safe.
         setTimeout(() => {
             onAdd({ quantity: Number(quantityStr), unit, memo: memo.trim() });
             if (shouldCloseScanner) closeScanner();
@@ -143,13 +138,12 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         }, 300);
     };
 
-    // Updated KeypadButton using onPointerDown for instant reaction
     const KeypadButton = ({ onClick, className, children, disabled }: any) => (
         <button 
             type="button"
             onPointerDown={(e) => {
                 if (disabled || isSubmitting) return;
-                e.preventDefault(); // Prevent ghost clicks
+                e.preventDefault();
                 e.stopPropagation();
                 playBeep(!!uiFeedback?.soundOnPress);
                 onClick();
@@ -207,7 +201,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
             </div>
             
             <div className="mb-2 flex-shrink-0">
-                <h3 className="text-sm font-extrabold text-gray-900 leading-tight break-words">{product.name}</h3>
+                <h3 className="text-sm font-extrabold text-gray-900 leading-tight break-words">{displayName}</h3>
             </div>
 
             <div className="flex-grow flex flex-col gap-1.5 overflow-y-auto no-scrollbar pb-1">

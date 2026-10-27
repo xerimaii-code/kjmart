@@ -1,6 +1,6 @@
-
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { OrderItem, Product } from '../types';
+import { formatProductDisplayName } from '../utils/mapper';
 
 interface UseOrderManagerProps {
     initialItems?: OrderItem[];
@@ -28,7 +28,6 @@ export const isSaleActive = (saleStartDate?: string, saleEndDate?: string): bool
     }
 };
 
-
 // Helper to ensure item properties are consistent
 const normalizeItems = (items: OrderItem[]): OrderItem[] => {
     if (!items) return [];
@@ -39,7 +38,7 @@ const normalizeItems = (items: OrderItem[]): OrderItem[] => {
         quantity: item.quantity,
         unit: item.unit,
         memo: item.memo || '',
-        // 행사 정보 스냅샷 유지
+        masterPrice: item.masterPrice,
         eventPrice: item.eventPrice,
         salePrice: item.salePrice,
         saleName: item.saleName,
@@ -48,7 +47,6 @@ const normalizeItems = (items: OrderItem[]): OrderItem[] => {
         isModified: item.isModified
     }));
 };
-
 
 export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderManagerProps) => {
     const [items, setItems] = useState<OrderItem[]>(() => normalizeItems(initialItems));
@@ -73,17 +71,20 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         setItems(prevItems => {
             const existingItemIndex = prevItems.findIndex(i => i.barcode === product.barcode);
             const priceToUse = product.costPrice;
+            // 발주 시 표현 형태('상품명 [규격]')를 로컬/서버 구분 없이 일관되게 유지
+            const formattedName = formatProductDisplayName(product.name, product.spec);
 
             // [Snapshot] 현재 행사 중인 경우 해당 시점의 정보를 스냅샷으로 캡처
             const saleActive = isSaleActive(product.saleStartDate, product.saleEndDate);
             const snapshot = saleActive ? {
+                masterPrice: product.costPrice,
                 eventPrice: product.eventCostPrice,
                 salePrice: product.salePrice,
                 saleName: product.saleName,
-                // [중요] 행사 기간도 스냅샷에 포함
                 saleStartDate: product.saleStartDate,
                 saleEndDate: product.saleEndDate
             } : {
+                masterPrice: product.costPrice,
                 eventPrice: undefined,
                 salePrice: undefined,
                 saleName: undefined,
@@ -101,7 +102,8 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
                 } else {
                     updatedItems[existingItemIndex] = {
                         ...existingItem,
-                        ...snapshot, // 행사 정보 업데이트 (추가 시점 기준 박제)
+                        name: formattedName || existingItem.name,
+                        ...snapshot,
                         quantity: newQuantity,
                         unit: details.unit,
                         memo: details.memo || '',
@@ -115,12 +117,12 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
                 }
                 const newItem: OrderItem = {
                     barcode: product.barcode,
-                    name: product.name,
+                    name: formattedName,
                     price: priceToUse,
                     quantity: details.quantity,
                     unit: details.unit,
                     memo: details.memo || '',
-                    ...snapshot // 신규 추가 시 스냅샷 저장
+                    ...snapshot
                 };
                 return normalizeItems([...prevItems, newItem]);
             }

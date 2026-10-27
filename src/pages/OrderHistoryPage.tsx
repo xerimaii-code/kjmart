@@ -1,8 +1,7 @@
-
 import React, { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { useDataActions, useAlert, useModals, useMiscUI } from '../context/AppContext';
 import { Order } from '../types';
-import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, ChatBubbleLeftIcon, PencilSquareIcon, SpinnerIcon, ReturnBoxIcon } from '../components/Icons';
+import { SmsIcon, XlsIcon, TrashIcon, ArchiveBoxIcon, UndoIcon, MoreVerticalIcon, PencilSquareIcon, SpinnerIcon, ReturnBoxIcon } from '../components/Icons';
 import { exportToSMS, exportReturnToPDF, exportToXLS } from '../services/dataService';
 import { getAllDraftKeys } from '../services/draftDbService';
 import * as db from '../services/dbService';
@@ -13,9 +12,9 @@ interface OrderHistoryPageProps {
 }
 
 // --- Virtualization Constants ---
-const ORDER_ROW_HEIGHT = 76; // Reduced height for compact list view
-const DATE_HEADER_HEIGHT = 56; // Header height
-const CARD_GAP = 16; // Gap between date cards
+const ORDER_ROW_HEIGHT = 76;
+const DATE_HEADER_HEIGHT = 56;
+const CARD_GAP = 16;
 const OVERSCAN_COUNT = 5; 
 
 const getStatusIcon = (order: Order, hasDraft: boolean) => {
@@ -171,7 +170,7 @@ OrderRow.displayName = 'OrderRow';
 const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
     const { deleteOrder, updateOrderStatus } = useDataActions();
     const { showAlert, showToast } = useAlert();
-    const { openDetailModal, openDeliveryModal, isDeliveryModalOpen, orderToExport, closeDeliveryModal } = useModals();
+    const { openDetailModal, openDeliveryModal, isDeliveryModalOpen, orderToExport, closeDeliveryModal, isDetailModalOpen } = useModals();
     const { lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId } = useMiscUI();
 
     const [orders, setOrders] = useState<Order[]>([]);
@@ -211,6 +210,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         setCustomEndDate(e.target.value);
     };
 
+    // 다중 사용자 동시 발주 등록/수정 시 단일 스냅샷 브로드캐스트로 지연 없이 즉시 화면 반영
     useEffect(() => {
         if (!isActive) {
             setActiveMenuOrderId(null);
@@ -228,48 +228,43 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         };
     
         setIsLoading(true);
-        setOrders([]);
     
         const { startDate, endDate } = calculateDates();
     
         const unsubscribe = db.listenToOrderChangesByDateRange(
             endDate,
             {
-                onAdd: (newOrder) => {
-                    setOrders(prevOrders => {
-                        if (prevOrders.some(o => o.id === newOrder.id)) return prevOrders;
-                        const newArr = [...prevOrders, newOrder];
-                        newArr.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                        return newArr;
-                    });
+                onAdd: () => {},
+                onChange: () => {},
+                onRemove: () => {},
+                onSnapshot: (updatedOrders) => {
+                    setOrders(updatedOrders);
                     setIsLoading(false);
-                },
-                onChange: (changedOrder) => {
-                    setOrders(prevOrders => 
-                        prevOrders
-                            .map(o => o.id === changedOrder.id ? changedOrder : o)
-                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                    );
-                },
-                onRemove: (removedOrder) => {
-                    setOrders(prevOrders => prevOrders.filter(o => o.id !== removedOrder.id));
                 }
             },
             startDate
         );
     
-        const timer = setTimeout(() => setIsLoading(false), 2000); 
-    
-        const fetchKeys = () => getAllDraftKeys().then(keys => setDraftKeys(new Set(keys)));
-        fetchKeys();
-        const keyInterval = setInterval(fetchKeys, 2000); 
-    
         return () => {
             unsubscribe();
-            clearTimeout(timer);
-            clearInterval(keyInterval);
         };
     }, [isActive, customStartDate, customEndDate, setActiveMenuOrderId]);
+
+    // 임시저장 키 확인 (모달 열림/닫힘 시 및 변경이 있을 때만 Set 갱신하여 불필요한 2초 주기 리렌더링 제거)
+    useEffect(() => {
+        if (!isActive) return;
+        const fetchKeys = () => {
+            getAllDraftKeys().then(keys => {
+                setDraftKeys(prev => {
+                    if (prev.size === keys.length && keys.every(k => prev.has(k))) {
+                        return prev;
+                    }
+                    return new Set(keys);
+                });
+            }).catch(() => {});
+        };
+        fetchKeys();
+    }, [isActive, isDetailModalOpen, orders.length]);
 
     const groupedOrders = useMemo(() => {
         const groups: { [key: string]: { orders: Order[]; total: number } } = {};
@@ -295,7 +290,6 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
         let currentHeight = 0;
         
         groupedOrders.forEach((group, groupIndex) => {
-            // Header Item
             items.push({ 
                 type: 'header', 
                 height: DATE_HEADER_HEIGHT, 
@@ -304,23 +298,21 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
             });
             currentHeight += DATE_HEADER_HEIGHT;
             
-            // Order Items
             group.orders.forEach((order, orderIndex) => {
                 const isLast = orderIndex === group.orders.length - 1;
                 items.push({ 
                     type: 'order', 
                     height: ORDER_ROW_HEIGHT, 
                     top: currentHeight, 
-                    data: { order, isLast } // Pass isLast flag
+                    data: { order, isLast }
                 });
                 currentHeight += ORDER_ROW_HEIGHT;
             });
 
-            // Card Gap
             if (groupIndex < groupedOrders.length - 1) {
                 currentHeight += CARD_GAP;
             } else {
-                currentHeight += CARD_GAP * 2; // Extra padding at very bottom
+                currentHeight += CARD_GAP * 2;
             }
         });
         return { virtualItems: items, totalHeight: currentHeight };
@@ -403,7 +395,7 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                 const completionDetails: Order['completionDetails'] = { type: 'xls', timestamp };
 
                 handleLocalStatusUpdate(orderToExport.id, completionDetails);
-                updateOrderStatus(orderToExport.id, completionDetails).catch(err => {
+                updateOrderStatus(orderToExport.id, completionDetails).catch(() => {
                     showToast('XLS 상태 업데이트에 실패했습니다.', 'error');
                 });
                 showToast(`${orderToExport.customer.name} 발주서가 XLS 파일로 저장되었습니다.`, 'success');
@@ -482,12 +474,14 @@ const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ isActive }) => {
                         const pdfData = await exportReturnToPDF(orderWithItems);
                         blobUrl = pdfData.blobUrl;
 
-                        const link = document.createElement('a');
-                        link.href = blobUrl;
-                        link.download = pdfData.file.name;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                        if (blobUrl) {
+                            const link = document.createElement('a');
+                            link.href = blobUrl;
+                            link.download = pdfData.file.name;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                        }
                         
                         showToast('반품서 PDF 파일이 다운로드되었습니다.', 'success');
                         

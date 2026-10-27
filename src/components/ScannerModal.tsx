@@ -162,11 +162,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             let videoDevices = devices.filter(d => d.kind === 'videoinput');
             const hasLabels = videoDevices.some(d => d.label);
 
-            // Step 2: If no labels, request permission to get them.
-            if (!hasLabels && videoDevices.length > 0) {
+            // Step 2: If no labels or empty list, request permission to populate labels.
+            if (videoDevices.length === 0 || !hasLabels) {
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                    stream.getTracks().forEach(track => track.stop());
+                    const tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                    tempStream.getTracks().forEach(track => track.stop());
+                    await new Promise(r => setTimeout(r, 50));
                     devices = await navigator.mediaDevices.enumerateDevices();
                     videoDevices = devices.filter(d => d.kind === 'videoinput');
                 } catch (permErr) {
@@ -174,26 +175,39 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 }
             }
 
-            // Step 3: Device ID recovery logic.
+            // Step 3: Device ID recovery logic (matches by label if deviceId changed across sessions).
             let deviceIdToUse = selectedCameraId;
-            const idExists = videoDevices.some(d => d.deviceId === deviceIdToUse);
+            const idExists = deviceIdToUse ? videoDevices.some(d => d.deviceId === deviceIdToUse) : false;
 
-            if (deviceIdToUse && !idExists && selectedCameraLabel) {
+            if (!idExists && selectedCameraLabel) {
                 const labelMatch = videoDevices.find(d => d.label === selectedCameraLabel);
                 if (labelMatch) {
                     console.log(`Recovered camera via label: ${labelMatch.label}`);
                     deviceIdToUse = labelMatch.deviceId;
-                    // Persist the new recovered ID for next time.
                     await setSelectedCameraId(labelMatch.deviceId, labelMatch.label);
+                } else {
+                    deviceIdToUse = null;
                 }
             }
             
-            // Step 4: Get the final stream with the correct device ID.
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: deviceIdToUse
-                    ? { ...constraintsBase, deviceId: { exact: deviceIdToUse } }
-                    : { ...constraintsBase, facingMode: 'environment' }
-            });
+            // Step 4: Get the final stream with the correct device ID, with automatic environment fallback.
+            let stream: MediaStream;
+            if (deviceIdToUse) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { ...constraintsBase, deviceId: { exact: deviceIdToUse } }
+                    });
+                } catch (ConstraintErr) {
+                    console.warn("Exact camera ID failed, falling back to environment camera:", ConstraintErr);
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { ...constraintsBase, facingMode: 'environment' }
+                    });
+                }
+            } else {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { ...constraintsBase, facingMode: 'environment' }
+                });
+            }
 
             if (!isMountedRef.current) {
                 stream.getTracks().forEach(t => t.stop());

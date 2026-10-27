@@ -1,6 +1,5 @@
-
 import React, { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
-import { useDataState, useDataActions, useAlert, useScanner, useMiscUI, useModals } from '../context/AppContext';
+import { useDataState, useDataActions, useAlert, useScanner, useMiscUI, useModals, useDeviceSettings } from '../context/AppContext';
 import { Customer, Product, OrderItem, NewOrderDraft } from '../types';
 import { RemoveIcon, SpinnerIcon, ChatBubbleLeftIcon, ChevronDownIcon, DragHandleIcon } from '../components/Icons';
 import { useOrderManager, isSaleActive } from '../hooks/useOrderManager';
@@ -9,6 +8,7 @@ import { useDraft } from '../hooks/useDraft';
 import { useProductSearch } from '../hooks/useProductSearch';
 import { useSortedCustomers } from '../hooks/useSortedCustomers';
 import ProductSearchBar from '../components/ProductSearchBar';
+import { formatProductDisplayName } from '../utils/mapper';
 
 const DRAFT_KEY = 'new-order-draft';
 
@@ -24,10 +24,10 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index, isDragging,
     onDragOver: (e: React.DragEvent) => void;
     onDrop: (e: React.DragEvent) => void;
 }) => {
-    // [확정 전] 최신 상품 정보(Product)를 기준으로 행사 여부 판단
     const currentProduct = product;
     const saleIsActive = currentProduct ? isSaleActive(currentProduct.saleStartDate, currentProduct.saleEndDate) : false;
     const hasEventPrice = currentProduct && currentProduct.eventCostPrice && currentProduct.eventCostPrice > 0;
+    const displayName = currentProduct ? formatProductDisplayName(item.name, currentProduct.spec) : item.name;
 
     return (
         <div
@@ -52,7 +52,7 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index, isDragging,
                             </span>
                         )}
                         <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap text-sm leading-snug">
-                            {item.name}
+                            {displayName}
                         </p>
                     </div>
                     {saleIsActive && hasEventPrice && (
@@ -114,14 +114,14 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { addOrder } = useDataActions();
     const { showAlert, showToast } = useAlert();
     const { openScanner } = useScanner();
-    const { setLastModifiedOrderId } = useMiscUI();
+    const { setLastModifiedOrderId, sqlStatus } = useMiscUI();
     const { openAddItemModal, openEditItemModal, closeEditItemModal } = useModals();
+    const { dataSourceSettings } = useDeviceSettings();
 
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
     const [debouncedCustomerSearch, setDebouncedCustomerSearch] = useState('');
     
-    // 수정 모달에 최신 정보를 넘기기 위한 임시 세션 상품 캐시
     const sessionProductsRef = useRef<Map<string, Product>>(new Map());
 
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -254,13 +254,13 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
         setIsSaving(true);
         try {
-            // [중요] 저장 시점의 상품 정보를 스냅샷으로 박제하여 저장
+            const isLocalMode = dataSourceSettings.newOrder === 'offline';
+
             const itemsWithSnapshot: OrderItem[] = await Promise.all(currentItemsList.map(async (item) => {
-                // 1. 세션(검색 결과)에서 최신 상품 정보 조회
                 let prod = sessionProductsRef.current.get(item.barcode) || products.find(p => p.barcode === item.barcode);
                 
-                // 2. 만약 없다면 온라인 조회 시도
-                if (!prod && navigator.onLine) {
+                // 로컬 모드가 아닐 때(서버 모드)이고 로컬/세션에 없으며 SQL이 연결되어 있을 때만 조회
+                if (!prod && !isLocalMode && sqlStatus === 'connected') {
                     try {
                         prod = await searchByBarcode(item.barcode) || undefined;
                     } catch (e) {}
@@ -268,20 +268,19 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
                 if (prod) {
                     const saleActive = isSaleActive(prod.saleStartDate, prod.saleEndDate);
+                    const formattedName = formatProductDisplayName(item.name || prod.name, prod.spec);
                     return {
                         ...item,
-                        // [Snapshot] 검색된 시점의 마스터/행사 정보를 그대로 박제
+                        name: formattedName,
                         masterPrice: prod.costPrice,
                         eventPrice: saleActive ? prod.eventCostPrice : undefined,
                         salePrice: saleActive ? prod.salePrice : undefined,
                         saleName: saleActive ? prod.saleName : undefined,
-                        saleStartDate: saleActive ? prod.saleStartDate : undefined, // [수정] 기간 저장
-                        saleEndDate: saleActive ? prod.saleEndDate : undefined,     // [수정] 기간 저장
-                        // 가격은 행사 중이면 행사 매입가, 아니면 마스터 매입가 사용
+                        saleStartDate: saleActive ? prod.saleStartDate : undefined,
+                        saleEndDate: saleActive ? prod.saleEndDate : undefined,
                         price: (saleActive && prod.eventCostPrice && prod.eventCostPrice > 0) ? prod.eventCostPrice : prod.costPrice
                     };
                 }
-                // 상품 정보를 못 찾으면 기존 item 정보 유지
                 return item;
             }));
 
@@ -308,7 +307,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         } finally {
             setIsSaving(false);
         }
-    }, [addOrder, setLastModifiedOrderId, showAlert, removeDraftData, showToast, resetItems, setProductSearch, products, searchByBarcode]);
+    }, [addOrder, setLastModifiedOrderId, showAlert, removeDraftData, showToast, resetItems, setProductSearch, products, searchByBarcode, dataSourceSettings.newOrder, sqlStatus]);
 
     const handleAddProductFromSearch = useCallback((product: Product) => {
         sessionProductsRef.current.set(product.barcode, product);
@@ -331,7 +330,6 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
             let product: Product | null = null;
             try {
-                // [수정] searchByBarcode를 사용하여 온라인(행사정보 포함) 우선 검색
                 product = await searchByBarcode(barcode);
                 if (product) sessionProductsRef.current.set(product.barcode, product);
             } catch (error) {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Product, ReceivingItem } from '../types';
@@ -7,6 +6,7 @@ import { isSaleActive } from '../hooks/useOrderManager';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useDeviceSettings, useScanner } from '../context/AppContext';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
+import { formatProductDisplayName } from '../utils/mapper';
 
 // Global Singleton AudioContext for zero-latency feedback
 let globalAudioCtx: AudioContext | null = null;
@@ -95,7 +95,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     useEffect(() => {
         if (isOpen && product) {
             setQuantity(1); setCostPrice(product.costPrice || 0); setSellingPrice(product.sellingPrice || 0);
-            setCustomName(product.name || ''); setActiveField('quantity');
+            setCustomName(formatProductDisplayName(product.name, product.spec) || ''); setActiveField('quantity');
             isFirstInputRef.current = true;
         }
     }, [isOpen, product, timestamp]);
@@ -104,9 +104,8 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     
     const isQuantityValid = !isNaN(Number(quantity)) && Number(quantity) !== 0;
     const isUnregistered = !product.name || product.name === '미등록 상품' || product.name === '';
-    const displayName = isUnregistered ? (customName || '미등록 상품') : product.name;
+    const displayName = isUnregistered ? (customName || '미등록 상품') : formatProductDisplayName(product.name, product.spec);
 
-    // Safe close handler
     const handleSafeClose = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
@@ -134,7 +133,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const handleAddItemAction = (isReturn: boolean, shouldScanNext: boolean) => {
         if (isSubmitting || !isQuantityValid) return;
         setIsSubmitting(true);
-        setIsVisible(false); // Start animation immediately
+        setIsVisible(false);
 
         setTimeout(() => {
             const qty = isReturn ? -Math.abs(Number(quantity)) : Number(quantity);

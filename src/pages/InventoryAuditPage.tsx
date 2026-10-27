@@ -1,8 +1,7 @@
-
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useDataState, useAlert, useScanner, useMiscUI, useModals } from '../context/AppContext';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useDataState, useAlert, useScanner, useMiscUI } from '../context/AppContext';
 import { Product, AuditedItem, InventoryAuditDraft } from '../types';
-import { SpinnerIcon, TrashIcon, CheckCircleIcon, BarcodeScannerIcon, ChevronDownIcon, SearchIcon } from '../components/Icons';
+import { SpinnerIcon, TrashIcon, CheckCircleIcon, BarcodeScannerIcon, ChevronDownIcon, SearchIcon, WarningIcon } from '../components/Icons';
 import { useProductSearch } from '../hooks/useProductSearch';
 import { useDraft } from '../hooks/useDraft';
 import { useDebounce } from '../hooks/useDebounce';
@@ -57,7 +56,6 @@ BEGIN TRY
     IF @DiffQty <> 0
     BEGIN
         -- [중요] 직접 UPDATE parts 대신 보정 테이블 INSERT만 수행
-        -- 트리거가 있는 시스템에서는 보정 테이블 입력 시 자동으로 재고가 계산됩니다.
         SET @SQL = N'INSERT INTO ' + @TableName + N' (
                         comcode, day1, barcode, 
                         itemcount, money0vat, tmoney, money1, tmoney1, 
@@ -109,7 +107,6 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [isFetchingStock, setIsFetchingStock] = useState(false);
     
-    // Search UI Refs
     const inputRef = useRef<HTMLInputElement>(null);
     const blurTimeoutRef = useRef<number | null>(null);
     const [showDropdown, setShowDropdown] = useState(false);
@@ -123,11 +120,13 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const { draft, save: saveDraft, remove: removeDraft, isLoading: isDraftLoading } = useDraft<InventoryAuditDraft>(DRAFT_KEY);
 
+    // 재고실사는 SQL이 켜져 있으면 무조건 서버 접속, 오프라인이면 로컬 조회 허용
     const { 
         searchTerm, setSearchTerm, results, isSearching, search, searchByBarcode 
     } = useProductSearch('productInquiry', 50, '상품조회', { forceOnline: true });
 
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
+    const isOffline = sqlStatus !== 'connected';
 
     useEffect(() => {
         if (isActive && debouncedSearchTerm.trim().length >= 2) {
@@ -168,7 +167,6 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 stockQuantity: realTimeStock !== null ? realTimeStock : product.stockQuantity
             };
             
-            // [중요] 모달이 열릴 때 히스토리 상태를 추가하여 스캐너 배경이 98% 블랙으로 되도록 함
             if (window.history.state?.modal !== 'auditItem') {
                 window.history.pushState({ modal: 'auditItem' }, '', '');
             }
@@ -210,6 +208,10 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         const p = auditModalProps.product;
         
         if (applyMode === 'immediate') {
+            if (sqlStatus !== 'connected') {
+                showAlert('현재 오프라인 상태이므로 즉시 적용할 수 없습니다.\n[일괄 적용] 모드로 변경하여 목록에 저장한 뒤 온라인 연결 시 전송해주세요.');
+                return;
+            }
             setIsSaving(true);
             try {
                 const params = { Barcode: p.barcode, RealQty: auditQty };
@@ -217,7 +219,6 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 
                 if (res && res[0]?.RESULT === 'SUCCESS') {
                     showToast(`'${p.name}' 실사가 서버에 즉시 반영되었습니다.`, 'success');
-                    // [수정됨] 즉시 적용 시 목록에 추가하지 않음
                 } else throw new Error(res?.[0]?.MSG || '서버 처리 오류');
             } catch (e: any) {
                 showAlert(`즉시 반영 실패: ${e.message}`);
@@ -285,6 +286,14 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     return (
         <div className="h-full flex flex-col bg-gray-50 overflow-hidden">
+            {isOffline && (
+                <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 flex items-center gap-2 text-amber-800 flex-shrink-0 z-30 animate-fade-in-down">
+                    <WarningIcon className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                    <p className="text-xs font-bold leading-snug">
+                        오프라인 모드 주의: 현재 로컬 저장 데이터로 조회되므로 전산 재고 정보가 부정확할 수 있습니다.
+                    </p>
+                </div>
+            )}
             <div className="p-3 bg-white border-b border-gray-200 flex-shrink-0 z-20 shadow-sm">
                 <div className="flex gap-2">
                     <div className="flex-1 flex flex-col gap-2 min-w-0">
@@ -402,7 +411,6 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                     <button onClick={handleReset} className="h-12 bg-gray-100 text-gray-600 rounded-xl font-bold active:scale-95">초기화</button>
-                    {/* 즉시 적용 모드일 때는 버튼을 비활성화하거나 다른 텍스트 표시 */}
                     <button 
                         onClick={handleBatchSave} 
                         disabled={isSaving || auditedItems.length === 0 || applyMode === 'immediate'}

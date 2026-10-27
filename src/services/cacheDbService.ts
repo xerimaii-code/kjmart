@@ -1,13 +1,12 @@
-
 import { Customer, Product, BOM, Category } from '../types';
 
 const DB_NAME = 'KJMartCacheDB';
-const DB_VERSION = 4; // 버전 오류 해결을 위해 4로 상향
+const DB_VERSION = 4;
 const CUSTOMERS_STORE = 'customers';
 const PRODUCTS_STORE = 'products';
 const BOM_STORE = 'bom';
 const CATEGORIES_STORE = 'categories';
-const SETTINGS_STORE = 'settings'; // New store for generic key-value settings
+const SETTINGS_STORE = 'settings';
 
 type StoreName = typeof CUSTOMERS_STORE | typeof PRODUCTS_STORE | typeof SETTINGS_STORE | typeof BOM_STORE | typeof CATEGORIES_STORE;
 
@@ -40,8 +39,6 @@ function openDB(): Promise<IDBDatabase> {
                 db.createObjectStore(PRODUCTS_STORE, { keyPath: 'barcode' });
             }
             if (!db.objectStoreNames.contains(BOM_STORE)) {
-                // BOM needs to be queried by parent barcode (pcode) primarily
-                // Composite key 'id' will be generated before saving
                 const store = db.createObjectStore(BOM_STORE, { keyPath: 'id' });
                 store.createIndex('pcode', 'pcode', { unique: false });
             }
@@ -55,9 +52,6 @@ function openDB(): Promise<IDBDatabase> {
     });
 }
 
-/**
- * Ensures the database connection is established. This should be called once on app startup.
- */
 export async function initializeCacheDb(): Promise<void> {
     await openDB();
 }
@@ -110,13 +104,11 @@ export async function isSyncInterrupted(storeName: string): Promise<boolean> {
     return !!flag;
 }
 
-// CRITICAL FIX: Reset flags on startup to prevent deadlock if app crashed during sync
 export async function resetAllSyncFlags(): Promise<void> {
     const stores = [CUSTOMERS_STORE, PRODUCTS_STORE, BOM_STORE, CATEGORIES_STORE];
     for (const store of stores) {
         await setSyncFlag(store, false);
     }
-    console.log("Sync locks reset.");
 }
 
 // --- Data Store Functions ---
@@ -138,80 +130,90 @@ export async function getCachedData<T>(storeName: StoreName): Promise<T[]> {
     });
 }
 
+/**
+ * 전체 데이터를 단일 원자적 트랜잭션(Single Atomic Transaction)으로 교체합니다.
+ * clear()와 put()을 별도 트랜잭션으로 분리하거나 setTimeout 지연을 두지 않으므로,
+ * 저장 도중 앱이 백그라운드로 전환되거나 강제 종료되면 IndexedDB가 트랜잭션 전체를 자동 롤백(Rollback)하여
+ * 기존 로컬 데이터가 깨지거나 증발하는 현상을 원천적으로 방지합니다.
+ */
 export async function setCachedData(storeName: StoreName, data: any[], onProgress?: (progress: number) => void): Promise<void> {
-    // 1. Set Sync Flag ON
     await setSyncFlag(storeName, true);
-
     const db = await openDB();
-    console.log(`Starting setCachedData for ${storeName}. Items count: ${data.length}`);
 
     try {
-        // 2. Clear the store first (Separate Transaction)
         await new Promise<void>((resolve, reject) => {
             const transaction = db.transaction(storeName, 'readwrite');
             const store = transaction.objectStore(storeName);
-            const request = store.clear();
-            
-            transaction.oncomplete = () => resolve();
-            transaction.onerror = (e) => {
-                console.error(`Error clearing ${storeName}:`, transaction.error);
+
+            store.clear();
+
+            if (data && data.length > 0) {
+                const total = data.length;
+                const step = Math.max(1, Math.floor(total / 10));
+
+                for (let i = 0; i < total; i++) {
+                    const req = store.put(data[i]);
+                    if (onProgress && ((i + 1) % step === 0 || i === total - 1)) {
+                        const currentIdx = i + 1;
+                        req.onsuccess = () => {
+                            onProgress(Math.round((currentIdx / total) * 100));
+                        };
+                    }
+                }
+            }
+
+            transaction.oncomplete = () => {
+                if (onProgress) onProgress(100);
+                resolve();
+            };
+
+            transaction.onerror = () => {
+                console.error(`Atomic transaction failed for ${storeName}:`, transaction.error);
                 reject(transaction.error);
+            };
+
+            transaction.onabort = () => {
+                console.warn(`Atomic transaction aborted for ${storeName} (rolled back safely).`);
+                reject(transaction.error || new Error(`Transaction aborted for ${storeName}`));
             };
         });
 
-        if (!data || data.length === 0) {
-            console.log(`${storeName} data is empty. Cache cleared.`);
-            await setSyncFlag(storeName, false); // Clear flag if empty
-            return;
-        }
-
-        // 3. Insert data in chunks to prevent transaction timeouts and UI freezing
-        const CHUNK_SIZE = 500;
-        const totalChunks = Math.ceil(data.length / CHUNK_SIZE);
-        
-        for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-            const chunk = data.slice(i, i + CHUNK_SIZE);
-            
-            await new Promise<void>((resolve, reject) => {
-                const transaction = db.transaction(storeName, 'readwrite');
-                const store = transaction.objectStore(storeName);
-                
-                chunk.forEach(item => {
-                    try {
-                        store.put(item);
-                    } catch (e) {
-                        console.error(`Exception putting item in ${storeName}:`, item, e);
-                    }
-                });
-
-                transaction.oncomplete = () => {
-                    if (onProgress) {
-                        const currentChunk = Math.floor(i / CHUNK_SIZE) + 1;
-                        const progress = Math.round((currentChunk / totalChunks) * 100);
-                        onProgress(progress);
-                    }
-                    resolve();
-                };
-
-                transaction.onerror = (event) => {
-                    console.error(`Transaction failed for ${storeName} (chunk starting at ${i}):`, transaction.error);
-                    // We allow partial failure but don't clear the sync flag so it retries later
-                    reject(transaction.error); 
-                };
-            });
-            
-            // Critical: Add a small delay to let the event loop breathe and UI update
-            await new Promise(r => setTimeout(r, 50));
-        }
-        
-        // 4. Set Sync Flag OFF (Success)
         await setSyncFlag(storeName, false);
-        console.log(`Successfully cached ${data.length} items for ${storeName}`);
-
     } catch (e) {
-        console.error(`Sync failed for ${storeName}. Flag remains set for recovery.`, e);
+        console.error(`Sync failed for ${storeName}:`, e);
         throw e;
     }
+}
+
+/**
+ * 증분 동기화 전용: 기존 스토어를 clear()하지 않고 변경된 항목만 단일 원자적 트랜잭션으로 Upsert(추가/수정) 및 삭제합니다.
+ * 백그라운드 전환 시에도 기존 로컬 상품 데이터는 절대 손실되지 않습니다.
+ */
+export async function upsertCachedItems(storeName: StoreName, itemsToPut: any[], keysToDelete: string[] = []): Promise<void> {
+    if ((!itemsToPut || itemsToPut.length === 0) && (!keysToDelete || keysToDelete.length === 0)) {
+        return;
+    }
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+
+        for (const key of keysToDelete) {
+            if (key) store.delete(key);
+        }
+        for (const item of itemsToPut) {
+            store.put(item);
+        }
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => {
+            console.error(`Error upserting items in ${storeName}:`, transaction.error);
+            reject(transaction.error);
+        };
+        transaction.onabort = () => {
+            reject(transaction.error || new Error(`Upsert transaction aborted for ${storeName}`));
+        };
+    });
 }
 
 export async function addOrUpdateCachedItem(storeName: StoreName, item: any): Promise<void> {
@@ -252,12 +254,11 @@ export async function clearDataStores(): Promise<void> {
         await new Promise<void>((resolve, reject) => {
             const transaction = db.transaction(storeName, 'readwrite');
             const store = transaction.objectStore(storeName);
-            const request = store.clear();
+            store.clear();
             
             transaction.oncomplete = () => resolve();
             transaction.onerror = () => reject(transaction.error);
         });
-        // Reset flags
         await setSyncFlag(storeName, false);
     }
 }

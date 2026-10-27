@@ -1,4 +1,3 @@
-
 // api/sql.ts
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from 'mssql';
@@ -98,15 +97,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             finalQuery = "SELECT comcode, comname FROM comp WITH(NOLOCK) WHERE isuse <> '0'";
         } else if (type === 'syncProductsIncrementally') {
             request.input('lastDate', sql.VarChar, lastSyncDate || '1900-01-01');
-            finalQuery = "SELECT barcode, descr, spec, money0vat, money1, comcode, gubun1, gubun2, gubun3, curjago AS [재고수량], isuse, ispack, upday1 FROM parts WITH(NOLOCK) WHERE upday1 >= @lastDate";
+            // [단일화된 통합 상품 마스터 동기화 쿼리]
+            // 온라인 조회(searchProductsOnline)와 100% 동일한 스키마(거래처명, 행사정보, 규격, BOM여부 포함)로 반환하여
+            // 로컬(IndexedDB)과 서버 조회 데이터를 단일 포맷으로 일원화합니다.
+            finalQuery = `
+                DECLARE @Today VARCHAR(10) = CONVERT(VARCHAR(10), GETDATE(), 120);
+
+                SELECT
+                      p.barcode AS [바코드],
+                      p.descr AS [상품명],
+                      p.spec AS [규격],
+                      p.isvat AS [과세여부],
+                      p.money0vat AS [매입가],
+                      p.money1 AS [판매가],
+                      ISNULL(p.curjago, 0) AS [재고수량],
+                      CASE WHEN p.ispack = '1' THEN '묶음' ELSE '일반' END AS [BOM여부],
+                      CASE WHEN (s.barcode IS NOT NULL AND m.junno IS NOT NULL) THEN 'Y' ELSE 'N' END AS [행사유무],
+                      ISNULL(CASE WHEN m.junno IS NOT NULL THEN s.salemoney0 ELSE 0 END, 0) AS [행사매입가],
+                      ISNULL(CASE WHEN m.junno IS NOT NULL THEN s.salemoney1 ELSE 0 END, 0) AS [행사판매가],
+                      ISNULL(m.salename, '') AS [행사명],
+                      m.startday AS [행사시작일],
+                      m.endday AS [행사종료일],
+                      p.comcode AS [거래처코드],
+                      ISNULL(c.comname, '') AS [거래처명],
+                      p.gubun1,
+                      p.gubun2,
+                      p.gubun3,
+                      p.isuse AS [사용유무],
+                      p.ispoint AS [포인트적립],
+                      p.isjago AS [재고관리],
+                      p.ispack,
+                      p.upday1
+                FROM parts AS p WITH(NOLOCK)
+                LEFT JOIN comp AS c WITH(NOLOCK) ON p.comcode = c.comcode
+                LEFT JOIN sale_ready AS s WITH(NOLOCK) ON p.barcode = s.barcode AND s.isappl = '1'
+                LEFT JOIN sale_mast AS m WITH(NOLOCK) ON s.junno = m.junno AND m.isappl = '1' AND (@Today BETWEEN m.startday AND m.endday)
+                WHERE (@lastDate = '1900-01-01' AND p.isuse <> '0')
+                   OR (@lastDate <> '1900-01-01' AND (
+                        p.upday1 >= @lastDate
+                        OR (m.junno IS NOT NULL AND (m.startday >= @lastDate OR s.inpday >= @lastDate))
+                   ))
+            `;
         } else if (type === 'searchProductsOnline' || type === 'searchProductsForEdit') {
             const kw = searchTerm || '';
             request.input('kw', sql.NVarChar, kw);
             request.input('kwLike', sql.NVarChar, `%${kw}%`);
             
             // [통합 상품조회 쿼리 - 행사정보 sale_ready 조인 포함]
-            // 모든 필요 필드 (대분류, 과세, 사용유무 등)를 명시적으로 SELECT
-            // 중요: 매퍼가 인식할 수 있도록 gubun1, gubun2 등을 별칭 없이(또는 영문으로) 반환해야 함.
             finalQuery = `
                 DECLARE @Today VARCHAR(10) = CONVERT(VARCHAR(10), GETDATE(), 120);
 
@@ -133,7 +170,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       p.isuse AS [사용유무],
                       p.ispoint AS [포인트적립],
                       p.isjago AS [재고관리],
-                      p.ispack
+                      p.ispack,
+                      p.upday1
                 FROM parts AS p WITH(NOLOCK)
                 LEFT JOIN comp AS c WITH(NOLOCK) ON p.comcode = c.comcode
                 LEFT JOIN sale_ready AS s WITH(NOLOCK) ON p.barcode = s.barcode AND s.isappl = '1'

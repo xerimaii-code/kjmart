@@ -1,7 +1,7 @@
-
 import React from 'react';
 import { Product } from '../types';
 import { isSaleActive } from '../hooks/useOrderManager';
+import { formatProductDisplayName } from '../utils/mapper';
 
 interface ProductSearchResultItemProps {
     product: Product;
@@ -9,13 +9,12 @@ interface ProductSearchResultItemProps {
 }
 
 const ProductSearchResultItem: React.FC<ProductSearchResultItemProps> = ({ product, onClick }) => {
-    // 현재 날짜 기준 유효성 체크
     const saleIsActive = isSaleActive(product.saleStartDate, product.saleEndDate);
     const hasEventCostPrice = product.eventCostPrice !== undefined && product.eventCostPrice !== null && product.eventCostPrice > 0;
     const hasSalePrice = product.salePrice !== undefined && product.salePrice !== null && product.salePrice > 0;
     
-    // 유효한 행사이고 가격 정보가 있는 경우에만 표시
     const shouldShowSale = saleIsActive && (hasEventCostPrice || hasSalePrice);
+    const displayName = formatProductDisplayName(product.name, product.spec);
 
     const handleMouseDown = (e: React.MouseEvent) => {
         e.preventDefault(); 
@@ -25,15 +24,15 @@ const ProductSearchResultItem: React.FC<ProductSearchResultItemProps> = ({ produ
     return (
         <div onMouseDown={handleMouseDown} className="relative overflow-hidden p-3 hover:bg-gray-100 cursor-pointer text-gray-700 border-b border-gray-100 last:border-b-0">
             <div className="flex flex-col items-start w-full gap-y-1">
-                {/* Row 1: Name & Active Sale Badge */}
+                {/* Row 1: Name (+Spec) & Active Sale Badge */}
                 <div className="flex items-start justify-between w-full gap-2">
-                    <p className="font-semibold text-gray-800 whitespace-pre-wrap break-all">{product.name}</p>
+                    <p className="font-semibold text-gray-800 whitespace-pre-wrap break-all">{displayName}</p>
                     {shouldShowSale && (
-                        <span className="text-rose-500 text-[10px] font-black px-1.5 py-0.5 rounded border border-rose-200 bg-rose-50">행사중</span>
+                        <span className="text-rose-500 text-[10px] font-black px-1.5 py-0.5 rounded border border-rose-200 bg-rose-50 flex-shrink-0">행사중</span>
                     )}
                 </div>
                 
-                {/* Row 2: Normal Price (취소선 제거) */}
+                {/* Row 2: Normal Price */}
                 <div className="text-sm text-gray-700 font-medium flex items-center gap-x-2 w-full mt-0.5">
                     <span className="text-gray-400 text-[10px] font-bold uppercase">정상가</span>
                     <span className="font-bold text-gray-600">

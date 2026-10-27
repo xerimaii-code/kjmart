@@ -196,7 +196,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
             </div>
             <div className="mb-2">
                 <h3 className="text-sm font-extrabold text-gray-900 leading-snug break-words whitespace-pre-wrap">{product.name}</h3>
-                {product.spec && <p className="text-[10px] text-gray-500 mt-1 break-words">{product.spec}</p>}
+                {product.spec && !product.name.includes(product.spec) && <p className="text-[10px] text-gray-500 mt-1 break-words">{product.spec}</p>}
             </div>
             <div className="grid grid-cols-2 gap-1.5 mb-2 flex-shrink-0">
                 <div className="bg-gray-100 p-2 rounded-lg border border-gray-200 flex flex-col items-center">

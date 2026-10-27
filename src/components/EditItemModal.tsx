@@ -5,6 +5,7 @@ import { OrderItem, Product } from '../types';
 import { useDataState, useDeviceSettings } from '../context/AppContext';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { isSaleActive } from '../hooks/useOrderManager';
+import { formatProductDisplayName } from '../utils/mapper';
 import { XCircleIcon, PencilSquareIcon, ChatBubbleLeftIcon, SpinnerIcon } from './Icons';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
 
@@ -227,7 +228,7 @@ const EditItemModal: React.FC<EditItemModalProps> = ({ isOpen, item, product: ex
                 <KeypadHeaderControls isLocked={!!isPositionLocked} onToggleLock={() => setIsPositionLocked(!isPositionLocked)} isLeft={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} />
             </div>
             <div className="mb-2 flex-shrink-0 min-h-[1.5rem]">
-                <h3 className="text-sm font-extrabold text-gray-900 leading-tight break-words">{activeItem.name}</h3>
+                <h3 className="text-sm font-extrabold text-gray-900 leading-tight break-words">{formatProductDisplayName(activeItem.name, currentProduct?.spec)}</h3>
             </div>
 
             <div className="flex-grow flex flex-col gap-1.5 overflow-y-auto no-scrollbar pb-1">

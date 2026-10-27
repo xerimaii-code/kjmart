@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useDataState, useAlert, useMiscUI, useScanner } from '../context/AppContext';
 import { ReceivingBatch, ReceivingItem, Product, Customer, ReceivingDraft } from '../types';
 import * as receiveDb from '../services/receiveDbService';
-import { addReceivingBatch, listenToReceivingBatchChanges, deleteReceivingBatch } from '../services/dbService';
+import { addReceivingBatch, deleteReceivingBatch } from '../services/dbService';
 import { executeUserQuery } from '../services/sqlService';
 import { 
     SpinnerIcon, CheckSquareIcon, TrashIcon, 
@@ -19,6 +18,7 @@ import { isSaleActive } from '../hooks/useOrderManager';
 import ActionModal from '../components/ActionModal';
 import { useDraft } from '../hooks/useDraft';
 import ProductSearchBar from '../components/ProductSearchBar';
+import { formatProductDisplayName } from '../utils/mapper';
 
 interface ReceiveManagerPageProps {
     isActive: boolean;
@@ -34,6 +34,7 @@ const getLocalTodayString = () => {
 
 const ReceiveListItem = memo(({ item, index, onRemove, product }: { item: ReceivingItem, index: number, onRemove: (id: number) => void, product?: Product }) => {
     const saleIsActive = product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false;
+    const displayName = product ? formatProductDisplayName(item.name, product.spec) : item.name;
 
     return (
         <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center animate-fade-in-up">
@@ -47,7 +48,7 @@ const ReceiveListItem = memo(({ item, index, onRemove, product }: { item: Receiv
                             행사중
                         </span>
                     )}
-                    <p className="font-bold text-gray-800 text-base truncate">{item.name}</p>
+                    <p className="font-bold text-gray-800 text-base truncate">{displayName}</p>
                 </div>
                 <div className="text-sm text-gray-600 pl-1 flex items-center gap-2">
                     <span className="font-medium text-gray-400">{Number(item.costPrice).toLocaleString()}원</span>
@@ -68,7 +69,7 @@ ReceiveListItem.displayName = 'ReceiveListItem';
 const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClose }) => {
     const { customers, products } = useDataState();
     const { showAlert, showToast } = useAlert();
-    const { sqlStatus, checkSql, refreshReceivingState } = useMiscUI();
+    const { sqlStatus, checkSql, refreshReceivingState, receivingUpdateVersion } = useMiscUI();
     const { openScanner } = useScanner();
     
     const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -109,6 +110,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         editingBatchRef.current = editingBatch;
     }, [currentItems, selectedSupplier, batchDate, editingBatch]);
 
+    // 입고(매입)도 발주와 동일하게 'newOrder'(로컬/서버 옵션) 설정을 따르도록 연결
     const { 
         searchTerm: productSearch, 
         setSearchTerm: setProductSearch, 
@@ -116,7 +118,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         isSearching: isSearchingProducts, 
         search: searchProduct,
         searchByBarcode
-    } = useProductSearch('productInquiry', 50, '상품조회');
+    } = useProductSearch('newOrder', 50, '상품조회');
     
     const debouncedProductSearch = useDebounce(productSearch, 300);
     const supplierSearchInputRef = useRef<HTMLInputElement>(null);
@@ -205,27 +207,11 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         }
     }, [batches.length]);
 
+    // AppContext의 단일 실시간 브로드캐스트 리스너(receivingUpdateVersion)와 연동하여 다중 사용자 동시 작업 시 중복 로딩 지연 제거
     useEffect(() => {
         if (!isActive) return;
-        refreshLocalBatches();
-        const unsubscribe = listenToReceivingBatchChanges({
-            onAdd: async (remoteBatch) => {
-                if (remoteBatch.status === 'sent') await receiveDb.deleteBatch(remoteBatch.id);
-                else await receiveDb.saveOrUpdateBatch(remoteBatch);
-                refreshLocalBatches(true);
-            },
-            onChange: async (remoteBatch) => {
-                if (remoteBatch.status === 'sent') await receiveDb.deleteBatch(remoteBatch.id);
-                else await receiveDb.saveOrUpdateBatch(remoteBatch);
-                refreshLocalBatches(true);
-            },
-            onRemove: async (batchId) => {
-                await receiveDb.deleteBatch(Number(batchId));
-                refreshLocalBatches(true);
-            }
-        });
-        return () => unsubscribe();
-    }, [isActive, refreshLocalBatches]);
+        refreshLocalBatches(batches.length > 0);
+    }, [isActive, receivingUpdateVersion, refreshLocalBatches]);
 
     useEffect(() => {
         const term = debouncedProductSearch.trim();
@@ -321,6 +307,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             return next; 
         });
         setIsSending(false);
+        await refreshReceivingState();
         refreshLocalBatches(true);
         
         if (results.fail > 0) showAlert(`전송 결과:\n성공 ${results.success}건 / 실패 ${results.fail}건\n네트워크 또는 SQL 서버 상태를 확인하세요.`);
@@ -354,6 +341,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                     showToast('삭제되었습니다.', 'success');
                     setSelectedBatches(new Set());
                     setBatches(prev => prev.filter(b => !selectedBatches.has(b.id)));
+                    await refreshReceivingState();
                 } catch(e) { showAlert('삭제 중 오류가 발생했습니다.'); }
             },
             '삭제', 'bg-rose-600'
@@ -407,7 +395,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         }
 
         setTimeout(() => {
-            const productInput = document.querySelector('input[placeholder*="품목명"]') as HTMLInputElement;
+            const productInput = document.querySelector('input[placeholder*="품목"]') as HTMLInputElement;
             if (productInput) productInput.focus();
         }, 150);
     };
@@ -428,7 +416,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
 
     const handleAddItem = useCallback((itemData: Omit<ReceivingItem, 'uniqueId'>) => {
         setCurrentItems(prev => {
-            // [원복] 중복 합산 로직을 삭제하고 항상 새로운 항목으로 추가합니다.
             const newItem: ReceivingItem = { ...itemData, uniqueId: Date.now() + Math.random() };
             const updatedItems = [...prev, newItem];
 
@@ -473,6 +460,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         };
         try {
             await receiveDb.saveOrUpdateBatch(batchToSave);
+            // Firebase 실시간 DB로 브로드캐스트하여 다른 작업자 기기에도 즉시 공유
             try { await addReceivingBatch(batchToSave); } catch (e) {}
             if (!editingBatch) removeDraft();
             showToast('저장되었습니다.', 'success');
@@ -493,7 +481,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         isProcessingScanRef.current = true;
 
         try {
-            // [수정] searchByBarcode를 사용하여 온라인 우선 검색 (행사 정보 확보용)
+            // searchByBarcode는 '로컬' 설정 시 로컬 우선 조회 후 없을 때만(서버 ON 시) 서버 조회
             let product = await searchByBarcode(code);
             
             if (product) {

@@ -1,4 +1,3 @@
-
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
 import { DeviceSettings, ScannerContext as ScannerContextType, ScannerOptions, ReceivingDraft } from '../types';
 import { useAuth } from './AuthContext';
@@ -9,6 +8,7 @@ import { cleanupOldReceivingBatches } from '../services/dbService';
 import * as receiveDb from '../services/receiveDbService';
 import * as db from '../services/dbService';
 import { getDraft } from '../services/draftDbService';
+import { DATA_SCHEMA_VERSION } from '../config';
 
 // Re-export all necessary hooks from their source files for easy access
 import { AlertProvider, useAlert } from './AlertContext';
@@ -32,6 +32,7 @@ interface MiscUIState {
     receivingBadgeCount: number;
     hasActiveReceivingDraft: boolean;
     refreshReceivingState: () => Promise<void>;
+    receivingUpdateVersion: number;
 }
 const MiscUIContext = createContext<MiscUIState | undefined>(undefined);
 
@@ -55,7 +56,6 @@ const PWAInstallContext = createContext<PWAInstallState | undefined>(undefined);
 
 
 // --- CORE PROVIDER COMPONENT ---
-// This component now only manages state that hasn't been broken out yet.
 const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const { user } = useAuth();
     const { showToast } = useAlert();
@@ -63,7 +63,6 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const { setInitialSyncCompleted, setSyncStatusText } = useSyncSetters();
     const { syncWithDb, loadLocalData } = useDataActions();
 
-    // Get state from the new dedicated contexts
     const { selectedCameraId, scanSettings } = useDeviceSettings();
     const { isScannerOpen, scannerContext, onScanSuccess, options, openScanner, closeScanner } = useModals();
 
@@ -72,9 +71,11 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [isInstallPromptAvailable, setInstallPromptAvailable] = useState(false);
     const deferredInstallPrompt = useRef<any>(null);
     const [sqlStatus, setSqlStatus] = useState<SqlServerStatus>('unknown');
-    const isCheckingSql = useRef(false);
+    const checkingSqlPromiseRef = useRef<Promise<boolean> | null>(null);
     const [receivingBadgeCount, setReceivingBadgeCount] = useState(0);
     const [hasActiveReceivingDraft, setHasActiveReceivingDraft] = useState(false);
+    const [receivingUpdateVersion, setReceivingUpdateVersion] = useState(0);
+    const pendingForegroundSyncRef = useRef(false);
 
     const refreshReceivingState = useCallback(async () => {
         try {
@@ -83,27 +84,33 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
             const localDraft = await getDraft<ReceivingDraft>('receiving-new-draft');
             setHasActiveReceivingDraft(!!localDraft && (localDraft.items.length > 0 || !!localDraft.selectedSupplier));
+            setReceivingUpdateVersion(v => v + 1);
         } catch (e) {
             console.error("Failed to refresh receiving state:", e);
         }
     }, []);
 
-    // --- SQL Connection Check ---
+    // --- SQL Connection Check (Concurrent-safe Promise sharing) ---
     const checkSql = useCallback(async (): Promise<boolean> => {
-        if (isCheckingSql.current) return false;
-        isCheckingSql.current = true;
-        setSqlStatus('checking');
-        try {
-            const result = await checkSqlConnection();
-            const status = result.success ? 'connected' : 'error';
-            setSqlStatus(status);
-            return result.success;
-        } catch (e) {
-            setSqlStatus('error');
-            return false;
-        } finally {
-            isCheckingSql.current = false;
+        if (checkingSqlPromiseRef.current) {
+            return checkingSqlPromiseRef.current;
         }
+        setSqlStatus('checking');
+        const promise = (async () => {
+            try {
+                const result = await checkSqlConnection();
+                const status = result.success ? 'connected' : 'error';
+                setSqlStatus(status);
+                return result.success;
+            } catch (e) {
+                setSqlStatus('error');
+                return false;
+            } finally {
+                checkingSqlPromiseRef.current = null;
+            }
+        })();
+        checkingSqlPromiseRef.current = promise;
+        return promise;
     }, []);
     
     // --- PWA Install ---
@@ -124,15 +131,18 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     useEffect(() => {
         if (!user || initialSyncCompleted) return;
         const initApp = async () => {
-            // 1. Establish DB connection & reset flags
+            // 1. Establish DB connection & check interrupted flags BEFORE resetting them
             await cache.initializeCacheDb();
             setSyncStatusText('로컬 데이터 불러오는 중');
+            const syncInterrupted = await cache.isSyncInterrupted('products') || await cache.isSyncInterrupted('customers');
+            const cachedSchemaVer = await cache.getSetting<string>('dataSchemaVersion');
+            const schemaVerChanged = cachedSchemaVer !== DATA_SCHEMA_VERSION;
             await cache.resetAllSyncFlags();
             
             // 1.5 Perform maintenance: Cleanup old receiving data (local & remote)
             try {
-                await cleanupOldReceivingBatches(2); // Cleanup Firebase
-                await receiveDb.cleanupOldLocalBatches(2); // Cleanup local IndexedDB
+                await cleanupOldReceivingBatches(2);
+                await receiveDb.cleanupOldLocalBatches(2);
             } catch (cleanupError) {
                 console.warn("Error during old data cleanup:", cleanupError);
             }
@@ -141,25 +151,24 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             await loadLocalData();
             await refreshReceivingState();
             
-            // 3. Mark initial load as done so user can start working
+            // 3. Mark initial load as done so user can start working immediately
             setInitialSyncCompleted(true);
             
-            // 4. Delayed Background Sync (Only if online)
+            // 4. Background Sync (Only if SQL server is reachable)
             setTimeout(async () => {
                 const isConnected = await checkSql();
                 if (isConnected) {
                     const products = await cache.getCachedData('products');
-                    const syncInterrupted = await cache.isSyncInterrupted('products') || await cache.isSyncInterrupted('customers');
                     
-                    if (!products?.length || syncInterrupted) {
-                        setSyncStatusText('초기 데이터 다운로드 중...');
-                        await syncWithDb('full', false);
+                    if (!products?.length || syncInterrupted || schemaVerChanged) {
+                        await syncWithDb('full', true);
+                        await cache.setSetting('dataSchemaVersion', DATA_SCHEMA_VERSION);
                     } else {
-                        const schemaChanged = await syncAndCacheDbSchema();
-                        await syncWithDb(schemaChanged ? 'full' : 'incremental', true);
+                        const dbSchemaChanged = await syncAndCacheDbSchema();
+                        await syncWithDb(dbSchemaChanged ? 'full' : 'incremental', true);
                     }
                 }
-            }, 500);
+            }, 300);
         };
         initApp().catch(err => {
             console.error("Initialization error:", err); 
@@ -168,26 +177,62 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         });
     }, [user, initialSyncCompleted, checkSql, syncWithDb, loadLocalData, showToast, setInitialSyncCompleted, setSyncStatusText, refreshReceivingState]);
     
-    // --- Background Sync on Visibility Change ---
+    // --- Foreground Incremental Sync (Always run on foreground if SQL is connected; stay cleanly offline if not) ---
     const isSyncingRef = useRef(isSyncing);
-    useEffect(() => { isSyncingRef.current = isSyncing; }, [isSyncing]);
+    useEffect(() => {
+        isSyncingRef.current = isSyncing;
+        if (!isSyncing && pendingForegroundSyncRef.current) {
+            pendingForegroundSyncRef.current = false;
+            checkSql().then(connected => {
+                if (connected) syncWithDb('incremental', true);
+            });
+        }
+    }, [isSyncing, checkSql, syncWithDb]);
     
     useEffect(() => {
         if (!user || !initialSyncCompleted) return;
-        const handleVisibilityChange = async () => {
-            if (document.visibilityState === 'visible' && !isSyncingRef.current) {
-                refreshReceivingState();
-                setTimeout(async () => {
-                    if (await checkSql()) await syncWithDb('incremental', true);
-                }, 3000);
+        const triggerForegroundSync = async () => {
+            if (document.visibilityState !== 'visible') return;
+            refreshReceivingState();
+            const connected = await checkSql();
+            if (!connected) {
+                // SQL 서버 연결이 안 되어 있으면 에러 팝업 없이 조용히 오프라인(로컬 캐시) 모드 유지
+                return;
+            }
+            if (isSyncingRef.current) {
+                pendingForegroundSyncRef.current = true;
+            } else {
+                await syncWithDb('incremental', true);
             }
         };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                triggerForegroundSync();
+            }
+        };
+
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('pageshow', handleVisibilityChange);
+        window.addEventListener('online', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('pageshow', handleVisibilityChange);
+            window.removeEventListener('online', handleVisibilityChange);
+        };
     }, [user, initialSyncCompleted, checkSql, syncWithDb, refreshReceivingState]);
 
+    // --- Single centralized real-time listener for receiving batches (prevents duplicate 100x IndexedDB storm) ---
     useEffect(() => {
         if (!user || !initialSyncCompleted) return;
+
+        let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+        const scheduleRefresh = () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                refreshReceivingState();
+            }, 80);
+        };
 
         const unsubscribe = db.listenToReceivingBatchChanges({
             onAdd: async (batch) => {
@@ -196,7 +241,7 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
                 } else {
                     await receiveDb.saveOrUpdateBatch(batch);
                 }
-                await refreshReceivingState();
+                scheduleRefresh();
             },
             onChange: async (batch) => {
                 if (batch.status === 'sent') {
@@ -204,19 +249,34 @@ const CoreAppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
                 } else {
                     await receiveDb.saveOrUpdateBatch(batch);
                 }
-                await refreshReceivingState();
+                scheduleRefresh();
             },
             onRemove: async (batchId) => {
                 await receiveDb.deleteBatch(Number(batchId));
-                await refreshReceivingState();
+                scheduleRefresh();
             }
         });
 
-        return () => unsubscribe();
+        return () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            unsubscribe();
+        };
     }, [user, initialSyncCompleted, refreshReceivingState]);
 
     // --- Memoized Context Values ---
-    const miscUIValue = useMemo(() => ({ lastModifiedOrderId, setLastModifiedOrderId, activeMenuOrderId, setActiveMenuOrderId, sqlStatus, checkSql, receivingBadgeCount, hasActiveReceivingDraft, refreshReceivingState }), [lastModifiedOrderId, activeMenuOrderId, sqlStatus, checkSql, receivingBadgeCount, hasActiveReceivingDraft, refreshReceivingState]);
+    const miscUIValue = useMemo(() => ({
+        lastModifiedOrderId,
+        setLastModifiedOrderId,
+        activeMenuOrderId,
+        setActiveMenuOrderId,
+        sqlStatus,
+        checkSql,
+        receivingBadgeCount,
+        hasActiveReceivingDraft,
+        refreshReceivingState,
+        receivingUpdateVersion
+    }), [lastModifiedOrderId, activeMenuOrderId, sqlStatus, checkSql, receivingBadgeCount, hasActiveReceivingDraft, refreshReceivingState, receivingUpdateVersion]);
+
     const scannerValue = useMemo(() => ({ isScannerOpen, scannerContext, onScanSuccess, options, openScanner, closeScanner, selectedCameraId, scanSettings }), [isScannerOpen, scannerContext, onScanSuccess, options, openScanner, closeScanner, selectedCameraId, scanSettings]);
     const pwaValue = useMemo(() => ({ isInstallPromptAvailable, triggerInstallPrompt }), [isInstallPromptAvailable, triggerInstallPrompt]);
 

@@ -1,4 +1,3 @@
-
 export interface Customer {
     comcode: string;
     name: string;
@@ -25,6 +24,7 @@ export interface Product {
     gubun1?: string;
     gubun2?: string;
     gubun3?: string;
+    isuse?: string;
 }
 
 export interface OrderItem {

@@ -1,8 +1,7 @@
-
 import React, { useMemo, useCallback, useState } from 'react';
-import { useScanner, useDeviceSettings, useMiscUI, useModals, useAlert } from '../context/AppContext';
+import { useScanner, useMiscUI, useAlert } from '../context/AppContext';
 import { Product } from '../types';
-import { SearchIcon, SpinnerIcon, BarcodeScannerIcon } from '../components/Icons';
+import { SearchIcon, SpinnerIcon, BarcodeScannerIcon, WarningIcon } from '../components/Icons';
 import { isSaleActive } from '../hooks/useOrderManager';
 import { useProductSearch } from '../hooks/useProductSearch';
 import ProductEditPage from './ProductEditPage';
@@ -15,6 +14,7 @@ const ProductCard: React.FC<{ product: Product, index: number, onClick: (product
     const hasEventCostPrice = product.eventCostPrice !== undefined && product.eventCostPrice !== null && product.eventCostPrice > 0;
     const hasSalePrice = product.salePrice !== undefined && product.salePrice !== null && product.salePrice > 0;
     const hasAnySalePrice = hasEventCostPrice || hasSalePrice;
+    const showSeparateSpec = !!product.spec && !product.name.includes(product.spec);
 
     return (
         <div
@@ -30,8 +30,8 @@ const ProductCard: React.FC<{ product: Product, index: number, onClick: (product
                 )}
             </div>
             
-            {/* Row 1.5: Spec (Added) */}
-            {product.spec && (
+            {/* Row 1.5: Spec */}
+            {showSeparateSpec && (
                 <p className="text-sm text-gray-500 font-medium w-full">{product.spec}</p>
             )}
             
@@ -99,25 +99,23 @@ const ProductCard: React.FC<{ product: Product, index: number, onClick: (product
 const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { openScanner } = useScanner();
     const { sqlStatus } = useMiscUI();
-    const { showToast } = useAlert();
+    const { showAlert } = useAlert();
     
-    // State for ProductEditPage modal
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [selectedBarcodeForEdit, setSelectedBarcodeForEdit] = useState<string>('');
     
-    // State for new action modal
     const [actionModalOpen, setActionModalOpen] = useState(false);
     const [selectedProductForAction, setSelectedProductForAction] = useState<Product | null>(null);
 
-    // Use manual search mode
-    // We expose setResults from the hook implicitly via state update in search, but we need to override it for scan results
     const [scanResults, setScanResults] = useState<Product[] | null>(null);
 
-    const { searchTerm, setSearchTerm, results, isSearching, searchSource, search, searchByBarcode } = useProductSearch('productInquiry', MAX_RESULTS_TO_DISPLAY);
+    const { searchTerm, setSearchTerm, results, isSearching, searchSource, search, searchByBarcode } = useProductSearch('productInquiry', MAX_RESULTS_TO_DISPLAY, '상품조회', { forceOnline: true });
     
+    const isOffline = sqlStatus !== 'connected';
+
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        setScanResults(null); // Clear previous scan results
+        setScanResults(null);
         search();
     };
 
@@ -126,13 +124,11 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             'product-inquiry',
             async (barcode) => {
                 setSearchTerm(barcode);
-                setScanResults(null); // Reset
-                // Use dedicated scan query
+                setScanResults(null);
                 const product = await searchByBarcode(barcode);
                 if (product) {
                     setScanResults([product]);
                 } else {
-                    // Fallback to regular search if specialized scan query returns nothing (though scan query is robust)
                     search(barcode);
                 }
             },
@@ -146,12 +142,15 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, []);
 
     const handleEditProduct = useCallback((product: Product) => {
+        if (sqlStatus !== 'connected') {
+            showAlert('현재 오프라인 상태입니다.\n상품 등록 및 수정은 서버 온라인 상태에서만 가능합니다.');
+            return;
+        }
         setSelectedBarcodeForEdit(product.barcode);
         setEditModalOpen(true);
-    }, []);
+    }, [sqlStatus, showAlert]);
 
     const { displayedProducts, totalFound } = useMemo(() => {
-        // Prioritize scan results if available
         const currentResults = scanResults !== null ? scanResults : results;
         return {
             displayedProducts: currentResults,
@@ -183,8 +182,8 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     <SearchIcon className="w-16 h-16 text-gray-300 mb-4" />
                     <p className="text-lg font-semibold">검색 결과가 없습니다</p>
                     <p className="text-sm mt-1">
-                        {searchSource === 'online' && sqlStatus !== 'connected' 
-                            ? '온라인 서버에 연결할 수 없습니다.' 
+                        {isOffline 
+                            ? '오프라인 로컬 데이터에 일치하는 상품이 없습니다.' 
                             : '다른 검색어를 입력해보세요.'
                         }
                     </p>
@@ -210,6 +209,14 @@ const ProductInquiryPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     
     return (
         <div className="h-full flex flex-col bg-white">
+            {isOffline && (
+                <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 flex items-center gap-2 text-amber-800 flex-shrink-0 z-20 animate-fade-in-down">
+                    <WarningIcon className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                    <p className="text-xs font-bold leading-snug">
+                        오프라인 모드: 로컬 저장 데이터로 조회 중이므로 전산 재고 및 최신 가격이 부정확할 수 있습니다.
+                    </p>
+                </div>
+            )}
             <div className="fixed-filter w-full p-3 bg-white border-b border-gray-200 z-10">
                 <form onSubmit={handleSearchSubmit} className="flex items-stretch gap-2 w-full max-w-2xl mx-auto">
                     <div className="relative flex-grow">

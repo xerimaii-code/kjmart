@@ -1,4 +1,3 @@
-
 // src/services/dbService.ts
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, User } from 'firebase/auth';
@@ -26,7 +25,6 @@ let dbReady = false;
 export let isFirebaseInitialized = false;
 
 try {
-    // 1. Primary Firebase Initialization
     if (firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("YOUR_")) {
         app = initializeApp(firebaseConfig);
         isFirebaseInitialized = true;
@@ -63,7 +61,6 @@ export const isInitialized = () => isFirebaseInitialized;
 
 const DB_UNAVAILABLE_ERROR = new Error("Database service is not available.");
 
-// Helper to remove undefined fields which Firebase rejects
 const cleanForFirebase = <T>(obj: T): T => {
     return JSON.parse(JSON.stringify(obj));
 };
@@ -93,18 +90,20 @@ export const setDeviceSetting = async (deviceId: string, key: keyof DeviceSettin
     await set(ref(db, `settings/devices/${deviceId}/${key}`), value === undefined ? null : value);
 };
 
-// --- Listener functions for realtime updates ---
+// --- Listener functions for realtime updates (Optimized for multi-user broadcast without N-item re-render lag) ---
 export const listenToOrderChangesByDateRange = (
     endDate: Date,
     callbacks: {
         onAdd: (order: Order) => void;
         onChange: (order: Order) => void;
         onRemove: (order: Order) => void;
+        onSnapshot?: (orders: Order[]) => void;
     },
     startDate?: Date,
 ): (() => void) => {
     if (!db) {
         console.warn("listenToOrderChangesByDateRange: DB not ready.");
+        if (callbacks.onSnapshot) callbacks.onSnapshot([]);
         return () => {};
     }
     const endOfDay = new Date(endDate);
@@ -113,8 +112,26 @@ export const listenToOrderChangesByDateRange = (
     
     if (startDate) {
         const startOfDay = new Date(startDate);
-        startOfDay.setHours(0,0,0,0);
+        startOfDay.setHours(0, 0, 0, 0);
         ordersQuery = query(ref(db, 'orders'), orderByChild('date'), startAt(startOfDay.toISOString()), endAt(endOfDay.toISOString()));
+    }
+
+    // onSnapshot이 제공된 경우 단일 onValue 리스너로 초기 로딩 지연 제거 및 다중 사용자 실시간 브로드캐스트 일괄 반영
+    if (callbacks.onSnapshot) {
+        return onValue(ordersQuery, (snapshot) => {
+            const list: Order[] = [];
+            if (snapshot.exists()) {
+                snapshot.forEach((child) => {
+                    const val = child.val() as Order;
+                    if (val) list.push(val);
+                });
+            }
+            list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            callbacks.onSnapshot!(list);
+        }, (error) => {
+            console.error("Error in orders real-time listener:", error);
+            callbacks.onSnapshot!([]);
+        });
     }
 
     const unsubs = [
@@ -150,13 +167,11 @@ export const listenToOrderItems = (orderId: number, callback: (items: OrderItem[
     });
 };
 
-// Legacy subscription (batch download)
 export const subscribeToReceivingBatches = (callback: (batches: ReceivingBatch[]) => void): (() => void) => {
     if (!db) {
         callback([]);
         return () => {};
     }
-    // Limit to the last 100 entries to prevent performance issues
     const q = query(ref(db, 'receiving-batches'), limitToLast(100));
     return onValue(q, (snapshot) => {
         const data = snapshot.val();
@@ -165,7 +180,6 @@ export const subscribeToReceivingBatches = (callback: (batches: ReceivingBatch[]
     });
 };
 
-// Real-time listener for receiving batches (granular events)
 export const listenToReceivingBatchChanges = (
     callbacks: {
         onAdd: (batch: ReceivingBatch) => void;
@@ -174,7 +188,6 @@ export const listenToReceivingBatchChanges = (
     }
 ): (() => void) => {
     if (!db) return () => {};
-    // Listen to the last 100 items. This matches the legacy limit logic.
     const q = query(ref(db, 'receiving-batches'), limitToLast(100));
 
     const unsubs = [
@@ -194,7 +207,6 @@ export const cleanupOldReceivingBatches = async (daysToKeep: number = 2): Promis
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
     const cutoffTimestamp = cutoffDate.getTime();
 
-    // Receiving batches ID is essentially a timestamp
     const batchRef = ref(db, 'receiving-batches');
     const oldBatchesQuery = query(batchRef, orderByKey(), endAt(String(cutoffTimestamp)));
 
@@ -205,7 +217,6 @@ export const cleanupOldReceivingBatches = async (daysToKeep: number = 2): Promis
             let count = 0;
             snapshot.forEach((child) => {
                 const batch = child.val() as ReceivingBatch;
-                // STRICTLY check: Only delete if 'sent'. Drafts are preserved.
                 if (batch.status === 'sent') {
                     updates[child.key!] = null;
                     count++;
@@ -312,7 +323,6 @@ export const getOrder = async (orderId: number): Promise<Order | null> => {
                 : Object.values(itemsData);
         }
         
-        // Filter out any potential null/undefined values from Firebase arrays
         const cleanedItems = items.filter(item => item != null);
 
         return { ...orderData, items: cleanedItems };
@@ -331,12 +341,11 @@ export const addOrder = async (
     const newOrderId = Date.now();
     const now = new Date().toISOString();
     
-    // items 배열을 제거한 순수 주문 객체 생성 (any 타입 캐스팅을 통해 삭제 허용)
     const newOrder: any = {
         ...orderData, id: newOrderId, date: now, createdAt: now, updatedAt: now,
         itemCount: items.length, completedAt: null, completionDetails: null,
     };
-    delete newOrder.items; // 중복 저장 방지를 위해 명시적 삭제
+    delete newOrder.items;
 
     const updates: { [key: string]: any } = {};
     updates[`/orders/${newOrderId}`] = cleanForFirebase(newOrder);
@@ -349,7 +358,7 @@ export const updateOrder = (order: Order, items: OrderItem[]): Promise<void> => 
     if (!db) return Promise.reject(DB_UNAVAILABLE_ERROR);
     const now = new Date().toISOString();
     const updatedOrderData = { ...order, itemCount: items.length, updatedAt: now, date: now };
-    delete updatedOrderData.items; // 중복 저장 방지
+    delete updatedOrderData.items;
     const updates: { [key: string]: any } = {};
     updates[`/orders/${order.id}`] = cleanForFirebase(updatedOrderData);
     updates[`/order-items/${order.id}`] = cleanForFirebase(items);
@@ -415,7 +424,6 @@ export const subscribeToUserQueries = (callback: (queries: UserQuery[]) => void)
         callback([]);
         return () => {};
     }
-    // Keep 'saved-queries' path for backward compatibility
     const queriesRef = ref(db, 'saved-queries');
     const queriesQuery = query(queriesRef, orderByChild('order'));
     return onValue(queriesQuery, (snapshot) => {
@@ -447,8 +455,6 @@ export const deleteUserQuery = async (id: string): Promise<void> => {
 
 export const addReceivingBatch = async (batch: ReceivingBatch): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
-    // Firebase does not allow 'undefined' values.
-    // cleanForFirebase removes undefined properties to avoid set() failure.
     const cleanBatch = cleanForFirebase(batch);
     await set(ref(db, `receiving-batches/${batch.id}`), cleanBatch);
 };
@@ -461,12 +467,9 @@ export const deleteReceivingBatch = async (batchId: number): Promise<void> => {
 export const getReceivingBatchesByDateRange = async (startDate: string, endDate: string): Promise<ReceivingBatch[]> => {
     if (!db) return [];
     
-    // Parse YYYY-MM-DD explicitly as local time to avoid UTC offsets
     const s = startDate.split('-').map(Number);
     const e = endDate.split('-').map(Number);
     
-    // Create Date objects for local midnight
-    // Month is 0-indexed in JS Date constructor (e.g. January is 0)
     const startDt = new Date(s[0], s[1] - 1, s[2], 0, 0, 0, 0);
     const endDt = new Date(e[0], e[1] - 1, e[2], 23, 59, 59, 999);
 
@@ -475,7 +478,6 @@ export const getReceivingBatchesByDateRange = async (startDate: string, endDate:
 
     try {
         const batchesRef = ref(db, 'receiving-batches');
-        // Query by key (timestamp)
         const batchesQuery = query(
             batchesRef, 
             orderByKey(), 
@@ -491,7 +493,6 @@ export const getReceivingBatchesByDateRange = async (startDate: string, endDate:
             batches.push(child.val());
         });
         
-        // Return newest first
         return batches.reverse(); 
     } catch (error) {
         console.error("Error fetching batches by date range:", error);

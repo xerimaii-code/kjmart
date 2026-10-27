@@ -1,4 +1,3 @@
-
 // src/utils/mapper.ts
 import { Product, Customer } from '../types';
 
@@ -15,7 +14,6 @@ export const formatDateFromSQL = (dateValue: any): string | undefined => {
         if (dateValue instanceof Date) {
             d = dateValue;
         } else {
-            // Handle 'YYYY-MM-DDTHH:mm:ss.sssZ' or 'YYYY-MM-DD' formats
             const dateStr = String(dateValue).split('T')[0].replace(/-/g, '/');
             d = new Date(dateStr);
         }
@@ -30,31 +28,47 @@ export const formatDateFromSQL = (dateValue: any): string | undefined => {
     }
 };
 
+/**
+ * 발주/입고/검색창 등에서 '상품명 + 규격' 형태를 일관되게 표현하기 위한 헬퍼 함수.
+ * 내부 Product 테이블은 단일 스키마(name, spec)로 유지하되,
+ * 이미 name에 spec이 포함되어 있는 경우(예: '상품조회_발주' 쿼리 결과) 중복 표기를 방지하고,
+ * 분리되어 있는 경우 '상품명 [규격]' 형태로 결합합니다.
+ */
+export const formatProductDisplayName = (name?: string, spec?: string): string => {
+    const cleanName = sanitizeString(name);
+    const cleanSpec = sanitizeString(spec);
+    if (!cleanSpec) return cleanName;
+    if (cleanName.includes(cleanSpec)) return cleanName;
+    return `${cleanName} [${cleanSpec}]`;
+};
+
 export const mapSqlResultToProduct = (p: any): Product => {
-    // 재고 필드명 불일치 해결 (재고수량 또는 curjago 확인)
     const stockVal = p.재고수량 !== undefined && p.재고수량 !== null ? p.재고수량 : p.curjago;
+    const rawName = sanitizeString(p.상품명 || p.품명 || p.descr || p.name || '');
+    const rawSpec = sanitizeString(p.규격 || p.spec || '');
+    const rawIsUse = p.사용유무 !== undefined ? String(p.사용유무).trim() : (p.isuse !== undefined ? String(p.isuse).trim() : '1');
     
     return {
         barcode: sanitizeString(p.바코드 || p.barcode || ''),
-        name: sanitizeString(p.상품명 || p.descr || ''),
-        spec: sanitizeString(p.규격 || p.spec || '') || undefined,
-        costPrice: Number(p.매입가 ?? p.money0vat ?? 0),
-        sellingPrice: Number(p.판매가 ?? p.money1 ?? 0),
-        eventCostPrice: p.행사매입가 ? Number(p.행사매입가) : undefined,
-        salePrice: p.행사판매가 ? Number(p.행사판매가) : undefined,
+        name: rawName,
+        spec: rawSpec || undefined,
+        costPrice: Number(p.매입가 ?? p.money0vat ?? p.costPrice ?? 0),
+        sellingPrice: Number(p.판매가 ?? p.money1 ?? p.sellingPrice ?? 0),
+        eventCostPrice: p.행사매입가 ? Number(p.행사매입가) : (p.salemoney0 ? Number(p.salemoney0) : undefined),
+        salePrice: p.행사판매가 ? Number(p.행사판매가) : (p.salemoney1 ? Number(p.salemoney1) : undefined),
         saleName: sanitizeString(p.행사명 || p.salename) || undefined,
-        saleStartDate: formatDateFromSQL(p.행사시작일),
-        saleEndDate: formatDateFromSQL(p.행사종료일),
-        supplierName: sanitizeString(p.거래처명) || undefined,
-        // [수정] 증분 동기화 필드 추가 (upday1)
-        lastModified: p.최종수정일 || p.upday1 || undefined,
+        saleStartDate: formatDateFromSQL(p.행사시작일 || p.startday || p.salestartday),
+        saleEndDate: formatDateFromSQL(p.행사종료일 || p.endday || p.saleendday),
+        supplierName: sanitizeString(p.거래처명 || p.comname) || undefined,
+        lastModified: formatDateFromSQL(p.최종수정일 || p.upday1) || p.최종수정일 || p.upday1 || undefined,
         stockQuantity: stockVal !== null && stockVal !== undefined ? parseFloat(String(stockVal)) : undefined,
-        bomStatus: p['BOM여부'] || undefined,
-        ispack: p.ispack, // Map ispack directly for logic checks
+        bomStatus: p['BOM여부'] || (p.ispack === '1' || p.ispack === 1 || p.ispack === true ? '묶음' : undefined),
+        ispack: p.ispack,
         comcode: sanitizeString(p.거래처코드 || p.comcode),
         gubun1: sanitizeString(p.gubun1 || p.대분류코드 || p.대분류),
         gubun2: sanitizeString(p.gubun2 || p.중분류코드 || p.중분류),
         gubun3: sanitizeString(p.gubun3 || p.소분류코드 || p.소분류),
+        isuse: rawIsUse,
     };
 };
 

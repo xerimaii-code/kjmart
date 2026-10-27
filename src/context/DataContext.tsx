@@ -1,4 +1,3 @@
-
 import React, { createContext, useState, useCallback, useEffect, ReactNode, useContext, useMemo, useRef } from 'react';
 import { Customer, Product, Order, OrderItem, BOM, Category, UserQuery, ReceivingBatch } from '../types';
 import * as db from '../services/dbService';
@@ -31,6 +30,25 @@ interface DataActions {
 
 export const DataStateContext = createContext<DataState | undefined>(undefined);
 export const DataActionsContext = createContext<DataActions | undefined>(undefined);
+
+const toLocalYMD = (dateInput: string | Date): string | null => {
+    try {
+        if (typeof dateInput === 'string') {
+            const trimmed = dateInput.trim();
+            if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+                return trimmed.slice(0, 10);
+            }
+        }
+        const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+        if (isNaN(d.getTime())) return null;
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    } catch {
+        return null;
+    }
+};
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const { user } = useAuth();
@@ -96,15 +114,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const syncWithDb = useCallback(async (type: 'incremental' | 'full', silent: boolean = false) => {
         if (isSyncingRef.current) return;
         setIsSyncing(true);
+        isSyncingRef.current = true;
         
-        let schemaChanged = false;
-        try { if (type === 'full') schemaChanged = await syncAndCacheDbSchema(); } catch (e) { console.warn("Schema check failed during sync:", e); }
-
-        setSyncDataType(type);
-        if (!silent) setSyncStatusText('동기화 준비 중...');
-        setSyncProgress(5);
-
         try {
+            if (type === 'full') {
+                try { await syncAndCacheDbSchema(); } catch (e) { console.warn("Schema check failed during sync:", e); }
+            }
+
+            setSyncDataType(type);
+            if (!silent) setSyncStatusText('동기화 준비 중...');
+            setSyncProgress(5);
+
             if (type === 'full') {
                 if (!silent) showToast('전체 동기화를 시작합니다.', 'success');
                 if (!silent) setSyncStatusText('거래처 정보 수신 중...');
@@ -115,10 +135,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setSyncProgress(30);
                 const allProductsRaw = await syncProductsIncrementally('1900-01-01');
                 
-                if (schemaChanged || !silent) {
-                    await cache.clearDataStores();
-                }
-
                 if (!silent) setSyncStatusText('데이터 저장 중...');
                 setSyncProgress(50);
                 
@@ -126,14 +142,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 await cache.setCachedData('customers', mappedCustomers);
                 setCustomers(mappedCustomers);
 
-                const mappedProducts = allProductsRaw.map(mapSqlResultToProduct);
+                // 단일화된 상품 마스터 저장 (사용유무 '0' 제외 및 바코드 중복 제거)
+                const productMap = new Map<string, Product>();
+                for (const raw of allProductsRaw) {
+                    const p = mapSqlResultToProduct(raw);
+                    if (p.barcode && p.isuse !== '0') {
+                        productMap.set(p.barcode, p);
+                    }
+                }
+                const mappedProducts = Array.from(productMap.values());
                 await cache.setCachedData('products', mappedProducts, (p) => setSyncProgress(60 + Math.floor(p * 0.3)));
                 setProducts(mappedProducts);
 
                 if (!silent) setSyncStatusText('부가 정보 수신 중...');
                 setSyncProgress(90);
                 
-                // BOM 동기화 - 개별 예외 처리 (오류 시 무시하고 진행)
                 try {
                     const bomRaw = await syncBOMFromDb();
                     const bomData: BOM[] = bomRaw.map((b: any) => ({ 
@@ -147,7 +170,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     console.warn("BOM Sync failed (skipping):", bomErr);
                 }
 
-                // 카테고리 동기화 - 개별 예외 처리
                 try {
                     const categoriesData = await syncCategoriesFromDb();
                     const categories: Category[] = [];
@@ -172,21 +194,48 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 await cache.setCachedData('customers', mappedCustomers);
                 setCustomers(mappedCustomers);
 
-                const currentLastProduct = baseProducts.reduce((latest, p) => (!p.lastModified || !latest || new Date(p.lastModified) > latest) ? (p.lastModified ? new Date(p.lastModified) : latest) : latest, null as Date | null);
-                const syncBaseline = currentLastProduct ? currentLastProduct.toISOString().slice(0, 10) : '1900-01-01';
+                // 한국 로컬 시간(YYYY-MM-DD) 기준 최신 수정일 추출 (UTC 오차 방지)
+                let latestDateStr = '1900-01-01';
+                for (const p of baseProducts) {
+                    if (p.lastModified) {
+                        const ymd = toLocalYMD(p.lastModified);
+                        if (ymd && ymd > latestDateStr) {
+                            latestDateStr = ymd;
+                        }
+                    }
+                }
                 
                 if (!silent) setSyncStatusText('상품 업데이트 확인 중...');
-                const newProductsRaw = await syncProductsIncrementally(syncBaseline);
-                const newProducts = newProductsRaw.map(mapSqlResultToProduct);
+                const newProductsRaw = await syncProductsIncrementally(latestDateStr);
+                const mappedNewProducts = newProductsRaw.map(mapSqlResultToProduct).filter(p => !!p.barcode);
                 
-                if (newProducts.length > 0) {
-                    if (!silent) setSyncStatusText(`${newProducts.length}건 업데이트 중...`);
+                if (mappedNewProducts.length > 0) {
+                    const activeUpdates: Product[] = [];
+                    const deactivatedBarcodes: string[] = [];
+
+                    for (const p of mappedNewProducts) {
+                        if (p.isuse === '0') {
+                            deactivatedBarcodes.push(p.barcode);
+                        } else {
+                            activeUpdates.push(p);
+                        }
+                    }
+
+                    if (!silent) setSyncStatusText(`${mappedNewProducts.length}건 업데이트 중...`);
+                    // [핵심] 전체 clear() 없이 변경분만 단일 트랜잭션으로 Upsert (백그라운드 전환 시 데이터 유실 원천 차단)
+                    await cache.upsertCachedItems('products', activeUpdates, deactivatedBarcodes);
+
                     const productMap = new Map(baseProducts.map(p => [p.barcode, p]));
-                    newProducts.forEach(p => productMap.set(p.barcode, p));
+                    for (const code of deactivatedBarcodes) {
+                        productMap.delete(code);
+                    }
+                    for (const p of activeUpdates) {
+                        productMap.set(p.barcode, p);
+                    }
+
                     const updatedProducts = Array.from(productMap.values());
-                    await cache.setCachedData('products', updatedProducts);
                     setProducts(updatedProducts);
-                    if (!silent) showToast(`${newProducts.length}건 업데이트 완료`, 'success');
+                    if (!silent) showToast(`${mappedNewProducts.length}건 업데이트 완료`, 'success');
                 } else {
                     if (productsRef.current.length === 0 && baseProducts.length > 0) setProducts(baseProducts);
                     if (!silent) showToast('최신 상태입니다.', 'success');
@@ -199,6 +248,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (productsRef.current.length === 0) await loadLocalData();
         } finally {
             setIsSyncing(false);
+            isSyncingRef.current = false;
             setSyncDataType(null);
         }
     }, [showToast, setIsSyncing, setSyncDataType, setSyncProgress, setSyncStatusText, loadLocalData]);

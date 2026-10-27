@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import ActionModal from '../components/ActionModal';
 import { useAlert, useDataState, useScanner, useMiscUI } from '../context/AppContext';
 import { executeUserQuery, searchProductsForEdit, extractParamsForQuery } from '../services/sqlService';
-import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon, XMarkIcon, ChevronDownIcon } from '../components/Icons';
+import { BarcodeScannerIcon, SearchIcon, SpinnerIcon, CheckCircleIcon, UndoIcon, XMarkIcon, ChevronDownIcon, WarningIcon } from '../components/Icons';
 import { Customer, Category } from '../types';
 import { getCachedData } from '../services/cacheDbService';
 import { useAdjustForKeyboard } from '../hooks/useAdjustForKeyboard';
@@ -38,6 +38,90 @@ interface BomItem {
     qty: number;
 }
 
+export interface BarcodeChecksumAnalysis {
+    status: 'valid' | 'checksum_mismatch' | 'non_standard' | 'empty';
+    original: string;
+    corrected: string;
+    standardType?: 'EAN-13' | 'EAN-8' | 'UPC-A';
+    expectedDigit?: number;
+    actualDigit?: number;
+}
+
+/**
+ * 표준 바코드(EAN-13, EAN-8, UPC-A) 체크섬(Modulo 10) 검증 및 자동 교정 번호 산출 함수.
+ * 8자리, 12자리, 13자리 숫자 코드는 표준 체크섬을 계산하며,
+ * 그 외 길이(예: 4~6자리 자체 PLU 코드 등)나 영문 혼합 코드는 'non_standard'(체크섬 미적용 코드)로 분류합니다.
+ */
+export function analyzeBarcodeChecksum(rawCode: string): BarcodeChecksumAnalysis {
+    const code = (rawCode || '').trim();
+    if (!code) {
+        return { status: 'empty', original: '', corrected: '' };
+    }
+
+    if (/^\d{13}$/.test(code)) {
+        const digits = code.split('').map(Number);
+        let sum = 0;
+        for (let i = 0; i < 12; i++) {
+            sum += digits[i] * (i % 2 === 0 ? 1 : 3);
+        }
+        const expected = (10 - (sum % 10)) % 10;
+        const actual = digits[12];
+        const corrected = code.slice(0, 12) + String(expected);
+        return {
+            status: expected === actual ? 'valid' : 'checksum_mismatch',
+            original: code,
+            corrected,
+            standardType: 'EAN-13',
+            expectedDigit: expected,
+            actualDigit: actual,
+        };
+    }
+
+    if (/^\d{8}$/.test(code)) {
+        const digits = code.split('').map(Number);
+        let sum = 0;
+        for (let i = 0; i < 7; i++) {
+            sum += digits[i] * (i % 2 === 0 ? 3 : 1);
+        }
+        const expected = (10 - (sum % 10)) % 10;
+        const actual = digits[7];
+        const corrected = code.slice(0, 7) + String(expected);
+        return {
+            status: expected === actual ? 'valid' : 'checksum_mismatch',
+            original: code,
+            corrected,
+            standardType: 'EAN-8',
+            expectedDigit: expected,
+            actualDigit: actual,
+        };
+    }
+
+    if (/^\d{12}$/.test(code)) {
+        const digits = code.split('').map(Number);
+        let sum = 0;
+        for (let i = 0; i < 11; i++) {
+            sum += digits[i] * (i % 2 === 0 ? 3 : 1);
+        }
+        const expected = (10 - (sum % 10)) % 10;
+        const actual = digits[11];
+        const corrected = code.slice(0, 11) + String(expected);
+        return {
+            status: expected === actual ? 'valid' : 'checksum_mismatch',
+            original: code,
+            corrected,
+            standardType: 'UPC-A',
+            expectedDigit: expected,
+            actualDigit: actual,
+        };
+    }
+
+    return {
+        status: 'non_standard',
+        original: code,
+        corrected: code,
+    };
+}
+
 // [BOM 기본 쿼리 - 묶음 상품용 유지]
 const GET_BOM_COMPONENTS_SQL = `
 SELECT 
@@ -64,7 +148,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const { userQueries, customers: offlineCustomers } = useDataState();
     const { showAlert, showToast } = useAlert();
     const { openScanner } = useScanner();
-    const { sqlStatus } = useMiscUI();
+    const { sqlStatus, checkSql } = useMiscUI();
 
     // --- State Variables ---
     const [barcode, setBarcode] = useState('');
@@ -117,6 +201,12 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
     const [searchResults, setSearchResults] = useState<any[]>([]);
 
+    // Save & Checksum Confirmation Modal State
+    const [saveConfirmModal, setSaveConfirmModal] = useState<{
+        isOpen: boolean;
+        analysis: BarcodeChecksumAnalysis;
+    }>({ isOpen: false, analysis: { status: 'empty', original: '', corrected: '' } });
+
     // Keyboard Adjustment
     const modalContainerRef = useRef<HTMLDivElement>(null);
     const buttonsContainerRef = useRef<HTMLDivElement>(null);
@@ -125,11 +215,15 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     // Sorted Customers
     const { sortedCustomers, recordUsage } = useSortedCustomers(supplierList);
 
+    const isOffline = sqlStatus !== 'connected';
+
     const formatBarcodeDisplay = (code: string) => {
         if (!code) return '';
         if (code.length === 13) return `${code.slice(0, 3)} ${code.slice(3, 7)} ${code.slice(7)}`;
         return code;
     };
+
+    const barcodeAnalysis = useMemo(() => analyzeBarcodeChecksum(barcode), [barcode]);
 
     const loadSuppliers = useCallback(async () => {
         if (sqlStatus === 'connected') {
@@ -141,7 +235,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         } else { setSupplierList(offlineCustomers); }
     }, [sqlStatus, offlineCustomers]);
 
-    // [수정] 동적 컬럼 매핑 (분류)
     const mapCategoryData = (data: any[], level: number): CategoryOption[] => {
         if (!data || !Array.isArray(data)) return [];
         return data.map(item => {
@@ -161,7 +254,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }).filter(item => item.code);
     };
 
-    // [핵심] 분류 조회 함수: SQL Runner의 사용자 쿼리만 사용 + 클라이언트 필터링 강화
     const fetchCategories = useCallback(async (level: 1 | 2 | 3, parent1?: string, parent2?: string) => {
         if (sqlStatus === 'connected') {
             try {
@@ -169,7 +261,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 const userQuery = userQueries.find(q => q.name === queryName);
 
                 if (userQuery) {
-                    // 다양한 파라미터 이름 지원
                     const params = { 
                         lCode: parent1 || '', mCode: parent2 || '', 
                         gubun1: parent1, gubun2: parent2,
@@ -178,15 +269,11 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     };
                     const res = await executeUserQuery(queryName, params, userQuery.query);
                     
-                    // [안전장치] 사용자가 SQL에 WHERE 절을 넣지 않았을 경우를 대비하여 클라이언트 필터링 시도
-                    // 결과 데이터에 gubun1, gubun2 등의 상위 키 컬럼이 존재할 경우에만 작동함.
                     let filteredRes = res;
                     
                     if (level === 2 && parent1) {
                         filteredRes = res.filter(item => {
-                            // 다양한 상위 키 컬럼명 감지 (대소문자 무시)
                             const p1Key = Object.keys(item).find(k => /^(gubun1|l_code|code1|large|대분류.*|상위.*)$/i.test(k));
-                            // 키가 없으면 필터링하지 않음 (SQL에서 처리했다고 가정하거나 데이터 누락)
                             if (!p1Key) return true;
                             
                             const itemVal = String(item[p1Key]).trim();
@@ -211,7 +298,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 }
             } catch (e) { console.error(`Cat Lv${level} error:`, e); }
         } else {
-            // 오프라인 캐시 사용
             const allCats = await getCachedData<Category>('categories');
             if (level === 1) return allCats.filter(c => c.level === 1).map(c => ({ code: c.code1, name: c.name }));
             if (level === 2) return allCats.filter(c => c.level === 2 && c.code1 === parent1).map(c => ({ code: c.code2!, name: c.name }));
@@ -221,11 +307,11 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     }, [sqlStatus, userQueries]);
 
     useEffect(() => {
-        if (isOpen) {
+        if (isOpen && sqlStatus === 'connected') {
             loadSuppliers();
             fetchCategories(1).then(setLCats);
         }
-    }, [isOpen, loadSuppliers, fetchCategories]);
+    }, [isOpen, sqlStatus, loadSuppliers, fetchCategories]);
 
     useEffect(() => {
         if (comcode && supplierList.length > 0) {
@@ -313,7 +399,6 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         setIsPoint(toBoolean(p.ispoint || p.포인트적립));
         setIsStockManaged(toBoolean(p.isjago || p.재고관리));
         
-        // 분류 설정
         const lc = String(p.gubun1 || p.대분류코드 || '').trim();
         const mc = String(p.gubun2 || p.중분류코드 || '').trim();
         const sc = String(p.gubun3 || p.소분류코드 || '').trim();
@@ -361,25 +446,38 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     }, [fetchCategories, showToast, userQueries]);
 
     const performSearch = useCallback(async (code: string) => {
-        if (!code) return;
+        if (sqlStatus !== 'connected') {
+            showAlert('오프라인 상태에서는 상품 등록 및 수정을 사용할 수 없습니다.');
+            return;
+        }
+        const trimmed = code.trim();
+        if (!trimmed) return;
         try {
-            const results = await searchProductsForEdit(code);
+            const results = await searchProductsForEdit(trimmed);
             if (results && results.length > 0) {
                 if (results.length === 1) populateProductData(results[0]);
                 else { setSearchResults(results); setIsSelectionModalOpen(true); }
             } else {
-                if (/^\d+$/.test(code)) {
+                // 숫자로만 이루어졌거나 바코드 형식인 경우 신규 등록 모드로 전환
+                if (/^[0-9A-Za-z-]+$/.test(trimmed)) {
                     if (!isCategoryFixed) resetForm(true);
                     else resetForm(false);
-                    setBarcode(code); setIsEditMode(false);
+                    setBarcode(trimmed);
+                    setIsEditMode(false);
                     showToast('등록되지 않은 바코드입니다. 신규 등록합니다.', 'success');
                     setTimeout(() => productNameRef.current?.focus(), 150);
-                } else { showToast('검색 결과가 없습니다.', 'error'); }
+                } else {
+                    showToast('검색 결과가 없습니다.', 'error');
+                }
             }
         } catch (e) { showToast('상품 조회 중 오류가 발생했습니다.', 'error'); }
-    }, [populateProductData, resetForm, isCategoryFixed, showToast]);
+    }, [sqlStatus, showAlert, populateProductData, resetForm, isCategoryFixed, showToast]);
 
     const handleScan = () => {
+        if (isOffline) {
+            showAlert('오프라인 상태에서는 상품 등록 및 수정을 사용할 수 없습니다.');
+            return;
+        }
         openScanner('modal', (code) => {
             setSearchInput(code);
             performSearch(code);
@@ -399,16 +497,20 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
     useEffect(() => {
         if (isOpen) {
-            if (initialBarcode) { setSearchInput(initialBarcode); performSearch(initialBarcode); }
-            else { setSearchInput(''); resetForm(true); }
+            if (initialBarcode && sqlStatus === 'connected') {
+                setSearchInput(initialBarcode);
+                performSearch(initialBarcode);
+            } else if (!initialBarcode) {
+                setSearchInput('');
+                resetForm(true);
+            }
         }
-    }, [isOpen, initialBarcode, performSearch, resetForm]);
+    }, [isOpen, initialBarcode, sqlStatus, performSearch, resetForm]);
 
-    const handleSave = async () => {
-        if (!barcode || !productName) { showAlert("바코드와 상품명은 필수 항목입니다."); return; }
-        if (!lCode) { showAlert("대분류를 선택해주세요."); return; }
-        if (!comcode) { showAlert("거래처를 선택해주세요."); return; }
-
+    // 실제 SQL 저장 실행 함수 (확정된 targetBarcode를 인자로 받음)
+    const executeSaveWithBarcode = async (targetBarcode: string) => {
+        setSaveConfirmModal(prev => ({ ...prev, isOpen: false }));
+        setBarcode(targetBarcode);
         setIsSaving(true);
         try {
             const safeCost = Number(String(costPrice).replace(/,/g, ''));
@@ -420,7 +522,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                 Descr: productName, descr: productName,
                 isvat: toSqlBit(isTaxable),
                 gubun1: lCode || '', gubun2: mCode || '', gubun3: sCode || '',
-                barcode: barcode, spec: spec || '', comcode: comcode || '',
+                barcode: targetBarcode, spec: spec || '', comcode: comcode || '',
                 isjago: toSqlBit(isStockManaged), ispoint: toSqlBit(isPoint), isuse: toSqlBit(isUse),
                 CurrentDate: new Date().toISOString().slice(0, 10),
                 kw: searchInput, stock_yn: toSqlBit(isStockManaged),
@@ -434,7 +536,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             const dynamicParams = extractParamsForQuery(userDefinedQuery.query, contextParams);
             await executeUserQuery(userQueryName, dynamicParams, userDefinedQuery.query);
             
-            showToast(isEditMode ? "수정되었습니다." : "등록되었습니다.", "success");
+            showToast(isEditMode ? "수정되었습니다." : `등록되었습니다. [${targetBarcode}]`, "success");
             setSearchInput('');
             if (isCategoryFixed) resetForm(false); else resetForm(true);
             recordUsage(comcode);
@@ -442,12 +544,51 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         } catch (e: any) { showAlert(`저장 오류: ${e.message}`); } finally { setIsSaving(false); }
     };
 
+    // 저장 버튼 클릭 시 검증 및 체크섬 확인 창 표시
+    const handleSave = () => {
+        if (isOffline) {
+            showAlert("오프라인 상태에서는 상품을 저장할 수 없습니다.");
+            return;
+        }
+        const candidateBarcode = (barcode || searchInput).trim();
+        if (!candidateBarcode || !productName.trim()) {
+            showAlert("바코드와 상품명은 필수 항목입니다.");
+            return;
+        }
+        if (!lCode) {
+            showAlert("대분류를 선택해주세요.");
+            return;
+        }
+        if (!comcode) {
+            showAlert("거래처를 선택해주세요.");
+            return;
+        }
+
+        if (!barcode && candidateBarcode) {
+            setBarcode(candidateBarcode);
+        }
+
+        const analysis = analyzeBarcodeChecksum(candidateBarcode);
+
+        // 상품 수정 모드이면서 바코드가 표준 체크섬 정상인 경우에는 기존처럼 바로 저장하되,
+        // 신규 등록이거나 체크섬 불일치 / 비표준(체크섬 미적용) 코드인 경우 앱 디자인에 맞춘 확인 모달을 거칩니다.
+        if (isEditMode && analysis.status === 'valid') {
+            executeSaveWithBarcode(candidateBarcode);
+            return;
+        }
+
+        setSaveConfirmModal({
+            isOpen: true,
+            analysis,
+        });
+    };
+
     const handleToggleWithConfirm = (label: string, currentValue: boolean, setter: (val: boolean) => void) => {
         showAlert(`'${label}' 설정을 ${currentValue ? '해제' : '설정'}하시겠습니까?`, () => setter(!currentValue), '확인', 'bg-blue-600');
     };
     
-    const CustomToggleButton = ({ label, checked, onChange }: { label: string, checked: boolean, onChange: (v: boolean) => void }) => (
-        <button onClick={() => handleToggleWithConfirm(label, checked, onChange)} className={`flex items-center justify-center gap-1 px-1 py-1.5 rounded border ${checked ? 'bg-white border-blue-500 text-blue-700' : 'bg-gray-50 border-gray-300 text-gray-500'}`}>
+    const CustomToggleButton = ({ label, checked, onChange, disabled }: { label: string, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean }) => (
+        <button disabled={disabled} onClick={() => handleToggleWithConfirm(label, checked, onChange)} className={`flex items-center justify-center gap-1 px-1 py-1.5 rounded border ${checked ? 'bg-white border-blue-500 text-blue-700' : 'bg-gray-50 border-gray-300 text-gray-500'} disabled:opacity-50`}>
             <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${checked ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>{checked && <CheckCircleIcon className="w-2.5 h-2.5 text-white" />}</div>
             <span className="text-[11px] font-bold whitespace-nowrap">{label}</span>
         </button>
@@ -456,38 +597,90 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     return (
         <>
             <ActionModal isOpen={isOpen} onClose={onClose} title={isEditMode ? "상품 수정" : "상품 등록/수정"} disableBodyScroll={false} containerRef={modalContainerRef} zIndexClass="z-[50]">
-                <div className="px-2 pt-2 pb-0 space-y-1 bg-white flex flex-col h-full overflow-y-auto">
+                <div className="px-2 pt-2 pb-0 space-y-1 bg-white flex flex-col h-full overflow-y-auto relative">
+                    {isOffline && (
+                        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 mb-1 flex flex-col gap-2 text-rose-800 shadow-sm animate-fade-in-down">
+                            <div className="flex items-start gap-2">
+                                <WarningIcon className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+                                <div className="text-xs font-bold leading-relaxed">
+                                    <p className="text-sm font-extrabold text-rose-700">오프라인 모드 사용 불가</p>
+                                    <p className="mt-0.5 text-rose-600">상품 등록 및 수정은 SQL 서버와 온라인으로 연결된 상태에서만 작동합니다.</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => checkSql()}
+                                disabled={sqlStatus === 'checking'}
+                                className="w-full py-2 bg-rose-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform flex items-center justify-center gap-1.5 shadow-sm disabled:bg-rose-400"
+                            >
+                                {sqlStatus === 'checking' ? <SpinnerIcon className="w-4 h-4 animate-spin" /> : null}
+                                <span>{sqlStatus === 'checking' ? '연결 확인 중...' : '서버 연결 다시 확인'}</span>
+                            </button>
+                        </div>
+                    )}
+
                     <form onSubmit={(e) => { e.preventDefault(); performSearch(searchInput); }} className="flex gap-1 items-stretch">
-                        <input ref={searchInputRef} type="text" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="바코드/명칭 (길게 눌러 초기화)" className="flex-1 h-9 pl-2 pr-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm" />
-                        <button type="submit" className="w-14 h-9 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm"><SearchIcon className="w-5 h-5" /></button>
-                        <button type="button" onClick={handleScan} className="w-32 h-9 bg-gray-700 text-white rounded-md flex items-center justify-center gap-1 active:scale-95 shadow-sm hover:bg-gray-800"><BarcodeScannerIcon className="w-6 h-6" /><span className="text-xs font-bold">스캔</span></button>
+                        <input ref={searchInputRef} type="text" disabled={isOffline} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="바코드/명칭 (길게 눌러 초기화)" className="flex-1 h-9 pl-2 pr-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm disabled:bg-gray-100" />
+                        <button type="submit" disabled={isOffline} className="w-14 h-9 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm disabled:bg-gray-400"><SearchIcon className="w-5 h-5" /></button>
+                        <button type="button" disabled={isOffline} onClick={handleScan} className="w-32 h-9 bg-gray-700 text-white rounded-md flex items-center justify-center gap-1 active:scale-95 shadow-sm hover:bg-gray-800 disabled:bg-gray-400"><BarcodeScannerIcon className="w-6 h-6" /><span className="text-xs font-bold">스캔</span></button>
                     </form>
                     
                     <div className="flex gap-1 pt-1 min-w-0">
                         <div className="flex-grow flex flex-col gap-0.5 min-w-0">
-                            <div className="flex items-baseline gap-2"><label className="text-xs font-bold text-gray-700 whitespace-nowrap">상품명</label>{barcode && <span className="text-sm font-bold text-gray-900 font-mono tracking-tight truncate">[{formatBarcodeDisplay(barcode)}]</span>}</div>
-                            <input ref={productNameRef} type="text" value={productName} onChange={(e) => setProductName(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm" placeholder="상품명 입력" />
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                <label className="text-xs font-bold text-gray-700 whitespace-nowrap">상품명</label>
+                                {barcode && (
+                                    <span className="text-sm font-bold text-gray-900 font-mono tracking-tight truncate">
+                                        [{formatBarcodeDisplay(barcode)}]
+                                    </span>
+                                )}
+                                {barcode && barcodeAnalysis.status === 'valid' && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+                                        {barcodeAnalysis.standardType} 정상
+                                    </span>
+                                )}
+                                {barcode && barcodeAnalysis.status === 'checksum_mismatch' && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setBarcode(barcodeAnalysis.corrected);
+                                            setSearchInput(barcodeAnalysis.corrected);
+                                            showToast(`체크섬이 교정되었습니다: ${barcodeAnalysis.corrected}`, 'success');
+                                        }}
+                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-300 whitespace-nowrap active:scale-95"
+                                        title="터치하면 정상 체크섬 번호로 즉시 수정합니다"
+                                    >
+                                        체크섬오류 (교정:{barcodeAnalysis.expectedDigit})
+                                    </button>
+                                )}
+                                {barcode && barcodeAnalysis.status === 'non_standard' && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">
+                                        자체/비표준 코드
+                                    </span>
+                                )}
+                            </div>
+                            <input ref={productNameRef} type="text" disabled={isOffline} value={productName} onChange={(e) => setProductName(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm disabled:bg-gray-100" placeholder="상품명 입력" />
                         </div>
                         <div className="w-1/3 flex flex-col gap-0.5 flex-shrink-0">
                             <label className="text-xs font-bold text-gray-700">규격</label>
-                            <input type="text" value={spec} onChange={(e) => setSpec(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm" placeholder="규격" />
+                            <input type="text" disabled={isOffline} value={spec} onChange={(e) => setSpec(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm disabled:bg-gray-100" placeholder="규격" />
                         </div>
                     </div>
 
                     <div className="flex gap-1 items-end pt-1">
-                        <div className="flex-1 flex flex-col gap-0.5"><label className="text-xs font-bold text-gray-700">매입가</label><input type="text" inputMode="numeric" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-semibold" /></div>
-                        <div className="flex-1 flex flex-col gap-0.5"><label className="text-xs font-bold text-gray-700">판매가</label><input type="text" inputMode="numeric" value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-bold text-blue-600" /></div>
+                        <div className="flex-1 flex flex-col gap-0.5"><label className="text-xs font-bold text-gray-700">매입가</label><input type="text" disabled={isOffline} inputMode="numeric" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-semibold disabled:bg-gray-100" /></div>
+                        <div className="flex-1 flex flex-col gap-0.5"><label className="text-xs font-bold text-gray-700">판매가</label><input type="text" disabled={isOffline} inputMode="numeric" value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} className="w-full h-9 px-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-right text-sm font-bold text-blue-600 disabled:bg-gray-100" /></div>
                         <div className="w-12 flex flex-col items-center justify-center pb-1.5"><label className="text-[10px] text-gray-500 leading-none mb-0.5">이익률</label><span className={`text-xs font-bold ${marginRate >= 0 ? 'text-blue-600' : 'text-red-600'}`}>{marginRate.toFixed(1)}%</span></div>
-                        <div className="pb-0.5"><button onClick={() => setIsTaxable(!isTaxable)} className={`flex items-center gap-1 px-2 h-9 rounded border ${isTaxable ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600'}`}><div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${isTaxable ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>{isTaxable && <CheckCircleIcon className="w-2.5 h-2.5 text-white" />}</div><span className="text-xs font-bold">과세</span></button></div>
+                        <div className="pb-0.5"><button disabled={isOffline} onClick={() => setIsTaxable(!isTaxable)} className={`flex items-center gap-1 px-2 h-9 rounded border ${isTaxable ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600'} disabled:opacity-50`}><div className={`w-3.5 h-3.5 border rounded flex items-center justify-center ${isTaxable ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-400'}`}>{isTaxable && <CheckCircleIcon className="w-2.5 h-2.5 text-white" />}</div><span className="text-xs font-bold">과세</span></button></div>
                     </div>
 
                     <div className="flex flex-col gap-0.5 pt-1">
                         <label className="text-xs font-bold text-gray-700">상품 분류</label>
                         <div className="flex gap-1 items-center">
-                            <select value={lCode} onChange={handleLargeChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0"><option value="">대분류</option>{lCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
-                            <select value={mCode} onChange={handleMediumChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0"><option value="">중분류</option>{mCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
-                            <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0"><option value="">소분류</option>{sCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
-                            <label className="flex-shrink-0 flex items-center gap-1 cursor-pointer whitespace-nowrap px-1 ml-1 bg-gray-50 rounded border border-gray-200 h-9"><input type="checkbox" checked={isCategoryFixed} onChange={(e) => setIsCategoryFixed(e.target.checked)} className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-blue-500" /><span className="text-[11px] font-bold text-gray-700">고정</span></label>
+                            <select disabled={isOffline} value={lCode} onChange={handleLargeChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0 disabled:bg-gray-100"><option value="">대분류</option>{lCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
+                            <select disabled={isOffline} value={mCode} onChange={handleMediumChange} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0 disabled:bg-gray-100"><option value="">중분류</option>{mCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
+                            <select disabled={isOffline} value={sCode} onChange={(e) => setSCode(e.target.value)} className="flex-1 h-9 px-1 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 truncate min-w-0 disabled:bg-gray-100"><option value="">소분류</option>{sCats.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
+                            <label className="flex-shrink-0 flex items-center gap-1 cursor-pointer whitespace-nowrap px-1 ml-1 bg-gray-50 rounded border border-gray-200 h-9"><input type="checkbox" disabled={isOffline} checked={isCategoryFixed} onChange={(e) => setIsCategoryFixed(e.target.checked)} className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-blue-500" /><span className="text-[11px] font-bold text-gray-700">고정</span></label>
                         </div>
                     </div>
 
@@ -495,11 +688,11 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                          <div className="relative flex-grow flex flex-col gap-0.5">
                             <label className="text-xs font-bold text-gray-700">거래처</label>
                             <div className="relative">
-                                <input ref={supplierInputRef} type="text" value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setComcode(''); setShowSupplierDropdown(true); }} onFocus={() => { if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current); setShowSupplierDropdown(true); }} onBlur={() => { blurTimeoutRef.current = window.setTimeout(() => setShowSupplierDropdown(false), 200); }} placeholder="거래처 검색 (선택)" className={`w-full h-9 px-2 pr-8 border rounded-md focus:ring-1 focus:ring-blue-500 text-sm ${comcode ? 'bg-blue-50 border-blue-500 text-blue-800 font-bold' : 'bg-white border-gray-300'}`} />
-                                {comcode && <button onClick={handleClearSupplier} className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600" type="button"><XMarkIcon className="w-4 h-4" /></button>}
+                                <input ref={supplierInputRef} type="text" disabled={isOffline} value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setComcode(''); setShowSupplierDropdown(true); }} onFocus={() => { if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current); setShowSupplierDropdown(true); }} onBlur={() => { blurTimeoutRef.current = window.setTimeout(() => setShowSupplierDropdown(false), 200); }} placeholder="거래처 검색 (선택)" className={`w-full h-9 px-2 pr-8 border rounded-md focus:ring-1 focus:ring-blue-500 text-sm disabled:bg-gray-100 ${comcode ? 'bg-blue-50 border-blue-500 text-blue-800 font-bold' : 'bg-white border-gray-300'}`} />
+                                {comcode && !isOffline && <button onClick={handleClearSupplier} className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600" type="button"><XMarkIcon className="w-4 h-4" /></button>}
                                 {!comcode && <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"><ChevronDownIcon className="w-4 h-4" /></div>}
                             </div>
-                            <SearchDropdown<Customer> items={filteredSuppliers} show={showSupplierDropdown && !comcode} renderItem={(c) => (<div onMouseDown={(e) => { e.preventDefault(); handleSelectSupplier(c); }} className="p-2 hover:bg-gray-100 cursor-pointer border-b last:border-b-0"><p className="font-semibold text-sm">{c.name}</p><p className="text-xs text-gray-500">{c.comcode}</p></div>)} />
+                            <SearchDropdown<Customer> items={filteredSuppliers} show={showSupplierDropdown && !comcode && !isOffline} renderItem={(c) => (<div onMouseDown={(e) => { e.preventDefault(); handleSelectSupplier(c); }} className="p-2 hover:bg-gray-100 cursor-pointer border-b last:border-b-0"><p className="font-semibold text-sm">{c.name}</p><p className="text-xs text-gray-500">{c.comcode}</p></div>)} />
                         </div>
                         <div className="w-1/3 flex flex-col gap-0.5">
                             <div className="flex justify-between items-center"><label className="text-xs font-bold text-gray-700">재고수량</label>{isBundle && <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 rounded border border-purple-200 leading-none">묶음</span>}</div>
@@ -508,14 +701,14 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     </div>
 
                     <div className="grid grid-cols-3 gap-1 py-1">
-                        <CustomToggleButton label="사용유무" checked={isUse} onChange={setIsUse} />
-                        <CustomToggleButton label="포인트적립" checked={isPoint} onChange={setIsPoint} />
-                        <CustomToggleButton label="재고관리" checked={isStockManaged} onChange={setIsStockManaged} />
+                        <CustomToggleButton label="사용유무" checked={isUse} onChange={setIsUse} disabled={isOffline} />
+                        <CustomToggleButton label="포인트적립" checked={isPoint} onChange={setIsPoint} disabled={isOffline} />
+                        <CustomToggleButton label="재고관리" checked={isStockManaged} onChange={setIsStockManaged} disabled={isOffline} />
                     </div>
 
                     <div ref={buttonsContainerRef} className="grid grid-cols-[1fr_4fr] gap-2 pt-1 pb-1">
-                        <button onClick={handleReset} className="h-12 bg-orange-100 border border-orange-200 text-orange-600 rounded-md flex items-center justify-center hover:bg-orange-200 active:scale-95 transition-transform"><UndoIcon className="w-6 h-6" /></button>
-                        <button onClick={handleSave} disabled={isSaving} className="h-12 bg-blue-600 text-white rounded-md font-bold text-lg flex items-center justify-center gap-2 hover:bg-blue-700 shadow-md active:scale-95 disabled:bg-gray-400 transition-transform">{isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}저장</button>
+                        <button onClick={handleReset} disabled={isOffline} className="h-12 bg-orange-100 border border-orange-200 text-orange-600 rounded-md flex items-center justify-center hover:bg-orange-200 active:scale-95 transition-transform disabled:opacity-50"><UndoIcon className="w-6 h-6" /></button>
+                        <button onClick={handleSave} disabled={isSaving || isOffline} className="h-12 bg-blue-600 text-white rounded-md font-bold text-lg flex items-center justify-center gap-2 hover:bg-blue-700 shadow-md active:scale-95 disabled:bg-gray-400 transition-transform">{isSaving ? <SpinnerIcon className="w-5 h-5" /> : <CheckCircleIcon className="w-5 h-5" />}저장</button>
                     </div>
 
                     <div className="grid grid-cols-2 gap-1 mt-1 mb-0">
@@ -534,7 +727,144 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     </div>
                 </div>
             </ActionModal>
+
             <ProductSelectionModal isOpen={isSelectionModalOpen} onClose={() => setIsSelectionModalOpen(false)} products={searchResults} onSelect={handleProductSelect} />
+
+            {/* 바코드 체크섬 검증 및 저장 확인 모달 (앱 디자인 일관성 적용) */}
+            {saveConfirmModal.isOpen && createPortal(
+                <div
+                    className="fixed inset-0 bg-black/50 z-[220] flex items-center justify-center p-4 animate-fade-in-down"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={() => setSaveConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                >
+                    <div
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-100"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="p-5 space-y-3">
+                            {saveConfirmModal.analysis.status === 'checksum_mismatch' ? (
+                                <>
+                                    <div className="flex items-center justify-center gap-2 text-amber-600">
+                                        <WarningIcon className="w-6 h-6 flex-shrink-0" />
+                                        <h3 className="text-lg font-extrabold text-slate-800">바코드 체크섬 확인</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-600 text-center leading-relaxed">
+                                        입력한 바코드의 끝자리 체크섬이 표준({saveConfirmModal.analysis.standardType}) 규칙과 다릅니다. 체크섬에 맞게 수정하여 저장하시겠습니까?
+                                    </p>
+                                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-2 text-xs">
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-bold text-slate-500">입력 번호 (체크섬 불일치)</span>
+                                            <span className="font-mono font-bold text-rose-600 text-sm">
+                                                {saveConfirmModal.analysis.original.slice(0, -1)}
+                                                <span className="underline decoration-2">{saveConfirmModal.analysis.original.slice(-1)}</span>
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center pt-1.5 border-t border-slate-200">
+                                            <span className="font-bold text-blue-600">교정 번호 (정상 체크섬)</span>
+                                            <span className="font-mono font-extrabold text-blue-700 text-sm bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                                                {saveConfirmModal.analysis.corrected.slice(0, -1)}
+                                                <span className="text-rose-600 underline decoration-2">{saveConfirmModal.analysis.corrected.slice(-1)}</span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 text-center">
+                                        * 체크섬을 사용하지 않는 자체/예외 코드인 경우 아래 [입력값 그대로 저장]을 선택하세요.
+                                    </p>
+                                </>
+                            ) : saveConfirmModal.analysis.status === 'non_standard' ? (
+                                <>
+                                    <div className="flex items-center justify-center gap-2 text-indigo-600">
+                                        <WarningIcon className="w-6 h-6 flex-shrink-0" />
+                                        <h3 className="text-lg font-extrabold text-slate-800">비표준(자체) 바코드 확인</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-600 text-center leading-relaxed">
+                                        표준(8/12/13자리) 체크섬 대상이 아닌 <strong>체크섬 미적용 코드</strong>입니다. 아래 정보로 저장하시겠습니까?
+                                    </p>
+                                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1.5 text-xs">
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-bold text-slate-500">바코드 ({saveConfirmModal.analysis.original.length}자리)</span>
+                                            <span className="font-mono font-extrabold text-slate-800 text-sm">{saveConfirmModal.analysis.original}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-bold text-slate-500">상품명</span>
+                                            <span className="font-bold text-slate-800 truncate max-w-[180px]">{productName}</span>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="flex items-center justify-center gap-2 text-blue-600">
+                                        <CheckCircleIcon className="w-6 h-6 flex-shrink-0" />
+                                        <h3 className="text-lg font-extrabold text-slate-800">신규 상품 등록 확인</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-600 text-center leading-relaxed">
+                                        바코드 체크섬({saveConfirmModal.analysis.standardType})이 정상입니다. 아래 정보로 등록하시겠습니까?
+                                    </p>
+                                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1.5 text-xs">
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-bold text-slate-500">바코드</span>
+                                            <span className="font-mono font-extrabold text-emerald-700 text-sm">{saveConfirmModal.analysis.original}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-bold text-slate-500">상품명</span>
+                                            <span className="font-bold text-slate-800 truncate max-w-[180px]">{productName}</span>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="bg-slate-50 p-3 border-t border-slate-100 flex flex-col gap-2">
+                            {saveConfirmModal.analysis.status === 'checksum_mismatch' ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => executeSaveWithBarcode(saveConfirmModal.analysis.corrected)}
+                                        className="w-full py-2.5 px-4 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-700 shadow-sm active:scale-95 transition-transform"
+                                    >
+                                        체크섬 수정 후 저장 ({saveConfirmModal.analysis.corrected})
+                                    </button>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSaveConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                                            className="py-2.5 px-3 rounded-xl font-bold text-xs text-slate-700 bg-gray-200 hover:bg-gray-300 active:scale-95 transition-transform"
+                                        >
+                                            취소
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => executeSaveWithBarcode(saveConfirmModal.analysis.original)}
+                                            className="py-2.5 px-3 rounded-xl font-bold text-xs text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 active:scale-95 transition-transform"
+                                        >
+                                            입력값 그대로 저장
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-2.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSaveConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                                        className="py-2.5 px-4 rounded-xl font-bold text-sm text-slate-700 bg-gray-200 hover:bg-gray-300 active:scale-95 transition-transform"
+                                    >
+                                        취소
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => executeSaveWithBarcode(saveConfirmModal.analysis.original)}
+                                        className="py-2.5 px-4 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-700 shadow-sm active:scale-95 transition-transform"
+                                    >
+                                        확인 및 저장
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
         </>
     );
 }

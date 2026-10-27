@@ -1,6 +1,5 @@
-
 import React, { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
-import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI } from '../context/AppContext';
+import { useDataState, useDataActions, useAlert, useModals, useScanner, useMiscUI, useDeviceSettings } from '../context/AppContext';
 import { OrderItem, Product, EditedOrderDraft, Order } from '../types';
 import { RemoveIcon, ChatBubbleLeftIcon, SpinnerIcon, DragHandleIcon } from './Icons';
 import { isSaleActive, useOrderManager } from '../hooks/useOrderManager';
@@ -9,6 +8,7 @@ import { getDraft, saveDraft, deleteDraft } from '../services/draftDbService';
 import { useProductSearch } from '../hooks/useProductSearch';
 import ActionModal from './ActionModal';
 import ProductSearchBar from './ProductSearchBar';
+import { formatProductDisplayName } from '../utils/mapper';
 
 type ItemStatus = 'new' | 'modified' | 'none';
 
@@ -28,11 +28,6 @@ const EditedItemRow = memo(({
     onDragOver: (e: React.DragEvent) => void;
     onDrop: (e: React.DragEvent) => void;
 }) => {
-    // [행사 정보 표시 로직 수정]
-    // 1. 이미 저장된(박제된) 행사 정보(item.saleName)가 있다면 무조건 그것을 우선 사용합니다.
-    // 2. 저장된 정보가 없고, 실시간 상품 정보(product)에 행사 정보가 있다면 그것을 사용합니다 (신규 추가된 경우 등).
-    
-    // 저장된 스냅샷이 있는지 확인
     const hasSnapshot = !!item.saleName;
     
     let saleActive = false;
@@ -43,7 +38,6 @@ const EditedItemRow = memo(({
     let dispSaleEnd: string | undefined = undefined;
 
     if (hasSnapshot) {
-        // 박제된 정보 사용 (Snapshot Prioritization)
         saleActive = !!item.saleEndDate && isSaleActive(item.saleStartDate, item.saleEndDate);
         if (saleActive) {
             dispEventPrice = item.eventPrice;
@@ -52,13 +46,11 @@ const EditedItemRow = memo(({
             dispSaleStart = item.saleStartDate;
             dispSaleEnd = item.saleEndDate;
             
-            // [보정] 기존 데이터에 salePrice가 누락된 경우, 현재 상품 정보와 행사명이 같으면 가져옴
             if (!dispSalePrice && product && product.saleName === item.saleName) {
                 dispSalePrice = product.salePrice;
             }
         }
     } else if (product) {
-        // 박제된 정보가 없고 실시간 정보가 있는 경우 (Fallback to Live Data)
         saleActive = isSaleActive(product.saleStartDate, product.saleEndDate);
         if (saleActive) {
             dispEventPrice = product.eventCostPrice;
@@ -70,6 +62,7 @@ const EditedItemRow = memo(({
     }
 
     const hasEventInfo = saleActive && dispEventPrice !== undefined && dispEventPrice > 0;
+    const displayName = product ? formatProductDisplayName(item.name, product.spec) : item.name;
 
     return (
         <div
@@ -92,7 +85,7 @@ const EditedItemRow = memo(({
                     <div className="flex flex-wrap items-center gap-1 flex-grow">
                         {status === 'new' && <span className="bg-teal-100 text-teal-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-teal-200 whitespace-nowrap">신규</span>}
                         {status === 'modified' && <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-200 whitespace-nowrap">수정</span>}
-                        <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap text-sm leading-snug">{item.name}</p>
+                        <p className="font-semibold text-gray-800 break-words whitespace-pre-wrap text-sm leading-snug">{displayName}</p>
                     </div>
                     {hasEventInfo && <span className="text-rose-500 text-[10px] font-black px-1.5 py-0.5 rounded-md border border-rose-200 bg-rose-50 animate-pulse">행사중</span>}
                 </div>
@@ -150,10 +143,12 @@ EditedItemRow.displayName = 'EditedItemRow';
 
 const OrderDetailModal: React.FC = () => {
     const { products } = useDataState();
-    const { updateOrder, addOrder } = useDataActions();
+    const { updateOrder } = useDataActions();
     const { showAlert, showToast } = useAlert();
     const { editingOrder: activeOrder, closeDetailModal, openAddItemModal, openEditItemModal, closeEditItemModal } = useModals();
     const { openScanner } = useScanner();
+    const { sqlStatus } = useMiscUI();
+    const { dataSourceSettings } = useDeviceSettings();
     
     const [isSaving, setIsSaving] = useState(false);
     const [draftLoaded, setDraftLoaded] = useState(false);
@@ -162,7 +157,6 @@ const OrderDetailModal: React.FC = () => {
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
     const [dropIdx, setDropIdx] = useState<number | null>(null);
 
-    // 세션 임시 캐시 (검색/스캔으로 불러온 상세 정보 저장)
     const sessionProductsRef = useRef<Map<string, Product>>(new Map());
 
     const { 
@@ -248,27 +242,27 @@ const OrderDetailModal: React.FC = () => {
             if (isProcessingScanRef.current) return;
             isProcessingScanRef.current = true;
             try {
-                let product = products.find(p => p.barcode === barcode);
-                if (!product) {
-                    product = await searchByBarcode(barcode);
-                    if (product) sessionProductsRef.current.set(product.barcode, product);
-                }
-                
+                // searchByBarcode를 직접 호출하여 '로컬' / '서버' 설정 및 온라인 폴백 규칙을 정확히 준수
+                const product = await searchByBarcode(barcode);
                 if (product) {
-                    const existingItem = itemsRef.current.find(item => item.barcode === product!.barcode);
+                    sessionProductsRef.current.set(product.barcode, product);
+                    const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
                     openAddItemModal({
                         product, existingItem: existingItem || null, trigger: 'scan',
-                        onAdd: (details) => { addOrUpdateItem(product!, details); isProcessingScanRef.current = false; },
+                        onAdd: (details) => { addOrUpdateItem(product, details); isProcessingScanRef.current = false; },
                         onClose: () => { isProcessingScanRef.current = false; }, 
                         onNextScan: handleOpenScanner,
                         initialSettings: { unit: existingItem ? existingItem.unit : (isBoxUnitDefault ? '박스' : '개') },
                         timestamp: Date.now()
                     });
-                } else { isProcessingScanRef.current = false; showAlert("등록되지 않은 상품입니다."); }
+                } else {
+                    isProcessingScanRef.current = false;
+                    showAlert("등록되지 않은 상품입니다.");
+                }
             } catch (e) { isProcessingScanRef.current = false; }
         };
         openScanner('modal', onScan, { continuous: true });
-    }, [openScanner, products, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, showAlert, searchByBarcode]);
+    }, [openScanner, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, showAlert, searchByBarcode]);
 
     const handleDragStart = (idx: number) => setDraggedIdx(idx);
     const handleDragEnd = () => { setDraggedIdx(null); setDropIdx(null); };
@@ -290,14 +284,12 @@ const OrderDetailModal: React.FC = () => {
         if (!activeOrder) return;
         setIsSaving(true);
         try {
-            // [저장 로직 수정]
-            // 기존에 저장된(Snapshot) 행사 정보를 덮어쓰지 않고 보존합니다.
-            // 검색이나 스캔을 통해 명시적으로 'Rich Data'(세션)를 불러온 경우에만 갱신합니다.
+            const isLocalMode = dataSourceSettings.newOrder === 'offline';
+
             const itemsWithSnapshot: OrderItem[] = await Promise.all(items.map(async (item) => {
                 let prod = sessionProductsRef.current.get(item.barcode) || products.find(p => p.barcode === item.barcode);
                 
-                // 로컬에도 없고 세션에도 없다면 온라인 조회 시도
-                if (!prod && navigator.onLine) {
+                if (!prod && !isLocalMode && sqlStatus === 'connected') {
                     try { 
                         const onlineProd = await searchByBarcode(item.barcode);
                         if (onlineProd) {
@@ -308,43 +300,37 @@ const OrderDetailModal: React.FC = () => {
                 }
 
                 if (prod) {
-                    // 세션(검색)에서 온 데이터인지 확인 (행사 정보가 온전한지 판단)
                     const isRichData = sessionProductsRef.current.has(item.barcode) || prod.saleStartDate !== undefined;
+                    const formattedName = formatProductDisplayName(item.name || prod.name, prod.spec);
 
-                    // Rich Data인 경우에만 스냅샷 갱신
                     if (isRichData) {
                         const saleActive = isSaleActive(prod.saleStartDate, prod.saleEndDate);
                         return {
                             ...item,
+                            name: formattedName,
                             masterPrice: prod.costPrice,
                             eventPrice: saleActive ? prod.eventCostPrice : undefined,
                             salePrice: saleActive ? prod.salePrice : undefined,
                             saleName: saleActive ? prod.saleName : undefined,
-                            saleStartDate: saleActive ? prod.saleStartDate : undefined, // [수정] 기간 저장
-                            saleEndDate: saleActive ? prod.saleEndDate : undefined,     // [수정] 기간 저장
+                            saleStartDate: saleActive ? prod.saleStartDate : undefined,
+                            saleEndDate: saleActive ? prod.saleEndDate : undefined,
                             price: item.isModified ? item.price : ((saleActive && prod.eventCostPrice && prod.eventCostPrice > 0) ? prod.eventCostPrice : prod.costPrice)
                         };
                     } else {
-                        // 불완전한 로컬 데이터라면, 기존에 저장된 스냅샷(행사 정보)을 그대로 유지합니다.
                         const wasEventItem = item.eventPrice && item.eventPrice > 0;
                         return {
                             ...item,
-                            // 마스터 가격은 로컬 정보로 갱신 (단가 변동 반영)
+                            name: formattedName,
                             masterPrice: prod.costPrice,
-                            
-                            // [중요] 기존 행사 정보 스냅샷 유지
                             eventPrice: item.eventPrice,
                             salePrice: item.salePrice,
                             saleName: item.saleName,
-                            saleStartDate: item.saleStartDate, // [수정] 기존 기간 유지
-                            saleEndDate: item.saleEndDate,     // [수정] 기존 기간 유지
-                            
-                            // 가격 유지 로직: 수동 수정값 > 기존 적용값 > 로컬 마스터값
+                            saleStartDate: item.saleStartDate,
+                            saleEndDate: item.saleEndDate,
                             price: item.isModified ? item.price : (wasEventItem ? item.price : prod.costPrice)
                         };
                     }
                 }
-                // 상품 정보 조회 실패 시 기존 정보 유지
                 return item;
             }));
 

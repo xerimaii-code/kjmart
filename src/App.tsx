@@ -1,11 +1,9 @@
-
-import React, { useState, lazy, Suspense, useMemo, useEffect } from 'react';
-import { AppProvider, useModals, useScanner, useSyncState, useDataActions, useAlert, useMiscUI } from './context/AppContext';
+import React, { useState, lazy, Suspense, useEffect } from 'react';
+import { AppProvider, useModals, useScanner, useSyncState } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import { SpinnerIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
-import { exportToXLS } from './services/dataService';
 import AddItemModal from './components/AddItemModal';
 import EditItemModal from './components/EditItemModal';
 import { IS_DEVELOPER_MODE } from './config';
@@ -182,6 +180,31 @@ const App: React.FC = () => {
                 if (!refreshing) { refreshing = true; window.location.reload(); }
             });
         }
+    }, []);
+
+    // 모바일 크롬 일반 탭에서 실행된 경우에도 첫 터치 시 주소줄이 없는 풀 전체화면으로 자동 전환 시도
+    useEffect(() => {
+        const isStandalone = window.matchMedia('(display-mode: fullscreen)').matches ||
+            window.matchMedia('(display-mode: standalone)').matches ||
+            (window.navigator as any).standalone === true;
+        const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+        if (isStandalone || !isTouchDevice || IS_DEVELOPER_MODE) return;
+
+        const tryEnterFullscreenOnFirstTap = (e: MouseEvent) => {
+            const target = e.target as HTMLElement | null;
+            if (target && target.closest('input, textarea, select')) return;
+
+            const docEl = document.documentElement as any;
+            const reqFs = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
+            if (!document.fullscreenElement && reqFs) {
+                Promise.resolve(reqFs.call(docEl, { navigationUI: 'hide' })).catch(() => {});
+            }
+            document.removeEventListener('click', tryEnterFullscreenOnFirstTap);
+        };
+
+        document.addEventListener('click', tryEnterFullscreenOnFirstTap, { passive: true });
+        return () => document.removeEventListener('click', tryEnterFullscreenOnFirstTap);
     }, []);
 
     useEffect(() => {
