@@ -59,7 +59,7 @@ type ActiveField = 'quantity' | 'cost' | 'selling';
 
 const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd, currentItems = [], onScanNext, timestamp }) => {
     const { uiFeedback } = useDeviceSettings();
-    const { closeScanner, options } = useScanner();
+    const { closeScanner } = useScanner();
     const [isMounted, setIsMounted] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -86,9 +86,18 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     useEffect(() => {
         if (isOpen) {
             setIsMounted(true); setIsSubmitting(false);
+            (window as any).__isReceiveItemModalOpen = true;
+            window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
             initAudio();
             const timer = setTimeout(() => setIsVisible(true), 10);
-            return () => clearTimeout(timer);
+            return () => {
+                clearTimeout(timer);
+                (window as any).__isReceiveItemModalOpen = false;
+                window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
+            };
+        } else {
+            (window as any).__isReceiveItemModalOpen = false;
+            window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
         }
     }, [isOpen]);
 
@@ -114,7 +123,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
         
         setTimeout(() => {
             if (isMounted) onClose();
-        }, 250);
+        }, 300);
     };
 
     const handleSafeSkip = () => {
@@ -125,36 +134,28 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
         setTimeout(() => {
             if (isMounted) {
                 onClose();
-                if (onScanNext) setTimeout(onScanNext, 150);
+                if (onScanNext) setTimeout(onScanNext, 200);
             }
-        }, 250);
+        }, 300);
     };
 
-    const handleAddItemAction = (isReturn: boolean, shouldScanNext: boolean, shouldSaveBatchAndExit: boolean = false) => {
+    const handleAddItemAction = (isReturn: boolean, shouldScanNext: boolean) => {
         if (isSubmitting || !isQuantityValid) return;
         setIsSubmitting(true);
         setIsVisible(false);
-
-        const saveAndExitCallback = options?.onSaveAndExit;
 
         setTimeout(() => {
             const qty = isReturn ? -Math.abs(Number(quantity)) : Number(quantity);
             onAdd({ barcode: product.barcode, name: displayName, costPrice: Number(costPrice), sellingPrice: Number(sellingPrice), quantity: qty, isNew: true });
             
-            if (shouldSaveBatchAndExit && saveAndExitCallback) {
-                if (onScanNext) closeScanner();
-                onClose();
-                setTimeout(() => {
-                    saveAndExitCallback();
-                }, 120);
-            } else if (shouldScanNext && onScanNext) { 
+            if (shouldScanNext && onScanNext) { 
                 onClose(); 
                 setTimeout(onScanNext, 150); 
             } else { 
                 if (onScanNext) closeScanner(); 
                 onClose(); 
             }
-        }, 220);
+        }, 300);
     };
 
     const KeypadButton = ({ onClick, className, children, disabled }: any) => (
@@ -182,10 +183,10 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
                     <KeypadButton onClick={handleSafeSkip} className="bg-white border border-gray-300 text-gray-500 h-11"><ChevronRightIcon className="w-4 h-4 mr-1" />스킵</KeypadButton>
                 </div>
                 <div className="grid grid-cols-2 gap-1">
-                    <KeypadButton onClick={() => handleAddItemAction(true, !!onScanNext, false)} disabled={!isQuantityValid} className="bg-red-50 text-red-500 border border-red-200 h-11"><ReturnBoxIcon className="w-4 h-4 mr-1" />반품</KeypadButton>
-                    <KeypadButton onClick={() => handleAddItemAction(false, false, !!onScanNext)} disabled={!isQuantityValid} className="bg-emerald-50 border border-emerald-300 text-emerald-700 h-11"><SaveIcon className="w-4 h-4 mr-1" />{onScanNext ? '저장&종료' : '추가&종료'}</KeypadButton>
+                    <KeypadButton onClick={() => handleAddItemAction(true, !!onScanNext)} disabled={!isQuantityValid} className="bg-red-50 text-red-500 border border-red-200 h-11"><ReturnBoxIcon className="w-4 h-4 mr-1" />반품</KeypadButton>
+                    <KeypadButton onClick={() => handleAddItemAction(false, false)} disabled={!isQuantityValid} className="bg-white border border-blue-200 text-blue-700 h-11"><SaveIcon className="w-4 h-4 mr-1" />추가&종료</KeypadButton>
                 </div>
-                {onScanNext && <KeypadButton onClick={() => handleAddItemAction(false, true, false)} disabled={!isQuantityValid} className={`h-16 mt-1 ${isUnregistered ? 'bg-orange-600' : 'bg-blue-600'} text-white text-lg sm:text-xl active:bg-blue-700`}><BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />추가 & 스캔</KeypadButton>}
+                {onScanNext && <KeypadButton onClick={() => handleAddItemAction(false, true)} disabled={!isQuantityValid} className={`h-16 mt-1 ${isUnregistered ? 'bg-orange-600' : 'bg-blue-600'} text-white text-lg sm:text-xl active:bg-blue-700`}><BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />추가 & 스캔</KeypadButton>}
             </div>
             <div className="grid grid-cols-3 gap-1 flex-grow min-h-0">
                 {[7, 8, 9, 4, 5, 6, 1, 2, 3].map(num => (
@@ -303,21 +304,8 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const backdropClass = onScanNext ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex flex-col items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={(e) => { if(e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
+        <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={(e) => { if(e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
             <KeypadLayout layoutId="receive_modal_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
-            {onScanNext && options?.onSaveAndExit && (
-                <div className="w-[85%] max-w-[20rem] mt-2 z-[150] safe-area-pb" onClick={e => e.stopPropagation()}>
-                    <button
-                        type="button"
-                        disabled={!isQuantityValid || isSubmitting}
-                        onClick={() => handleAddItemAction(false, false, true)}
-                        className="w-full py-3 px-5 rounded-2xl font-extrabold text-base flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-400/50 disabled:opacity-50"
-                    >
-                        <SaveIcon className="w-5 h-5" />
-                        <span>저장 & 종료 (마지막 스캔 포함 저장)</span>
-                    </button>
-                </div>
-            )}
         </div>,
         document.body
     );

@@ -22,8 +22,6 @@ const getGlobalAudioCtx = () => {
 
 /**
  * 카메라 스캔 시 빛 반사/흔들림으로 인해 잘못 읽힌(오인식) 바코드인지 판별합니다.
- * - 제어문자/특수기호 포함 또는 4자리 미만의 깨진 조각
- * - 8자리/12자리/13자리 표준 숫자 바코드인데 Modulo-10 체크섬이 틀린 경우 (카메라 오인식의 90% 이상 차지)
  */
 function checkScannedBarcodeValidity(raw: string): { valid: boolean; reason?: string } {
     const code = (raw || '').trim();
@@ -83,7 +81,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     const isHandlingResult = useRef(false); 
     const isMountedRef = useRef(false);
     const isLongPressRef = useRef(false);
-    // ZXing(소프트웨어 디코더) 사용 시 흔들림에 의한 1프레임 오인식을 막기 위한 이전 프레임 후보 기록
     const lastCandidateRef = useRef<{ code: string; time: number } | null>(null);
     
     const [engineMode, setEngineMode] = useState<'gpu' | 'zxing' | 'checking'>('checking');
@@ -192,7 +189,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         const res = scanSettings.scanResolution === '480p' ? { w: 854, h: 480 } : { w: 1280, h: 720 };
         const fpsConfig = scanSettings.scanFps === 'auto' ? { ideal: 30 } : { ideal: scanSettings.scanFps };
         
-        // 연속 자동 초점(continuous autofocus) 힌트 추가로 근접 바코드 스캔 정확도 향상
         const constraintsBase: any = {
             width: { ideal: res.w }, 
             height: { ideal: res.h }, 
@@ -250,7 +246,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                 return;
             }
 
-            // 하드웨어 연속 초점(continuous) 및 노출 보정 지원 시 트랙에 직접 적용
             try {
                 const track = stream.getVideoTracks()[0];
                 const caps = (track as any)?.getCapabilities?.();
@@ -310,8 +305,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
 
         const validity = checkScannedBarcodeValidity(barcode);
 
-        // 만약 체크섬 불일치이거나 비표준 짧은 코드인데 1프레임만 튀어서 읽힌 경우,
-        // 400ms 이내에 동일 코드가 2번 연속 읽혔는지 확인하여 순간적인 초점 흔들림 오인식을 1차 차단합니다.
         if (!validity.valid || (engineMode === 'zxing' && barcode.length !== 13 && barcode.length !== 8)) {
             const now = Date.now();
             if (!lastCandidateRef.current || lastCandidateRef.current.code !== barcode || now - lastCandidateRef.current.time > 450) {
@@ -326,7 +319,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         stopScanningLoop();
 
         if (!validity.valid) {
-            // 형식에 어긋나거나 체크섬이 깨진 오인식 바코드일 때 작은 미니 알림창([재스캔] / [계속] / [취소]) 표시
             playBeep(true);
             setInvalidScanAlert({
                 isOpen: true,
@@ -340,7 +332,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         acceptValidBarcode(barcode);
     };
 
-    // 미니 알림창에서 [재스캔] 클릭 시: 카메라 스트림을 끄지 않고 즉시 스캔 재개
     const handleRescanFromAlert = () => {
         setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
         isHandlingResult.current = false;
@@ -351,14 +342,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         }, 80);
     };
 
-    // 미니 알림창에서 [계속(그대로 사용)] 클릭 시: 비표준 자체 코드 등으로 간주하고 작업 계속 진행
     const handleContinueWithInvalidBarcode = () => {
         const codeToUse = invalidScanAlert.barcode;
         setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
         acceptValidBarcode(codeToUse);
     };
 
-    // 미니 알림창에서 [취소] 클릭 시: 알림창을 닫고 대기 상태(또는 스캐너 종료)로 복귀
     const handleCancelFromAlert = () => {
         setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
         isHandlingResult.current = false;
@@ -367,7 +356,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         }
     };
 
-    // 스캐너 하단 중앙 [저장 & 종료] 버튼 클릭 핸들러
     const handleSaveAndExitClick = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -598,26 +586,26 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                 </div>
             </div>
 
-            {/* 화면 하단 중앙: 발주/입고 스캔 작업 중 바로 전표를 저장하고 목록으로 돌아가는 [저장 & 종료] 버튼 */}
+            {/* 카메라 스캔 모드에서만 하단 중앙에 표시되는 소형 [저장 & 종료] 버튼 (메인 Touch to Scan 버튼보다 작고 아담한 크기) */}
             {onSaveAndExit && !isPaused && !invalidScanAlert.isOpen && (
-                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-[2400] w-[85%] max-w-[20rem] pointer-events-auto safe-area-pb">
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[2400] pointer-events-auto safe-area-pb">
                     <button
                         type="button"
                         onClick={handleSaveAndExitClick}
                         disabled={saveAndExitCount <= 0}
-                        className={`w-full h-13 py-3.5 px-5 rounded-2xl font-extrabold text-base flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 border ${
+                        className={`h-10 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95 border whitespace-nowrap ${
                             saveAndExitCount > 0
-                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-400/50'
+                                ? 'bg-emerald-600/95 hover:bg-emerald-700 text-white border-emerald-400/50'
                                 : 'bg-black/50 text-white/40 border-white/10 cursor-not-allowed'
                         }`}
                     >
-                        <SaveIcon className="w-5 h-5" />
-                        <span>저장 & 종료 {saveAndExitCount > 0 ? `(${saveAndExitCount}건)` : ''}</span>
+                        <SaveIcon className="w-4 h-4" />
+                        <span>저장 & 종료{saveAndExitCount > 0 ? ` (${saveAndExitCount})` : ''}</span>
                     </button>
                 </div>
             )}
 
-            {/* 카메라 오인식 / 바코드 형식 오류 시 표시되는 소형 확인창 (카메라와 충돌 없이 재스캔/계속/취소 제어) */}
+            {/* 카메라 오인식 / 바코드 형식 오류 시 표시되는 소형 확인창 */}
             {invalidScanAlert.isOpen && (
                 <div
                     className="fixed inset-0 bg-black/70 z-[2600] flex items-center justify-center p-4 animate-fade-in-down pointer-events-auto"

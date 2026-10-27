@@ -69,8 +69,21 @@ const AppContent: React.FC = () => {
      } = useModals();
     const { isScannerOpen, onScanSuccess, closeScanner, options } = useScanner();
     const { isAlertOpen } = useAlert();
+    const [isReceiveItemOpen, setIsReceiveItemOpen] = useState<boolean>(() => !!(window as any).__isReceiveItemModalOpen);
 
-    const isAnyInputModalOpen = isAlertOpen || !!addItemModalProps || !!editItemModalProps || !!isClearHistoryModalOpen || !!isDeliveryModalOpen || window.history.state?.modal === 'receiveItem' || window.history.state?.modal === 'auditItem' || window.history.state?.modal === 'continuousEventAdd';
+    useEffect(() => {
+        const syncModalFlag = () => {
+            setIsReceiveItemOpen(!!(window as any).__isReceiveItemModalOpen);
+        };
+        window.addEventListener('kjmart-modal-change', syncModalFlag);
+        window.addEventListener('popstate', syncModalFlag);
+        return () => {
+            window.removeEventListener('kjmart-modal-change', syncModalFlag);
+            window.removeEventListener('popstate', syncModalFlag);
+        };
+    }, []);
+
+    const isAnyInputModalOpen = isAlertOpen || isReceiveItemOpen || !!addItemModalProps || !!editItemModalProps || !!isClearHistoryModalOpen || !!isDeliveryModalOpen || window.history.state?.modal === 'receiveItem' || window.history.state?.modal === 'auditItem' || window.history.state?.modal === 'continuousEventAdd';
     
     return (
         <div className="h-full w-full flex flex-col bg-transparent">
@@ -157,7 +170,6 @@ const App: React.FC = () => {
 
     const promptUserForUpdate = useCallback((worker: ServiceWorker) => {
         waitingWorkerRef.current = worker;
-        // 이미 '계속 사용'을 눌러 다음 포그라운드 업데이트로 예약한 상태가 아닐 때만 선택창 표시
         if (!deferUpdateToNextForegroundRef.current) {
             setIsUpdateModalOpen(true);
         }
@@ -209,7 +221,6 @@ const App: React.FC = () => {
                 });
             };
 
-            // React 18 마운트 시점에 이미 window.onload가 지나간 경우 즉시 등록하여 PWA 설치 요건 누락 방지
             if (document.readyState === 'complete' || document.readyState === 'interactive') {
                 registerSW();
             } else {
@@ -229,7 +240,6 @@ const App: React.FC = () => {
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                // 사용자가 이전에 '계속 사용'을 선택했고 대기 중인 업데이트가 있다면, 포그라운드 복귀 시 즉시 자동 업데이트
                 if (deferUpdateToNextForegroundRef.current && (waitingWorkerRef.current || registration?.waiting)) {
                     applyUpdateNow();
                     return;
