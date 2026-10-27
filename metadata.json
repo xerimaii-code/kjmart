@@ -1,7 +1,7 @@
 {
   "name": "KJ Mart",
   "short_name": "KJ Mart",
-  "description": "발주 관리 및 재고 관리를 위한 어플리케이션으로, 엑셀 파일로 기초 자료를 등록하고 바코드 스캔을 통해 신규 발주를 생성하며, 발주 내역을 관리하고 SMS, XLS로 내보낼 수 있는 주문 관리 애플리케이션입니다.",
+  "description": "경진마트 발주·입고·재고·행사 통합 관리 웹앱",
   "icons": [
     {
       "src": "/icons/icon192.png",
@@ -35,11 +35,9 @@
   "display": "standalone",
   "display_override": [
     "standalone",
+    "fullscreen",
     "minimal-ui"
   ],
   "background_color": "#f8fafc",
-  "theme_color": "#f8fafc",
-  "requestFramePermissions": [
-    "camera"
-  ]
+  "theme_color": "#f8fafc"
 }

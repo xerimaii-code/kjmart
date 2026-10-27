@@ -98,96 +98,127 @@
           will-change: transform, opacity;
         }
         @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(16px); }
-            to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
         }
         .animate-fade-in-up {
             animation: fadeInUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
             will-change: transform, opacity;
         }
-        
-        /* Bouncy card entrance animation */
-        @keyframes card-enter {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        @keyframes cardEnter {
+          from { opacity: 0; transform: scale(0.97) translateY(8px); }
+          to { opacity: 1; transform: scale(1) translateY(0px); }
         }
         .animate-card-enter {
-            animation: card-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+            animation: cardEnter 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
             will-change: transform, opacity;
         }
 
-        /* Sale Ribbon Style */
-        .sale-ribbon {
-            position: absolute;
-            top: 12px;
-            right: -34px;
-            transform: rotate(45deg);
-            background-color: rgb(225 29 72); /* rose-600 */
-            color: white;
-            padding: 2px 32px;
-            font-size: 10px;
-            font-weight: 700;
-            line-height: 1.5;
-            text-align: center;
-            text-transform: uppercase;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            z-index: 1;
-            letter-spacing: 0.05em;
+        .text-shadow { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+
+        /* Scanner Viewfinder Styles */
+        .scanner-guide-hole {
+            height: 75px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+            border-radius: 1.25rem;
+            border: 3px solid rgba(255, 255, 255, 0.8);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .scanner-guide-hole.scanning {
+            border-color: #ef4444; /* red-500 */
+        }
+        .scanner-guide-hole.success {
+            border-color: #22c55e; /* green-500 */
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5), 0 0 25px #22c55e;
+        }
+        .scanner-guide-hole.idle {
+            border-color: rgba(255, 255, 255, 0.4);
+            border-style: dashed;
         }
         
-        /* Drag and Drop styles */
-        .dragging {
-            opacity: 0.6;
-            background: rgb(var(--primary-light-rgb));
-            box-shadow: 0 10px 15px -3px rgba(var(--shadow-color-rgb), 0.1), 0 4px 6px -2px rgba(var(--shadow-color-rgb), 0.05);
-            transform: scale(1.02);
-            border: 1px solid rgba(var(--primary-rgb), 0.3);
+        .safe-area-pb {
+            padding-bottom: calc(1rem + env(safe-area-inset-bottom));
         }
-        .drag-over-placeholder {
-            height: 60px;
-            background-color: rgba(var(--primary-rgb), 0.08);
-            border: 2px dashed rgba(var(--primary-rgb), 0.4);
-            border-radius: 0.75rem;
-            margin: 4px 0;
-            transition: all 0.2s ease-in-out;
+
+        /* Active feedback */
+        .active-scale:active {
+            transform: scale(0.98);
         }
     </style>
 
+    <script>
+      // 1. PWA 앱 설치 프롬프트(beforeinstallprompt) 조기 캡처 (상단 헤더의 [앱 설치] 버튼에서 즉시 실행 가능하도록 보관)
+      window.__deferredInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.__deferredInstallPrompt = e;
+        window.dispatchEvent(new CustomEvent('kjmart-install-available'));
+      });
+      window.addEventListener('appinstalled', function() {
+        window.__deferredInstallPrompt = null;
+        window.dispatchEvent(new CustomEvent('kjmart-app-installed'));
+      });
 
+      // 2. 전체화면 처리:
+      // - [앱 설치(WebAPK)]로 실행된 경우(standalone): 시작부터 주소줄이 완전히 없으며 안드로이드 하단 종료 팁도 뜨지 않으므로 별도 requestFullscreen 불필요
+      // - [바로가기 만들기] 또는 일반 브라우저 탭으로 실행된 경우: 우측 상단 버튼을 일일이 누르지 않아도 첫 터치 및 백그라운드 복귀 후 터치 시 자동으로 전체화면 전환
+      (function() {
+        window.__userExitedFullscreen = false;
+
+        function isStandaloneMode() {
+          return window.matchMedia('(display-mode: standalone)').matches ||
+                 window.matchMedia('(display-mode: fullscreen)').matches ||
+                 window.navigator.standalone === true;
+        }
+
+        function tryAutoFullscreen() {
+          if (isStandaloneMode() || window.__userExitedFullscreen) return;
+          var docEl = document.documentElement;
+          var isFs = document.fullscreenElement || document.webkitFullscreenElement;
+          if (!isFs) {
+            var req = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
+            if (req) {
+              try {
+                var p = req.call(docEl, { navigationUI: 'hide' });
+                if (p && p.catch) p.catch(function() {});
+              } catch (e) {}
+            }
+          }
+        }
+
+        // 일반 탭/바로가기 모드일 때 첫 터치 시 자동 전체화면 진입 (백그라운드 복귀 후에도 자동 재진입)
+        document.addEventListener('touchend', tryAutoFullscreen, { passive: true });
+        document.addEventListener('click', tryAutoFullscreen, { passive: true });
+        document.addEventListener('visibilitychange', function() {
+          if (document.visibilityState === 'visible') {
+            window.__userExitedFullscreen = false;
+          }
+        });
+      })();
+    </script>
+    
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script type="importmap">
 {
   "imports": {
-    "vite": "https://aistudiocdn.com/vite@^7.1.11",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.0.4",
-    "react": "https://aistudiocdn.com/react@^18.2.0",
-    "react/": "https://aistudiocdn.com/react@^18.2.0/",
-    "firebase/": "https://aistudiocdn.com/firebase@^12.4.0/",
-    "react-dom": "https://aistudiocdn.com/react-dom@^18.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^18.2.0/",
-    "react-dom/client": "https://aistudiocdn.com/react-dom@^18.2.0/client",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "@vercel/node": "https://aistudiocdn.com/@vercel/node@^5.5.8",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/",
+    "@vercel/node": "https://aistudiocdn.com/@vercel/node@^5.5.6",
     "mssql": "https://aistudiocdn.com/mssql@^12.1.0",
-    "@capacitor/cli": "https://esm.sh/@capacitor/cli@^8.0.0",
-    "@capacitor/app": "https://esm.sh/@capacitor/app@^8.0.0",
-    "@capacitor/core": "https://esm.sh/@capacitor/core@^8.0.1",
-    "@capacitor/filesystem": "https://esm.sh/@capacitor/filesystem@^8.0.0"
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.1",
+    "vite": "https://aistudiocdn.com/vite@^7.2.2",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "html5-qrcode": "https://aistudiocdn.com/html5-qrcode@^2.3.8",
+    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.0"
   }
 }
 </script>
 </head>
 <body class="antialiased">
-    <div id="root" class="h-full w-full bg-transparent">
-        <div style="display:flex; align-items:center; justify-content:center; height:100%; font-weight: 600; color: #64748b;">
-            앱 로딩 중...
-        </div>
-    </div>
-    <script type="module" src="/index.tsx"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
 </body>
 </html>
