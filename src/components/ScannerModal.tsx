@@ -102,6 +102,21 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     const [isProcessingSuccess, setIsProcessingSuccess] = useState(false);
     const [timeLeft, setTimeLeft] = useState(8);
     const [currentInterval, setCurrentInterval] = useState<number>(0);
+    const [liveCount, setLiveCount] = useState<number>(() => Number((window as any).__kjScannerItemCount) || 0);
+
+    useEffect(() => {
+        setLiveCount(saveAndExitCount);
+        (window as any).__kjScannerItemCount = saveAndExitCount;
+    }, [saveAndExitCount, isOpen]);
+
+    useEffect(() => {
+        const handleCountUpdate = () => {
+            setLiveCount(Number((window as any).__kjScannerItemCount) || 0);
+        };
+        window.addEventListener('kjmart-scanner-count', handleCountUpdate);
+        return () => window.removeEventListener('kjmart-scanner-count', handleCountUpdate);
+    }, []);
+    const effectiveSaveCount = Math.max(saveAndExitCount, liveCount);
 
     // 카메라 오인식 / 정식 규격 외(자체코드) 스캔 시 확인창 상태
     const [invalidScanAlert, setInvalidScanAlert] = useState<{
@@ -653,15 +668,15 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                     <button
                         type="button"
                         onClick={handleSaveAndExitClick}
-                        disabled={saveAndExitCount <= 0}
+                        disabled={effectiveSaveCount <= 0}
                         className={`h-10 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95 border whitespace-nowrap ${
-                            saveAndExitCount > 0
+                            effectiveSaveCount > 0
                                 ? 'bg-emerald-600/95 hover:bg-emerald-700 text-white border-emerald-400/50'
                                 : 'bg-black/50 text-white/40 border-white/10 cursor-not-allowed'
                         }`}
                     >
                         <SaveIcon className="w-4 h-4" />
-                        <span>저장 & 종료{saveAndExitCount > 0 ? ` (${saveAndExitCount})` : ''}</span>
+                        <span>저장 & 종료{effectiveSaveCount > 0 ? ` (${effectiveSaveCount})` : ''}</span>
                     </button>
                 </div>
             )}

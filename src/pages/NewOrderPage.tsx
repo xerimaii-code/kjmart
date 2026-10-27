@@ -179,6 +179,8 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleItemsChange = useCallback((newItems: OrderItem[]) => {
         itemsRef.current = newItems;
+        (window as any).__kjScannerItemCount = newItems.length;
+        window.dispatchEvent(new CustomEvent('kjmart-scanner-count'));
     }, []);
 
     const {

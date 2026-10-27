@@ -123,9 +123,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
         if (isSubmitting) return;
         setIsSubmitting(true);
         onClose();
-        if (!isScannerOpen && onScanNext) {
-            setTimeout(onScanNext, 50);
-        }
+        if (onScanNext) onScanNext();
     };
 
     const handleAddItemAction = (isReturn: boolean, shouldScanNext: boolean) => {
@@ -137,9 +135,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
         
         if (shouldScanNext && onScanNext) { 
             onClose(); 
-            if (!isScannerOpen) {
-                setTimeout(onScanNext, 50); 
-            }
+            onScanNext();
         } else { 
             if (onScanNext) closeScanner(); 
             onClose(); 

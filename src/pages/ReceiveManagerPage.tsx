@@ -491,6 +491,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             const newItem: ReceivingItem = { ...itemData, uniqueId: Date.now() + Math.random() };
             const updatedItems = [...prev, newItem];
             latestItemsRef.current = updatedItems;
+            (window as any).__kjScannerItemCount = updatedItems.length;
+            window.dispatchEvent(new CustomEvent('kjmart-scanner-count'));
 
             if (!editingBatchRef.current) {
                 saveDraft({
@@ -510,6 +512,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         setCurrentItems(prev => {
             const updatedItems = prev.filter(i => i.uniqueId !== uniqueId);
             latestItemsRef.current = updatedItems;
+            (window as any).__kjScannerItemCount = updatedItems.length;
+            window.dispatchEvent(new CustomEvent('kjmart-scanner-count'));
             if (!editingBatchRef.current) {
                 saveDraft({
                     currentDate: latestDateRef.current,

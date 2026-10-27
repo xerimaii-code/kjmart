@@ -177,6 +177,8 @@ const OrderDetailModal: React.FC = () => {
 
     const handleItemsChange = useCallback((newItems: OrderItem[]) => {
         itemsRef.current = newItems;
+        (window as any).__kjScannerItemCount = newItems.length;
+        window.dispatchEvent(new CustomEvent('kjmart-scanner-count'));
     }, []);
 
     const { items, addOrUpdateItem, updateItem, removeItem, reorderItems, resetItems, totalAmount } = useOrderManager({

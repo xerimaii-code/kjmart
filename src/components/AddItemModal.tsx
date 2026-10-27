@@ -106,9 +106,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         if (isSubmitting) return;
         setIsSubmitting(true);
         onClose();
-        if (!isScannerOpen && onNextScan) {
-            setTimeout(onNextScan, 50);
-        }
+        if (onNextScan) onNextScan();
     };
 
     const handleConfirmAdd = (shouldCloseScanner: boolean, shouldScanNext: boolean) => {
@@ -117,9 +115,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         onAdd({ quantity: Number(quantityStr), unit, memo: memo.trim() });
         if (shouldCloseScanner) closeScanner();
         onClose();
-        if (shouldScanNext && !isScannerOpen && onNextScan) {
-            setTimeout(onNextScan, 50);
-        }
+        if (shouldScanNext && onNextScan) onNextScan();
     };
 
     const KeypadButton = ({ onClick, className, children, disabled }: any) => (
