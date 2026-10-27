@@ -800,7 +800,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
 
             {addItemModalProps.isOpen && (
                 <ReceiveItemModal
-                    key={`receive-${addItemModalProps.product?.barcode}-${addItemModalProps.scanTimestamp || Date.now()}`}
+                    key={`receive-${addItemModalProps.product?.barcode || 'item'}`}
                     isOpen={true}
                     product={addItemModalProps.product}
                     currentItems={currentItems}

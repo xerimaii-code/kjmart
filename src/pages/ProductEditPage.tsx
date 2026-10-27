@@ -206,8 +206,9 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [checksumModal, setChecksumModal] = useState<{
         isOpen: boolean;
         mode: 'set_barcode' | 'save_product';
+        source: 'scan' | 'input';
         analysis: BarcodeChecksumAnalysis;
-    }>({ isOpen: false, mode: 'set_barcode', analysis: { status: 'empty', original: '', corrected: '' } });
+    }>({ isOpen: false, mode: 'set_barcode', source: 'input', analysis: { status: 'empty', original: '', corrected: '' } });
 
     const draftRestoredRef = useRef(false);
     const lastAppliedInitialBarcodeRef = useRef<string | undefined>(undefined);
@@ -524,7 +525,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }, 120);
     }, [isCategoryFixed, resetForm, showToast]);
 
-    const performSearch = useCallback(async (code: string) => {
+    const performSearch = useCallback(async (code: string, source: 'scan' | 'input' = 'input') => {
         if (sqlStatus !== 'connected') {
             showAlert('오프라인 상태에서는 상품 등록 및 수정을 사용할 수 없습니다.');
             return;
@@ -534,20 +535,22 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         try {
             const results = await searchProductsForEdit(trimmed);
             if (results && results.length > 0) {
+                setSearchInputMode('numeric');
                 if (results.length === 1) populateProductData(results[0]);
                 else { setSearchResults(results); setIsSelectionModalOpen(true); }
             } else {
-                // 미등록 바코드인 경우: 검색 버튼(또는 스캔)을 누른 즉시 체크섬을 검사하여 교정된 바코드로 세팅할지 확인!
-                if (/^[0-9A-Za-z-]+$/.test(trimmed)) {
+                // 미등록 바코드인 경우: 체크섬 불일치(checksum_mismatch)뿐만 아니라 정식 바코드 규칙을 벗어난 코드(non_standard)도 확인창을 거쳐 진행
+                if (/^[0-9A-Za-z-_]+$/.test(trimmed)) {
                     const analysis = analyzeBarcodeChecksum(trimmed);
-                    if (analysis.status === 'checksum_mismatch') {
-                        // 체크섬이 맞지 않으면 즉시 체크섬 교정 바코드 세팅 확인 모달 표시
+                    if (analysis.status === 'checksum_mismatch' || analysis.status === 'non_standard') {
                         setChecksumModal({
                             isOpen: true,
                             mode: 'set_barcode',
+                            source,
                             analysis,
                         });
                     } else {
+                        setSearchInputMode('numeric');
                         applyNewBarcodeToForm(trimmed, '등록되지 않은 바코드입니다. 신규 등록합니다.');
                     }
                 } else {
@@ -564,7 +567,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         }
         openScanner('modal', (code) => {
             setSearchInput(code);
-            performSearch(code);
+            performSearch(code, 'scan');
         }, false);
     };
 
@@ -664,6 +667,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
         setChecksumModal({
             isOpen: true,
             mode: 'save_product',
+            source: 'input',
             analysis,
         });
     };
@@ -704,33 +708,36 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                         </div>
                     )}
 
-                    <form onSubmit={(e) => { e.preventDefault(); performSearch(searchInput); }} className="flex gap-1 items-stretch">
+                    <form onSubmit={(e) => { e.preventDefault(); performSearch(searchInput, 'input'); }} className="flex gap-1 items-stretch">
                         <div className="relative flex-1 flex items-center">
                             <input
                                 ref={searchInputRef}
                                 type="text"
                                 inputMode={searchInputMode}
+                                lang={searchInputMode === 'text' ? 'ko' : undefined}
                                 disabled={isOffline}
                                 value={searchInput}
-                                onFocus={() => {
-                                    // 처음 검색칸 터치 시 숫자 키보드가 기본으로 뜨도록 처리
-                                    if (!searchInput.trim()) setSearchInputMode('numeric');
-                                }}
                                 onChange={(e) => setSearchInput(e.target.value)}
-                                placeholder="바코드 입력 (우측 가/123 전환)"
-                                className="w-full h-9 pl-2 pr-11 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm disabled:bg-gray-100"
+                                placeholder={searchInputMode === 'numeric' ? '바코드 숫자 입력 (우측 한글 전환)' : '상품명/바코드 한글 입력'}
+                                className="w-full h-9 pl-2 pr-14 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm disabled:bg-gray-100"
                             />
                             <button
                                 type="button"
                                 disabled={isOffline}
-                                onClick={() => {
+                                onPointerDown={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     setSearchInputMode(prev => prev === 'numeric' ? 'text' : 'numeric');
-                                    setTimeout(() => searchInputRef.current?.focus(), 30);
+                                    setTimeout(() => searchInputRef.current?.focus(), 20);
                                 }}
-                                className="absolute right-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-600 border border-slate-200 active:bg-slate-200"
-                                title="숫자/문자 키보드 전환"
+                                className={`absolute right-1 top-1/2 -translate-y-1/2 px-2 py-1 text-[11px] font-extrabold rounded border active:scale-95 transition-colors ${
+                                    searchInputMode === 'numeric'
+                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}
+                                title="숫자/한글 키보드 전환"
                             >
-                                {searchInputMode === 'numeric' ? '가' : '123'}
+                                {searchInputMode === 'numeric' ? '한글' : '숫자'}
                             </button>
                         </div>
                         <button type="submit" disabled={isOffline} className="w-12 h-9 flex items-center justify-center text-white bg-blue-600 rounded-md hover:bg-blue-700 active:scale-95 shadow-sm disabled:bg-gray-400"><SearchIcon className="w-5 h-5" /></button>
@@ -903,17 +910,22 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                         <h3 className="text-lg font-extrabold text-slate-800">비표준(자체) 바코드 확인</h3>
                                     </div>
                                     <p className="text-xs text-slate-600 text-center leading-relaxed">
-                                        표준(8/12/13자리) 체크섬 대상이 아닌 <strong>체크섬 미적용 코드</strong>입니다. 아래 정보로 저장하시겠습니까?
+                                        정식 바코드 규칙(8/12/13자리)을 벗어난 <strong>비표준 코드({checksumModal.analysis.original.length}자리)</strong>입니다.<br />
+                                        {checksumModal.mode === 'set_barcode'
+                                            ? '자체코드로 처리하여 계속 입력하시겠습니까?'
+                                            : '자체코드로 처리하여 저장하시겠습니까?'}
                                     </p>
                                     <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1.5 text-xs">
                                         <div className="flex justify-between items-center">
-                                            <span className="font-bold text-slate-500">바코드 ({checksumModal.analysis.original.length}자리)</span>
-                                            <span className="font-mono font-extrabold text-slate-800 text-sm">{checksumModal.analysis.original}</span>
+                                            <span className="font-bold text-slate-500">입력된 바코드 ({checksumModal.analysis.original.length}자리)</span>
+                                            <span className="font-mono font-extrabold text-rose-600 text-base">{checksumModal.analysis.original}</span>
                                         </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="font-bold text-slate-500">상품명</span>
-                                            <span className="font-bold text-slate-800 truncate max-w-[180px]">{productName}</span>
-                                        </div>
+                                        {checksumModal.mode === 'save_product' && (
+                                            <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                                                <span className="font-bold text-slate-500">상품명</span>
+                                                <span className="font-bold text-slate-800 truncate max-w-[180px]">{productName}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </>
                             ) : (
@@ -958,27 +970,85 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                             ? `체크섬 수정하여 세팅 (${checksumModal.analysis.corrected})`
                                             : `체크섬 수정 후 저장 (${checksumModal.analysis.corrected})`}
                                     </button>
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-3 gap-1.5">
                                         <button
                                             type="button"
-                                            onClick={() => setChecksumModal(prev => ({ ...prev, isOpen: false }))}
-                                            className="py-2.5 px-3 rounded-xl font-bold text-xs text-slate-700 bg-gray-200 hover:bg-gray-300 active:scale-95 transition-transform"
+                                            onClick={() => {
+                                                const src = checksumModal.source;
+                                                setChecksumModal(prev => ({ ...prev, isOpen: false }));
+                                                if (src === 'scan') {
+                                                    setTimeout(() => handleScan(), 80);
+                                                } else {
+                                                    setTimeout(() => {
+                                                        searchInputRef.current?.focus();
+                                                        searchInputRef.current?.select();
+                                                    }, 50);
+                                                }
+                                            }}
+                                            className="py-2.5 px-2 rounded-xl font-bold text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 active:scale-95 transition-transform"
                                         >
-                                            취소
+                                            {checksumModal.source === 'scan' ? '다시 스캔' : '다시 입력'}
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => {
                                                 if (checksumModal.mode === 'set_barcode') {
                                                     setChecksumModal(prev => ({ ...prev, isOpen: false }));
-                                                    applyNewBarcodeToForm(checksumModal.analysis.original, `입력 바코드[${checksumModal.analysis.original}] 그대로 세팅되었습니다.`);
+                                                    applyNewBarcodeToForm(checksumModal.analysis.original, `자체/원본 바코드[${checksumModal.analysis.original}]로 세팅되었습니다.`);
                                                 } else {
                                                     executeSaveWithBarcode(checksumModal.analysis.original);
                                                 }
                                             }}
-                                            className="py-2.5 px-3 rounded-xl font-bold text-xs text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 active:scale-95 transition-transform"
+                                            className="py-2.5 px-2 rounded-xl font-bold text-xs text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 active:scale-95 transition-transform"
                                         >
-                                            {checksumModal.mode === 'set_barcode' ? '입력값 그대로 세팅' : '입력값 그대로 저장'}
+                                            {checksumModal.mode === 'set_barcode' ? '계속 입력' : '그대로 저장'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setChecksumModal(prev => ({ ...prev, isOpen: false }))}
+                                            className="py-2.5 px-2 rounded-xl font-bold text-xs text-slate-600 bg-gray-200 hover:bg-gray-300 active:scale-95 transition-transform"
+                                        >
+                                            취소
+                                        </button>
+                                    </div>
+                                </>
+                            ) : checksumModal.analysis.status === 'non_standard' && checksumModal.mode === 'set_barcode' ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setChecksumModal(prev => ({ ...prev, isOpen: false }));
+                                            applyNewBarcodeToForm(checksumModal.analysis.original, `자체코드[${checksumModal.analysis.original}]로 세팅되었습니다.`);
+                                        }}
+                                        className="w-full py-2.5 px-4 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm active:scale-95 transition-transform"
+                                    >
+                                        계속 입력 (자체코드로 세팅)
+                                    </button>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const src = checksumModal.source;
+                                                setChecksumModal(prev => ({ ...prev, isOpen: false }));
+                                                if (src === 'scan') {
+                                                    setTimeout(() => handleScan(), 80);
+                                                } else {
+                                                    setTimeout(() => {
+                                                        searchInputRef.current?.focus();
+                                                        searchInputRef.current?.select();
+                                                    }, 50);
+                                                }
+                                            }}
+                                            className="py-2.5 px-3 rounded-xl font-bold text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 active:scale-95 transition-transform"
+                                        >
+                                            {checksumModal.source === 'scan' ? '다시 스캔' : '다시 입력'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setChecksumModal(prev => ({ ...prev, isOpen: false }))}
+                                            className="py-2.5 px-3 rounded-xl font-bold text-xs text-slate-700 bg-gray-200 hover:bg-gray-300 active:scale-95 transition-transform"
+                                        >
+                                            취소
                                         </button>
                                     </div>
                                 </>

@@ -64,10 +64,8 @@ interface AddItemModalProps {
 
 const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingItem, onClose, onAdd, onNextScan, trigger, initialSettings, timestamp }) => {
     const { uiFeedback } = useDeviceSettings();
-    const { closeScanner } = useScanner(); 
+    const { closeScanner, isScannerOpen } = useScanner(); 
     
-    const [isMounted, setIsMounted] = useState(false);
-    const [isVisible, setIsVisible] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLeftHanded, setIsLeftHanded] = useLocalStorage<boolean>('pos_layout_left_handed', false);
     const [isPositionLocked, setIsPositionLocked] = useLocalStorage<boolean>('pos_modal_locked', false);
@@ -82,21 +80,17 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     , [product]);
 
     useEffect(() => {
-        if (isOpen) {
-            setIsMounted(true);
+        if (isOpen && product) {
             setIsSubmitting(false);
             setQuantityStr('1');
             setMemo(existingItem?.memo || '');
             setUnit(initialSettings?.unit ?? existingItem?.unit ?? '개');
             isFirstInputRef.current = true;
             initAudio();
-            
-            const timer = setTimeout(() => setIsVisible(true), 10);
-            return () => clearTimeout(timer);
         }
-    }, [isOpen, timestamp, existingItem, initialSettings]);
+    }, [isOpen, product?.barcode, timestamp]);
 
-    if (!isMounted || !product) return null;
+    if (!isOpen || !product) return null;
 
     const isQuantityValid = quantityStr !== '' && !isNaN(Number(quantityStr)) && Number(quantityStr) !== 0;
     const displayName = formatProductDisplayName(product.name, product.spec);
@@ -104,38 +98,28 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const handleSafeClose = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
-        setIsVisible(false);
         if (trigger === 'scan') closeScanner();
-        
-        setTimeout(() => {
-            if (isMounted) onClose();
-        }, 300);
+        onClose();
     };
 
     const handleSafeSkip = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
-        setIsVisible(false);
-        
-        setTimeout(() => {
-            if (isMounted) {
-                onClose();
-                if (onNextScan) setTimeout(onNextScan, 50);
-            }
-        }, 300);
+        onClose();
+        if (!isScannerOpen && onNextScan) {
+            setTimeout(onNextScan, 50);
+        }
     };
 
     const handleConfirmAdd = (shouldCloseScanner: boolean, shouldScanNext: boolean) => {
         if (isSubmitting || !isQuantityValid) return;
         setIsSubmitting(true);
-        setIsVisible(false);
-
-        setTimeout(() => {
-            onAdd({ quantity: Number(quantityStr), unit, memo: memo.trim() });
-            if (shouldCloseScanner) closeScanner();
-            onClose();
-            if (shouldScanNext && onNextScan) setTimeout(onNextScan, 200);
-        }, 300);
+        onAdd({ quantity: Number(quantityStr), unit, memo: memo.trim() });
+        if (shouldCloseScanner) closeScanner();
+        onClose();
+        if (shouldScanNext && !isScannerOpen && onNextScan) {
+            setTimeout(onNextScan, 50);
+        }
     };
 
     const KeypadButton = ({ onClick, className, children, disabled }: any) => (
@@ -290,7 +274,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const backdropClass = trigger === 'scan' ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={(e) => { if (e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
+        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`} onClick={(e) => { if (e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
             <KeypadLayout layoutId="add_item_modal_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body

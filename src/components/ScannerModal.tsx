@@ -21,9 +21,10 @@ const getGlobalAudioCtx = () => {
 };
 
 /**
- * 카메라 스캔 시 빛 반사/흔들림으로 인해 잘못 읽힌(오인식) 바코드인지 판별합니다.
+ * 카메라 스캔 시 바코드 유효성 및 정식 코드(EAN-13, EAN-8, UPC-A) 규칙 여부를 판별합니다.
+ * - 정식 코드 규칙(8/12/13자리 숫자 + 체크섬 일치)을 벗어나면 자체코드 또는 카메라 오인식 확인창을 띄웁니다.
  */
-function checkScannedBarcodeValidity(raw: string): { valid: boolean; reason?: string } {
+function checkScannedBarcodeValidity(raw: string): { valid: boolean; reason?: string; isNonStandard?: boolean } {
     const code = (raw || '').trim();
     if (!code || code.length < 4) {
         return { valid: false, reason: '바코드 길이가 너무 짧습니다 (카메라 오인식 의심)' };
@@ -36,6 +37,13 @@ function checkScannedBarcodeValidity(raw: string): { valid: boolean; reason?: st
         return {
             valid: false,
             reason: `표준(${analysis.standardType}) 체크섬이 일치하지 않습니다 (카메라 오인식 의심)`
+        };
+    }
+    if (analysis.status === 'non_standard') {
+        return {
+            valid: false,
+            isNonStandard: true,
+            reason: `정식 바코드 규격(8/12/13자리)이 아닌 코드(${code.length}자리)입니다.\n자체코드로 계속 진행하거나 다시 스캔하시겠습니까?`
         };
     }
     return { valid: true };
@@ -86,23 +94,21 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     isPausedRef.current = isPaused;
 
     const lastCandidateRef = useRef<{ code: string; time: number } | null>(null);
-    // 방금 스캔 처리된 바코드가 모달이 닫히는 순간 잔상 프레임으로 즉시 재인식되는 현상 방지
-    const lastAcceptedScanRef = useRef<{ code: string; time: number } | null>(null);
     
     const [engineMode, setEngineMode] = useState<'gpu' | 'zxing' | 'checking'>('checking');
     const [isStreamReady, setIsStreamReady] = useState(false);
     const [scanState, setScanState] = useState<'idle' | 'scanning'>('idle');
     const scanStateRef = useRef<'idle' | 'scanning'>('idle');
     const [isProcessingSuccess, setIsProcessingSuccess] = useState(false);
-    const [isRendered, setIsRendered] = useState(false);
     const [timeLeft, setTimeLeft] = useState(8);
     const [currentInterval, setCurrentInterval] = useState<number>(0);
 
-    // 카메라 오인식/형식 오류 발생 시 스캐너와 충돌하지 않는 전용 미니 확인창 상태
+    // 카메라 오인식 / 정식 규격 외(자체코드) 스캔 시 확인창 상태
     const [invalidScanAlert, setInvalidScanAlert] = useState<{
         isOpen: boolean;
         barcode: string;
         reason: string;
+        isNonStandard?: boolean;
     }>({ isOpen: false, barcode: '', reason: '' });
     const invalidScanAlertOpenRef = useRef(false);
     invalidScanAlertOpenRef.current = invalidScanAlert.isOpen;
@@ -137,10 +143,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
 
     useEffect(() => {
         if (isOpen) {
-            setTimeout(() => setIsRendered(true), 10);
             isHandlingResult.current = false;
             lastCandidateRef.current = null;
-            lastAcceptedScanRef.current = null;
             setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
             setScanState('idle'); 
             scanStateRef.current = 'idle'; 
@@ -148,7 +152,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
             setCurrentInterval(0);
             startCamera();
         } else {
-            setIsRendered(false);
             if (resumeDelayTimerRef.current) clearTimeout(resumeDelayTimerRef.current);
             setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
             stopCamera();
@@ -156,8 +159,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         }
     }, [isOpen]);
 
-    // 수량 입력창(AddItemModal / ReceiveItemModal) 또는 알림창이 열릴 때(isPaused=true) 스캔 루프를 즉시 중단하고,
-    // 수량 입력창이 닫힐 때(isPaused=false) 잔상 프레임이 재인식되지 않도록 캔버스를 비운 뒤 대기 상태로 복귀
+    // 수량 입력창이 뜨면(isPaused=true) 비디오 프레임과 디코딩을 즉시 정지하여 뒤쪽 깜빡임을 원천 차단
     useEffect(() => {
         if (resumeDelayTimerRef.current) {
             clearTimeout(resumeDelayTimerRef.current);
@@ -165,17 +167,25 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         }
 
         if (isPaused) {
+            isHandlingResult.current = true;
             stopScanningLoop();
             setIsProcessingSuccess(false);
             lastCandidateRef.current = null;
+            canvasRef.current.width = 0;
+            canvasRef.current.height = 0;
+            try { videoRef.current?.pause(); } catch (e) {}
             return;
         }
 
         if (isOpen && isStreamReady && !invalidScanAlert.isOpen) {
-            // 캔버스 버퍼 초기화 (이전 프레임 잔상 제거)
             canvasRef.current.width = 0;
             canvasRef.current.height = 0;
             lastCandidateRef.current = null;
+            try {
+                if (videoRef.current && videoRef.current.paused) {
+                    videoRef.current.play().catch(() => {});
+                }
+            } catch (e) {}
 
             resumeDelayTimerRef.current = setTimeout(() => {
                 if (!isMountedRef.current || isPausedRef.current || invalidScanAlertOpenRef.current) return;
@@ -184,7 +194,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                 if (!scanSettings.useScannerButton && scanStateRef.current === 'idle') {
                     startScanningSession();
                 }
-            }, 350);
+            }, 300);
         }
     }, [isOpen, isStreamReady, isPaused, invalidScanAlert.isOpen, scanSettings.useScannerButton]);
 
@@ -320,24 +330,16 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     };
 
     const acceptValidBarcode = (barcode: string) => {
-        setIsProcessingSuccess(true);
-        lastAcceptedScanRef.current = { code: barcode, time: Date.now() };
-        // 캔버스 버퍼를 즉시 비워 잔상 재인식 원천 차단
+        isHandlingResult.current = true;
+        stopScanningLoop();
         canvasRef.current.width = 0;
         canvasRef.current.height = 0;
+        try { videoRef.current?.pause(); } catch (e) {}
 
         onScanSuccess(barcode);
         
         if (!continuous) {
-            setTimeout(() => { if (isMountedRef.current) onClose(); }, 150);
-        } else {
-            // 연속 스캔 모드에서는 수량 입력 모달(AddItemModal / ReceiveItemModal)이 열렸다가 닫힐 때
-            // 상단 isPaused useEffect에서 안전하게 스캔 대기 상태로 복구하므로 백그라운드에서 조기 재시작하지 않음
-            setTimeout(() => {
-                if (isMountedRef.current) {
-                    setIsProcessingSuccess(false);
-                }
-            }, 250);
+            setTimeout(() => { if (isMountedRef.current) onClose(); }, 80);
         }
     };
 
@@ -348,7 +350,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
 
         const validity = checkScannedBarcodeValidity(barcode);
 
-        if (!validity.valid || (engineMode === 'zxing' && barcode.length !== 13 && barcode.length !== 8)) {
+        if (!validity.valid) {
             const now = Date.now();
             if (!lastCandidateRef.current || lastCandidateRef.current.code !== barcode || now - lastCandidateRef.current.time > 450) {
                 lastCandidateRef.current = { code: barcode, time: now };
@@ -366,7 +368,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
             setInvalidScanAlert({
                 isOpen: true,
                 barcode,
-                reason: validity.reason || '바코드 형식이 올바르지 않습니다.'
+                reason: validity.reason || '바코드 형식이 올바르지 않습니다.',
+                isNonStandard: validity.isNonStandard
             });
             return;
         }
@@ -378,6 +381,11 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     const handleRescanFromAlert = () => {
         setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
         isHandlingResult.current = false;
+        try {
+            if (videoRef.current && videoRef.current.paused) {
+                videoRef.current.play().catch(() => {});
+            }
+        } catch (e) {}
         setTimeout(() => {
             if (isMountedRef.current && !isPausedRef.current) {
                 startScanningSession();
@@ -408,7 +416,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         if (onSaveAndExit) {
             setTimeout(() => {
                 onSaveAndExit();
-            }, 120);
+            }, 80);
         }
     };
 
@@ -509,6 +517,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
         if (scanLoopTimeoutRef.current) clearTimeout(scanLoopTimeoutRef.current);
 
+        try {
+            if (videoRef.current && videoRef.current.paused) {
+                videoRef.current.play().catch(() => {});
+            }
+        } catch (e) {}
+
         setScanState('scanning');
         scanStateRef.current = 'scanning';
         
@@ -566,12 +580,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     const isPowerSaving = scanSettings.scanResolution === '480p';
 
     return createPortal(
-        <div className={`fixed inset-0 bg-black z-[130] transition-opacity duration-150 ${isRendered ? 'opacity-100' : 'opacity-0'}`}>
+        <div className="fixed inset-0 bg-black z-[130]">
             <div className="absolute inset-0 w-full h-full overflow-hidden">
-                <video ref={videoRef} className={`w-full h-full object-cover transition-opacity duration-500 ${isStreamReady ? 'opacity-100' : 'opacity-0'}`} playsInline muted />
+                <video ref={videoRef} className={`w-full h-full object-cover ${isStreamReady ? 'opacity-100' : 'opacity-0'}`} playsInline muted />
             </div>
             
-            <div className="absolute top-6 left-6 z-[2500] flex flex-col gap-2 items-start animate-fade-in-down">
+            <div className="absolute top-6 left-6 z-[2500] flex flex-col gap-2 items-start">
                 {engineMode === 'gpu' && (
                     <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/80 rounded-full border border-emerald-400 shadow-lg">
                         <span className="text-[10px] font-black text-white uppercase tracking-wider">GPU 가속</span>
@@ -598,10 +612,10 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                                 {currentInterval}ms
                             </div>
                         )}
-                        <p className={`text-[13px] font-black uppercase tracking-[0.25em] text-shadow transition-colors duration-300 mb-2.5 z-[2100] ${isProcessingSuccess ? 'text-green-400' : (scanState === 'scanning' ? 'text-green-400 animate-pulse' : 'text-white/80')}`}>
+                        <p className={`text-[13px] font-black uppercase tracking-[0.25em] text-shadow mb-2.5 z-[2100] ${isProcessingSuccess ? 'text-green-400' : (scanState === 'scanning' ? 'text-green-400 animate-pulse' : 'text-white/80')}`}>
                             {isProcessingSuccess ? "RECOGNIZED" : (scanState === 'scanning' ? "SCANNING" : "READY")}
                         </p>
-                        <div ref={guideRef} className={`scanner-guide-hole w-full transition-all duration-300 ${isProcessingSuccess ? 'success' : (scanState === 'scanning' ? 'scanning' : 'idle')}`} />
+                        <div ref={guideRef} className={`scanner-guide-hole w-full ${isProcessingSuccess ? 'success' : (scanState === 'scanning' ? 'scanning' : 'idle')}`} />
                     </div>
 
                     {scanSettings.useScannerButton && !isPaused && !invalidScanAlert.isOpen && (
@@ -652,22 +666,25 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                 </div>
             )}
 
-            {/* 카메라 오인식 / 바코드 형식 오류 시 표시되는 소형 확인창 */}
+            {/* 카메라 오인식 / 정식 규격 외(자체코드) 스캔 시 확인창 ([다시 스캔] / [계속 입력] / [취소]) */}
             {invalidScanAlert.isOpen && (
                 <div
-                    className="fixed inset-0 bg-black/70 z-[2600] flex items-center justify-center p-4 animate-fade-in-down pointer-events-auto"
+                    className="fixed inset-0 bg-black/75 z-[2600] flex items-center justify-center p-4 pointer-events-auto"
                     onClick={e => e.stopPropagation()}
                 >
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden border border-slate-100 p-4 space-y-3">
                         <div className="flex items-center gap-2 text-amber-600 justify-center">
                             <WarningIcon className="w-5 h-5 flex-shrink-0" />
-                            <h4 className="font-extrabold text-slate-800 text-sm">바코드 인식 확인</h4>
+                            <h4 className="font-extrabold text-slate-800 text-sm">
+                                {invalidScanAlert.isNonStandard ? '비표준(자체) 바코드 확인' : '바코드 인식 확인'}
+                            </h4>
                         </div>
                         <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200 text-center">
+                            <p className="text-[10px] font-bold text-slate-400 mb-0.5">인식된 바코드</p>
                             <p className="font-mono font-black text-base text-rose-600 tracking-wider break-all">
                                 {invalidScanAlert.barcode}
                             </p>
-                            <p className="text-[11px] font-semibold text-slate-500 mt-1 leading-snug">
+                            <p className="text-[11px] font-semibold text-slate-600 mt-1.5 leading-snug whitespace-pre-line">
                                 {invalidScanAlert.reason}
                             </p>
                         </div>
@@ -678,7 +695,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5"
                             >
                                 <BarcodeScannerIcon className="w-4 h-4" />
-                                <span>재스캔</span>
+                                <span>다시 스캔</span>
                             </button>
                             <div className="grid grid-cols-2 gap-1.5">
                                 <button
@@ -693,7 +710,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
                                     onClick={handleContinueWithInvalidBarcode}
                                     className="py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl active:scale-95 transition-transform"
                                 >
-                                    계속 작업
+                                    계속 입력(자체코드)
                                 </button>
                             </div>
                         </div>

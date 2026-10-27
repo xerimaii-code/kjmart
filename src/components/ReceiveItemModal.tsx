@@ -59,9 +59,7 @@ type ActiveField = 'quantity' | 'cost' | 'selling';
 
 const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd, currentItems = [], onScanNext, timestamp }) => {
     const { uiFeedback } = useDeviceSettings();
-    const { closeScanner } = useScanner();
-    const [isMounted, setIsMounted] = useState(false);
-    const [isVisible, setIsVisible] = useState(false);
+    const { closeScanner, isScannerOpen } = useScanner();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLeftHanded, setIsLeftHanded] = useLocalStorage<boolean>('pos_layout_left_handed', false);
     const [isPositionLocked, setIsPositionLocked] = useLocalStorage<boolean>('pos_modal_locked', false);
@@ -85,13 +83,11 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
 
     useEffect(() => {
         if (isOpen) {
-            setIsMounted(true); setIsSubmitting(false);
+            setIsSubmitting(false);
             (window as any).__isReceiveItemModalOpen = true;
             window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
             initAudio();
-            const timer = setTimeout(() => setIsVisible(true), 10);
             return () => {
-                clearTimeout(timer);
                 (window as any).__isReceiveItemModalOpen = false;
                 window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
             };
@@ -103,13 +99,14 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
 
     useEffect(() => {
         if (isOpen && product) {
+            setIsSubmitting(false);
             setQuantity(1); setCostPrice(product.costPrice || 0); setSellingPrice(product.sellingPrice || 0);
             setCustomName(formatProductDisplayName(product.name, product.spec) || ''); setActiveField('quantity');
             isFirstInputRef.current = true;
         }
-    }, [isOpen, product, timestamp]);
+    }, [isOpen, product?.barcode, timestamp]);
 
-    if (!isMounted || !product) return null;
+    if (!isOpen || !product) return null;
     
     const isQuantityValid = !isNaN(Number(quantity)) && Number(quantity) !== 0;
     const isUnregistered = !product.name || product.name === '미등록 상품' || product.name === '';
@@ -118,44 +115,35 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const handleSafeClose = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
-        setIsVisible(false);
         if (onScanNext) closeScanner();
-        
-        setTimeout(() => {
-            if (isMounted) onClose();
-        }, 300);
+        onClose();
     };
 
     const handleSafeSkip = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
-        setIsVisible(false);
-        
-        setTimeout(() => {
-            if (isMounted) {
-                onClose();
-                if (onScanNext) setTimeout(onScanNext, 200);
-            }
-        }, 300);
+        onClose();
+        if (!isScannerOpen && onScanNext) {
+            setTimeout(onScanNext, 50);
+        }
     };
 
     const handleAddItemAction = (isReturn: boolean, shouldScanNext: boolean) => {
         if (isSubmitting || !isQuantityValid) return;
         setIsSubmitting(true);
-        setIsVisible(false);
 
-        setTimeout(() => {
-            const qty = isReturn ? -Math.abs(Number(quantity)) : Number(quantity);
-            onAdd({ barcode: product.barcode, name: displayName, costPrice: Number(costPrice), sellingPrice: Number(sellingPrice), quantity: qty, isNew: true });
-            
-            if (shouldScanNext && onScanNext) { 
-                onClose(); 
-                setTimeout(onScanNext, 150); 
-            } else { 
-                if (onScanNext) closeScanner(); 
-                onClose(); 
+        const qty = isReturn ? -Math.abs(Number(quantity)) : Number(quantity);
+        onAdd({ barcode: product.barcode, name: displayName, costPrice: Number(costPrice), sellingPrice: Number(sellingPrice), quantity: qty, isNew: true });
+        
+        if (shouldScanNext && onScanNext) { 
+            onClose(); 
+            if (!isScannerOpen) {
+                setTimeout(onScanNext, 50); 
             }
-        }, 300);
+        } else { 
+            if (onScanNext) closeScanner(); 
+            onClose(); 
+        }
     };
 
     const KeypadButton = ({ onClick, className, children, disabled }: any) => (
@@ -304,7 +292,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const backdropClass = onScanNext ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={(e) => { if(e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
+        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`} onClick={(e) => { if(e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
             <KeypadLayout layoutId="receive_modal_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body
