@@ -30,18 +30,17 @@ export interface Product {
 export interface OrderItem {
     barcode: string;
     name: string;
-    price: number; // 발주 시 결정된 최종 단가 (작성 중에는 실시간 반영, 저장 시 확정)
+    price: number;
     quantity: number;
     unit: '개' | '박스';
     memo?: string;
     isModified?: boolean;
-    // [최종 확정 시 박제될 스냅샷 필드]
-    masterPrice?: number;   // 마스터 정상 매입가
-    eventPrice?: number;    // 마스터 행사 매입가
-    salePrice?: number;     // 마스터 행사 판매가
-    saleName?: string;      // 행사명
-    saleStartDate?: string; // 행사 시작일
-    saleEndDate?: string;   // 행사 종료일
+    masterPrice?: number;
+    eventPrice?: number;
+    salePrice?: number;
+    saleName?: string;
+    saleStartDate?: string;
+    saleEndDate?: string;
 }
 
 export interface AuditedItem {
@@ -125,6 +124,8 @@ export type ScannerContext = 'new-order' | 'modal' | 'product-inquiry' | 'invent
 export interface ScannerOptions {
     continuous: boolean;
     useHighPrecision?: boolean;
+    onSaveAndExit?: () => void;
+    saveAndExitCount?: number;
 }
 
 export interface NewOrderDraft {

@@ -14,6 +14,7 @@ interface AlertState {
 }
 
 interface AlertContextType {
+    isAlertOpen: boolean;
     showAlert: (message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void, cancelText?: string, onClose?: () => void) => void;
     showToast: (message: string, type?: 'success' | 'error') => void;
 }
@@ -43,7 +44,7 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setToastState(prev => ({ ...prev, isOpen: false }));
     }, []);
 
-    const alertValue = useMemo(() => ({ showAlert, showToast }), [showAlert, showToast]);
+    const alertValue = useMemo(() => ({ isAlertOpen: alertState.isOpen, showAlert, showToast }), [alertState.isOpen, showAlert, showToast]);
 
     return (
         <AlertContext.Provider value={alertValue}>

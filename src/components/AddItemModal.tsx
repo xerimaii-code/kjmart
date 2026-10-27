@@ -64,7 +64,7 @@ interface AddItemModalProps {
 
 const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingItem, onClose, onAdd, onNextScan, trigger, initialSettings, timestamp }) => {
     const { uiFeedback } = useDeviceSettings();
-    const { closeScanner } = useScanner(); 
+    const { closeScanner, options } = useScanner(); 
     
     const [isMounted, setIsMounted] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
@@ -109,7 +109,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
         
         setTimeout(() => {
             if (isMounted) onClose();
-        }, 300);
+        }, 250);
     };
 
     const handleSafeSkip = () => {
@@ -122,20 +122,28 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                 onClose();
                 if (onNextScan) setTimeout(onNextScan, 50);
             }
-        }, 300);
+        }, 250);
     };
 
-    const handleConfirmAdd = (shouldCloseScanner: boolean, shouldScanNext: boolean) => {
+    const handleConfirmAdd = (shouldCloseScanner: boolean, shouldScanNext: boolean, shouldSaveOrderAndExit: boolean = false) => {
         if (isSubmitting || !isQuantityValid) return;
         setIsSubmitting(true);
         setIsVisible(false);
+
+        const saveAndExitCallback = options?.onSaveAndExit;
 
         setTimeout(() => {
             onAdd({ quantity: Number(quantityStr), unit, memo: memo.trim() });
             if (shouldCloseScanner) closeScanner();
             onClose();
-            if (shouldScanNext && onNextScan) setTimeout(onNextScan, 200);
-        }, 300);
+            if (shouldSaveOrderAndExit && saveAndExitCallback) {
+                setTimeout(() => {
+                    saveAndExitCallback();
+                }, 120);
+            } else if (shouldScanNext && onNextScan) {
+                setTimeout(onNextScan, 150);
+            }
+        }, 220);
     };
 
     const KeypadButton = ({ onClick, className, children, disabled }: any) => (
@@ -164,13 +172,13 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                             <KeypadButton onClick={handleSafeClose} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm"><XCircleIcon className="w-4 h-4 mr-1" />취소</KeypadButton>
                             <KeypadButton onClick={handleSafeSkip} className="bg-white border border-gray-300 text-gray-600 h-11 text-xs sm:text-sm"><ChevronRightIcon className="w-4 h-4 mr-1" />스킵</KeypadButton>
                         </div>
-                        <KeypadButton onClick={() => handleConfirmAdd(true, false)} disabled={!isQuantityValid} className="bg-white border border-blue-200 text-blue-700 h-11"><SaveIcon className="w-4 h-4 mr-1" />저장 & 종료</KeypadButton>
-                        <KeypadButton onClick={() => handleConfirmAdd(false, true)} disabled={!isQuantityValid} className="w-full bg-blue-600 text-white h-14 text-lg sm:text-xl active:bg-blue-700"><BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />추가 & 스캔</KeypadButton>
+                        <KeypadButton onClick={() => handleConfirmAdd(true, false, true)} disabled={!isQuantityValid} className="bg-emerald-50 border border-emerald-300 text-emerald-700 h-11"><SaveIcon className="w-4 h-4 mr-1" />저장 & 종료</KeypadButton>
+                        <KeypadButton onClick={() => handleConfirmAdd(false, true, false)} disabled={!isQuantityValid} className="w-full bg-blue-600 text-white h-14 text-lg sm:text-xl active:bg-blue-700"><BarcodeScannerIcon className="w-5 h-5 sm:w-6 sm:h-6 mr-1.5" />추가 & 스캔</KeypadButton>
                     </>
                 ) : (
                     <div className="flex flex-col gap-1">
                         <KeypadButton onClick={handleSafeClose} className="bg-gray-100 text-gray-500 border border-gray-200 h-11"><XCircleIcon className="w-4 h-4 mr-1" />취소</KeypadButton>
-                        <KeypadButton onClick={() => handleConfirmAdd(false, false)} disabled={!isQuantityValid} className="bg-blue-600 text-white h-16 text-lg sm:text-xl active:bg-blue-700"><SaveIcon className="w-6 h-6 mr-1.5" />확인</KeypadButton>
+                        <KeypadButton onClick={() => handleConfirmAdd(false, false, false)} disabled={!isQuantityValid} className="bg-blue-600 text-white h-16 text-lg sm:text-xl active:bg-blue-700"><SaveIcon className="w-6 h-6 mr-1.5" />확인</KeypadButton>
                     </div>
                 )}
             </div>
@@ -290,8 +298,21 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const backdropClass = trigger === 'scan' ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={(e) => { if (e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
+        <div className={`fixed inset-0 z-[140] flex flex-col items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={(e) => { if (e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
             <KeypadLayout layoutId="add_item_modal_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
+            {trigger === 'scan' && options?.onSaveAndExit && (
+                <div className="w-[85%] max-w-[20rem] mt-2 z-[150] safe-area-pb" onClick={e => e.stopPropagation()}>
+                    <button
+                        type="button"
+                        disabled={!isQuantityValid || isSubmitting}
+                        onClick={() => handleConfirmAdd(true, false, true)}
+                        className="w-full py-3 px-5 rounded-2xl font-extrabold text-base flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-400/50 disabled:opacity-50"
+                    >
+                        <SaveIcon className="w-5 h-5" />
+                        <span>저장 & 종료 (마지막 스캔 포함 저장)</span>
+                    </button>
+                </div>
+            )}
         </div>,
         document.body
     );

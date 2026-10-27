@@ -1,11 +1,10 @@
 // public/service-worker.js
 
-// Define cache names for better management and versioning
-const CACHE_VERSION = 'v1.40'; // Version bumped for unified PWA & product master update
-const APP_SHELL_CACHE_NAME = `kjmart-app-shell-${CACHE_VERSION}`; // For core app files
-const STATIC_ASSETS_CACHE_NAME = `kjmart-static-assets-${CACHE_VERSION}`; // For fonts, styles from CDNs
+// 빌드 시 vite.config.ts의 autoServiceWorkerVersionPlugin이 아래 CACHE_VERSION을 자동으로 최신 타임스탬프로 치환합니다.
+const CACHE_VERSION = 'v1.41';
+const APP_SHELL_CACHE_NAME = `kjmart-app-shell-${CACHE_VERSION}`;
+const STATIC_ASSETS_CACHE_NAME = `kjmart-static-assets-${CACHE_VERSION}`;
 
-// Core app files to be cached on install
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
@@ -19,14 +18,13 @@ const ALL_CACHE_NAMES = [
   STATIC_ASSETS_CACHE_NAME
 ];
 
-// Install: Cache the app shell
+// Install: Cache the app shell (Do NOT skipWaiting automatically; wait for user confirmation or next foreground)
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(APP_SHELL_CACHE_NAME)
       .then(cache => {
-        console.log('Service Worker: Caching app shell');
         const promises = APP_SHELL_URLS.map(url => {
-            return cache.add(url).catch(err => {
+            return cache.add(new Request(url, { cache: 'reload' })).catch(err => {
                 console.warn(`[SW] Failed to cache ${url}:`, err);
             });
         });
@@ -43,7 +41,6 @@ self.addEventListener('activate', event => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (!ALL_CACHE_NAMES.includes(cacheName)) {
-            console.log('Service Worker: Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
@@ -59,7 +56,6 @@ self.addEventListener('message', (event) => {
   }
 });
 
-// A helper function to implement the Stale-While-Revalidate strategy
 const staleWhileRevalidate = (request, cacheName) => {
   return caches.open(cacheName).then(cache => {
     return cache.match(request).then(cachedResponse => {
@@ -69,7 +65,6 @@ const staleWhileRevalidate = (request, cacheName) => {
         }
         return networkResponse;
       }).catch(err => {
-          console.warn(`Service Worker: Fetch failed for ${request.url}.`, err);
           throw err;
       });
 
@@ -78,7 +73,22 @@ const staleWhileRevalidate = (request, cacheName) => {
   });
 };
 
-// Fetch: Apply caching strategies based on request type
+// HTML Navigation 전용 Network-First 전략 (온라인 시 항상 최신 index.html 확보, 오프라인 시 캐시 폴백)
+const networkFirstNavigation = (request, cacheName) => {
+  return caches.open(cacheName).then(cache => {
+    return fetch(request)
+      .then(networkResponse => {
+        if (networkResponse && networkResponse.status === 200) {
+          cache.put(request, networkResponse.clone());
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return cache.match(request).then(cached => cached || cache.match('/index.html') || cache.match('/'));
+      });
+  });
+};
+
 self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
@@ -87,19 +97,17 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Ignore Firebase/Google Auth/API requests to let the SDKs handle them.
-  if (url.hostname.includes('firebaseio.com') || url.hostname.includes('googleapis.com') || url.pathname.startsWith('/api/')) {
+  if (url.hostname.includes('firebaseio.com') || url.hostname.includes('googleapis.com') || url.pathname.startsWith('/api/') || url.pathname.endsWith('/version.json')) {
     return;
   }
   
-  // Strategy for Google Fonts, Tailwind, ZXing (jsdelivr), and other CDNs: Stale-While-Revalidate
   if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com' || url.hostname === 'cdn.tailwindcss.com' || url.hostname === 'aistudiocdn.com' || url.hostname === 'cdn.jsdelivr.net' || url.hostname === 'cdnjs.cloudflare.com' || url.hostname === 'unpkg.com') {
     event.respondWith(staleWhileRevalidate(request, STATIC_ASSETS_CACHE_NAME));
     return;
   }
 
   if (request.mode === 'navigate') {
-    event.respondWith(staleWhileRevalidate(request, APP_SHELL_CACHE_NAME));
+    event.respondWith(networkFirstNavigation(request, APP_SHELL_CACHE_NAME));
     return;
   }
 

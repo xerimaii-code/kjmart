@@ -113,7 +113,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { customers, products } = useDataState();
     const { addOrder } = useDataActions();
     const { showAlert, showToast } = useAlert();
-    const { openScanner } = useScanner();
+    const { openScanner, closeScanner } = useScanner();
     const { setLastModifiedOrderId, sqlStatus } = useMiscUI();
     const { openAddItemModal, openEditItemModal, closeEditItemModal } = useModals();
     const { dataSourceSettings } = useDeviceSettings();
@@ -128,6 +128,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [dropIdx, setDropIdx] = useState<number | null>(null);
     
     const selectedCustomerRef = useRef(selectedCustomer);
+    const itemsRef = useRef<OrderItem[]>([]);
     
     useEffect(() => {
         const handler = setTimeout(() => setDebouncedCustomerSearch(customerSearch), 200);
@@ -176,6 +177,10 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         ).slice(0, 50);
     }, [sortedCustomers, customerSearch]);
 
+    const handleItemsChange = useCallback((newItems: OrderItem[]) => {
+        itemsRef.current = newItems;
+    }, []);
+
     const {
         items,
         addOrUpdateItem,
@@ -186,9 +191,9 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         totalAmount,
     } = useOrderManager({
         initialItems: [],
+        onItemsChange: handleItemsChange,
     });
     
-    const itemsRef = useRef(items);
     useEffect(() => {
         itemsRef.current = items;
         selectedCustomerRef.current = selectedCustomer;
@@ -235,6 +240,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleSelectCustomer = (customer: Customer) => {
         setSelectedCustomer(customer);
+        selectedCustomerRef.current = customer;
         setCustomerSearch(customer.name);
         setShowCustomerDropdown(false);
         recordUsage(customer.comcode);
@@ -242,6 +248,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
     const handleClearCustomer = () => {
         setSelectedCustomer(null);
+        selectedCustomerRef.current = null;
         setCustomerSearch('');
         setTimeout(() => customerSearchInputRef.current?.focus(), 50);
     };
@@ -259,7 +266,6 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             const itemsWithSnapshot: OrderItem[] = await Promise.all(currentItemsList.map(async (item) => {
                 let prod = sessionProductsRef.current.get(item.barcode) || products.find(p => p.barcode === item.barcode);
                 
-                // 로컬 모드가 아닐 때(서버 모드)이고 로컬/세션에 없으며 SQL이 연결되어 있을 때만 조회
                 if (!prod && !isLocalMode && sqlStatus === 'connected') {
                     try {
                         prod = await searchByBarcode(item.barcode) || undefined;
@@ -296,6 +302,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             removeDraftData();
             
             setSelectedCustomer(null);
+            selectedCustomerRef.current = null;
             setCustomerSearch('');
             setProductSearch('');
             resetItems([]);
@@ -341,20 +348,34 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 const existingItem = itemsRef.current.find(item => item.barcode === product!.barcode);
                 openAddItemModal({
                     product, existingItem: existingItem || null, trigger: 'scan',
-                    onAdd: (details) => { addOrUpdateItem(product!, details); isProcessingScanRef.current = false; },
+                    onAdd: (details) => {
+                        addOrUpdateItem(product!, details);
+                        isProcessingScanRef.current = false;
+                    },
                     onClose: () => { isProcessingScanRef.current = false; },
                     onNextScan: handleOpenScanner,
                     initialSettings: { unit: existingItem ? existingItem.unit : (isBoxUnitDefault ? '박스' : '개') },
                     timestamp: Date.now()
                 });
             } else {
-                showAlert("등록되지 않은 바코드입니다.");
-                isProcessingScanRef.current = false;
+                // 미등록/오인식 바코드일 때 [재스캔] / [취소] 선택 알림창 표시 (카메라 일시정지 상태로 충돌 방지)
+                showAlert(
+                    `[${barcode}]\n등록되지 않은 바코드입니다.\n다시 스캔하시겠습니까?`,
+                    () => { isProcessingScanRef.current = false; },
+                    '재스캔',
+                    'bg-indigo-600 hover:bg-indigo-700',
+                    () => { isProcessingScanRef.current = false; closeScanner(); },
+                    '취소'
+                );
             }
         };
     
-        openScanner('new-order', onScan, { continuous: true });
-    }, [showAlert, openScanner, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, searchByBarcode]);
+        openScanner('new-order', onScan, {
+            continuous: true,
+            onSaveAndExit: handleSaveOrder,
+            saveAndExitCount: itemsRef.current.length
+        });
+    }, [showAlert, openScanner, closeScanner, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, searchByBarcode, handleSaveOrder]);
 
     const handleDragStart = (idx: number) => setDraggedIdx(idx);
     const handleDragEnd = () => { setDraggedIdx(null); setDropIdx(null); };
@@ -443,7 +464,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                             <span className="text-xl font-bold text-gray-900 tracking-tighter">{totalAmount.toLocaleString()} 원</span>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
-                             <button onClick={() => showAlert("작성 중인 모든 내용을 삭제하시겠습니까?", () => { removeDraftData(); setSelectedCustomer(null); setCustomerSearch(''); setProductSearch(''); resetItems([]); setIsBoxUnitDefault(false); }, '삭제', 'bg-rose-500')} className="h-12 bg-gray-100 text-gray-600 rounded-xl font-bold text-base active:scale-95 transition-transform">초기화</button>
+                             <button onClick={() => showAlert("작성 중인 모든 내용을 삭제하시겠습니까?", () => { removeDraftData(); setSelectedCustomer(null); selectedCustomerRef.current = null; setCustomerSearch(''); setProductSearch(''); resetItems([]); setIsBoxUnitDefault(false); }, '삭제', 'bg-rose-500')} className="h-12 bg-gray-100 text-gray-600 rounded-xl font-bold text-base active:scale-95 transition-transform">초기화</button>
                             <button onClick={handleSaveOrder} disabled={isSaving || !isCustomerSelected || items.length === 0} className="relative col-span-2 h-12 bg-indigo-600 text-white rounded-xl font-bold text-base shadow-lg shadow-indigo-200 disabled:bg-gray-400 active:scale-95 transition-transform">
                                 <span className={isSaving ? 'opacity-0' : 'opacity-100'}>발주 저장</span>
                                 {isSaving && <div className="absolute inset-0 flex items-center justify-center"><SpinnerIcon className="w-6 h-6 animate-spin"/></div>}

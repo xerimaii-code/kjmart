@@ -60,8 +60,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [products, setProducts] = useState<Product[]>([]);
     const [userQueries, setUserQueries] = useState<UserQuery[]>([]);
     
+    const customersRef = useRef(customers);
+    useEffect(() => { customersRef.current = customers; }, [customers]);
+
     const productsRef = useRef(products);
-    useEffect(() => { productsRef.current = products; }, [products]);
+    const latestProductDateRef = useRef<string>('1900-01-01');
+
+    useEffect(() => {
+        productsRef.current = products;
+        if (products.length > 0 && latestProductDateRef.current === '1900-01-01') {
+            let maxDate = '1900-01-01';
+            for (const p of products) {
+                if (p.lastModified) {
+                    const ymd = toLocalYMD(p.lastModified);
+                    if (ymd && ymd > maxDate) maxDate = ymd;
+                }
+            }
+            latestProductDateRef.current = maxDate;
+        }
+    }, [products]);
     
     const isSyncingRef = useRef(isSyncing);
     useEffect(() => { isSyncingRef.current = isSyncing; }, [isSyncing]);
@@ -80,7 +97,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 cache.getCachedData<Product>('products')
             ]);
             if (localCustomers) setCustomers(localCustomers);
-            if (localProducts) setProducts(localProducts);
+            if (localProducts) {
+                setProducts(localProducts);
+                let maxDate = '1900-01-01';
+                for (const p of localProducts) {
+                    if (p.lastModified) {
+                        const ymd = toLocalYMD(p.lastModified);
+                        if (ymd && ymd > maxDate) maxDate = ymd;
+                    }
+                }
+                latestProductDateRef.current = maxDate;
+            }
         } catch (e) {
             console.error("Local data load failed:", e);
         }
@@ -142,14 +169,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 await cache.setCachedData('customers', mappedCustomers);
                 setCustomers(mappedCustomers);
 
-                // 단일화된 상품 마스터 저장 (사용유무 '0' 제외 및 바코드 중복 제거)
                 const productMap = new Map<string, Product>();
+                let maxDate = '1900-01-01';
                 for (const raw of allProductsRaw) {
                     const p = mapSqlResultToProduct(raw);
                     if (p.barcode && p.isuse !== '0') {
                         productMap.set(p.barcode, p);
+                        if (p.lastModified) {
+                            const ymd = toLocalYMD(p.lastModified);
+                            if (ymd && ymd > maxDate) maxDate = ymd;
+                        }
                     }
                 }
+                latestProductDateRef.current = maxDate;
                 const mappedProducts = Array.from(productMap.values());
                 await cache.setCachedData('products', mappedProducts, (p) => setSyncProgress(60 + Math.floor(p * 0.3)));
                 setProducts(mappedProducts);
@@ -184,25 +216,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setSyncProgress(100);
                 if (!silent) showToast('전체 동기화 완료', 'success');
             } else {
+                // [최적화] 백그라운드에서 깨어날 때(silent=true) 이미 메모리에 거래처가 로드되어 있다면
+                // 매번 수천 건의 거래처를 재다운로드하고 IndexedDB를 clear/rewrite하는 무거운 작업을 생략하여 깨어날 때의 버벅임을 제거합니다.
                 if (!silent) showToast('증분 동기화를 시작합니다.', 'success');
                 if (!silent) setSyncStatusText('변경 사항 확인 중...');
                 
-                let baseProducts = productsRef.current.length > 0 ? productsRef.current : await cache.getCachedData<Product>('products');
-                
-                const customersData = await syncCustomersFromDb();
-                const mappedCustomers = customersData.map(mapSqlResultToCustomer);
-                await cache.setCachedData('customers', mappedCustomers);
-                setCustomers(mappedCustomers);
+                if (!silent || customersRef.current.length === 0) {
+                    const customersData = await syncCustomersFromDb();
+                    const mappedCustomers = customersData.map(mapSqlResultToCustomer);
+                    await cache.setCachedData('customers', mappedCustomers);
+                    setCustomers(mappedCustomers);
+                }
 
-                // 한국 로컬 시간(YYYY-MM-DD) 기준 최신 수정일 추출 (UTC 오차 방지)
-                let latestDateStr = '1900-01-01';
-                for (const p of baseProducts) {
-                    if (p.lastModified) {
-                        const ymd = toLocalYMD(p.lastModified);
-                        if (ymd && ymd > latestDateStr) {
-                            latestDateStr = ymd;
+                const baseProducts = productsRef.current.length > 0 ? productsRef.current : await cache.getCachedData<Product>('products');
+                let latestDateStr = latestProductDateRef.current;
+                if (latestDateStr === '1900-01-01' && baseProducts.length > 0) {
+                    for (const p of baseProducts) {
+                        if (p.lastModified) {
+                            const ymd = toLocalYMD(p.lastModified);
+                            if (ymd && ymd > latestDateStr) latestDateStr = ymd;
                         }
                     }
+                    latestProductDateRef.current = latestDateStr;
                 }
                 
                 if (!silent) setSyncStatusText('상품 업데이트 확인 중...');
@@ -212,29 +247,45 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 if (mappedNewProducts.length > 0) {
                     const activeUpdates: Product[] = [];
                     const deactivatedBarcodes: string[] = [];
+                    let maxDate = latestDateStr;
 
                     for (const p of mappedNewProducts) {
                         if (p.isuse === '0') {
                             deactivatedBarcodes.push(p.barcode);
                         } else {
                             activeUpdates.push(p);
+                            if (p.lastModified) {
+                                const ymd = toLocalYMD(p.lastModified);
+                                if (ymd && ymd > maxDate) maxDate = ymd;
+                            }
                         }
                     }
+                    latestProductDateRef.current = maxDate;
 
                     if (!silent) setSyncStatusText(`${mappedNewProducts.length}건 업데이트 중...`);
-                    // [핵심] 전체 clear() 없이 변경분만 단일 트랜잭션으로 Upsert (백그라운드 전환 시 데이터 유실 원천 차단)
                     await cache.upsertCachedItems('products', activeUpdates, deactivatedBarcodes);
 
                     const productMap = new Map(baseProducts.map(p => [p.barcode, p]));
+                    let hasActualDiff = false;
+
                     for (const code of deactivatedBarcodes) {
-                        productMap.delete(code);
+                        if (productMap.has(code)) {
+                            productMap.delete(code);
+                            hasActualDiff = true;
+                        }
                     }
                     for (const p of activeUpdates) {
+                        const prev = productMap.get(p.barcode);
+                        if (!prev || prev.costPrice !== p.costPrice || prev.sellingPrice !== p.sellingPrice || prev.eventCostPrice !== p.eventCostPrice || prev.salePrice !== p.salePrice || prev.stockQuantity !== p.stockQuantity || prev.name !== p.name || prev.lastModified !== p.lastModified) {
+                            hasActualDiff = true;
+                        }
                         productMap.set(p.barcode, p);
                     }
 
-                    const updatedProducts = Array.from(productMap.values());
-                    setProducts(updatedProducts);
+                    // 실제 변경된 상품이 있을 때만 React 상태를 갱신하여 불필요한 전체 화면 리렌더링 방지
+                    if (hasActualDiff || productsRef.current.length === 0) {
+                        setProducts(Array.from(productMap.values()));
+                    }
                     if (!silent) showToast(`${mappedNewProducts.length}건 업데이트 완료`, 'success');
                 } else {
                     if (productsRef.current.length === 0 && baseProducts.length > 0) setProducts(baseProducts);
@@ -295,6 +346,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             await cache.setCachedData('customers', []);
         } else {
             setProducts([]);
+            latestProductDateRef.current = '1900-01-01';
             await cache.setCachedData('products', []);
         }
         showToast('데이터가 초기화되었습니다.', 'success');

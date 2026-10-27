@@ -110,7 +110,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         editingBatchRef.current = editingBatch;
     }, [currentItems, selectedSupplier, batchDate, editingBatch]);
 
-    // 입고(매입)도 발주와 동일하게 'newOrder'(로컬/서버 옵션) 설정을 따르도록 연결
     const { 
         searchTerm: productSearch, 
         setSearchTerm: setProductSearch, 
@@ -126,25 +125,21 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const { sortedCustomers, recordUsage } = useSortedCustomers(customers);
 
     const openItemModal = (props: typeof addItemModalProps) => {
-        if (navLock.current) return;
-        navLock.current = true;
-        setTimeout(() => { navLock.current = false; }, 500);
-
-        if (window.history.state?.modal === 'receiveItem') {
-            setAddItemModalProps({ ...props, scanTimestamp: Date.now() });
-            return;
-        }
-        window.history.pushState({ modal: 'receiveItem' }, '', '');
         setAddItemModalProps({ ...props, scanTimestamp: Date.now() });
+        if (navLock.current) return;
+        if (window.history.state?.modal !== 'receiveItem') {
+            navLock.current = true;
+            setTimeout(() => { navLock.current = false; }, 300);
+            window.history.pushState({ modal: 'receiveItem' }, '', '');
+        }
     };
 
     const closeItemModal = () => {
         isProcessingScanRef.current = false;
+        setAddItemModalProps(prev => ({ ...prev, isOpen: false }));
 
         if (window.history.state?.modal === 'receiveItem') {
             window.history.back();
-        } else {
-            setAddItemModalProps(prev => ({ ...prev, isOpen: false }));
         }
     };
 
@@ -152,8 +147,9 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         const handlePopState = (event: PopStateEvent) => {
             const modal = event.state?.modal;
             if (addItemModalProps.isOpen && modal !== 'receiveItem') {
-                closeItemModal(); 
-            } else if (isEditorOpen && modal !== 'receiveEditor' && modal !== 'receiveItem') {
+                isProcessingScanRef.current = false;
+                setAddItemModalProps(prev => ({ ...prev, isOpen: false }));
+            } else if (isEditorOpen && !['receiveEditor', 'receiveItem', 'scanner'].includes(modal)) {
                 setIsEditorOpen(false);
             }
         };
@@ -162,25 +158,21 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     }, [addItemModalProps.isOpen, isEditorOpen]);
 
     const openEditor = () => {
-        if (navLock.current) return;
-        navLock.current = true;
-        setTimeout(() => { navLock.current = false; }, 500);
-
-        if (window.history.state?.modal === 'receiveEditor') {
-            setIsEditorOpen(true);
-            return;
-        }
-        window.history.pushState({ modal: 'receiveEditor' }, '', '');
         setIsEditorOpen(true);
+        if (navLock.current) return;
+        if (window.history.state?.modal !== 'receiveEditor') {
+            navLock.current = true;
+            setTimeout(() => { navLock.current = false; }, 300);
+            window.history.pushState({ modal: 'receiveEditor' }, '', '');
+        }
     };
 
-    const closeEditor = () => {
+    const closeEditor = useCallback(() => {
+        setIsEditorOpen(false);
         if (window.history.state?.modal === 'receiveEditor') {
             window.history.back();
-        } else {
-            setIsEditorOpen(false);
         }
-    };
+    }, []);
 
     useEffect(() => {
         if (isEditorOpen && !isDraftLoading && !editingBatch) {
@@ -207,7 +199,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         }
     }, [batches.length]);
 
-    // AppContext의 단일 실시간 브로드캐스트 리스너(receivingUpdateVersion)와 연동하여 다중 사용자 동시 작업 시 중복 로딩 지연 제거
     useEffect(() => {
         if (!isActive) return;
         refreshLocalBatches(batches.length > 0);
@@ -351,25 +342,48 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const hasDraft = useMemo(() => !isDraftLoading && draft && ((draft.items && draft.items.length > 0) || !!draft.selectedSupplier), [draft, isDraftLoading]);
 
     const setupNewBatchState = () => {
-        setEditingBatch(null); setSelectedSupplier(null); setSupplierSearch('');
-        setBatchDate(getLocalTodayString()); setCurrentItems([]);
+        setEditingBatch(null);
+        editingBatchRef.current = null;
+        setSelectedSupplier(null);
+        latestSupplierRef.current = null;
+        setSupplierSearch('');
+        const today = getLocalTodayString();
+        setBatchDate(today);
+        latestDateRef.current = today;
+        setCurrentItems([]);
+        latestItemsRef.current = [];
     };
 
     const handleResumeDraft = () => {
         if (!draft) return;
-        setEditingBatch(null); setSelectedSupplier(draft.selectedSupplier);
+        setEditingBatch(null);
+        editingBatchRef.current = null;
+        setSelectedSupplier(draft.selectedSupplier);
+        latestSupplierRef.current = draft.selectedSupplier;
         setSupplierSearch(draft.selectedSupplier ? draft.selectedSupplier.name : '');
-        setBatchDate(draft.currentDate || getLocalTodayString());
-        setCurrentItems(draft.items || []);
+        const dateVal = draft.currentDate || getLocalTodayString();
+        setBatchDate(dateVal);
+        latestDateRef.current = dateVal;
+        const itemsVal = draft.items || [];
+        setCurrentItems(itemsVal);
+        latestItemsRef.current = itemsVal;
         showToast("작성 중이던 내용을 불러왔습니다.", "success");
         openEditor();
     };
 
     const startNewBatch = () => { setupNewBatchState(); openEditor(); };
     const editBatch = (batch: ReceivingBatch) => {
-        setEditingBatch(batch); setSelectedSupplier(batch.supplier);
-        setSupplierSearch(batch.supplier.name); setBatchDate(batch.date);
-        setCurrentItems(batch.items || []); openEditor();
+        setEditingBatch(batch);
+        editingBatchRef.current = batch;
+        setSelectedSupplier(batch.supplier);
+        latestSupplierRef.current = batch.supplier;
+        setSupplierSearch(batch.supplier.name);
+        setBatchDate(batch.date);
+        latestDateRef.current = batch.date;
+        const itemsVal = batch.items || [];
+        setCurrentItems(itemsVal);
+        latestItemsRef.current = itemsVal;
+        openEditor();
     };
 
     const filteredSuppliers = useMemo(() => {
@@ -381,7 +395,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     }, [sortedCustomers, supplierSearch]);
 
     const handleSelectSupplier = (customer: Customer) => {
-        setSelectedSupplier(customer); 
+        setSelectedSupplier(customer);
+        latestSupplierRef.current = customer;
         setSupplierSearch(customer.name); 
         setShowSupplierDropdown(false); 
         recordUsage(customer.comcode);
@@ -401,7 +416,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     };
 
     const handleClearSupplier = () => {
-        setSelectedSupplier(null); 
+        setSelectedSupplier(null);
+        latestSupplierRef.current = null;
         setSupplierSearch(''); 
         requestAnimationFrame(() => supplierSearchInputRef.current?.focus());
         
@@ -418,6 +434,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         setCurrentItems(prev => {
             const newItem: ReceivingItem = { ...itemData, uniqueId: Date.now() + Math.random() };
             const updatedItems = [...prev, newItem];
+            latestItemsRef.current = updatedItems;
 
             if (!editingBatchRef.current) {
                 saveDraft({
@@ -436,6 +453,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const handleRemoveItem = useCallback((uniqueId: number) => {
         setCurrentItems(prev => {
             const updatedItems = prev.filter(i => i.uniqueId !== uniqueId);
+            latestItemsRef.current = updatedItems;
             if (!editingBatchRef.current) {
                 saveDraft({
                     currentDate: latestDateRef.current,
@@ -447,32 +465,42 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         });
     }, [saveDraft]);
 
-    const handleSaveBatch = async () => {
-        if (!selectedSupplier) { showAlert('거래처를 선택해주세요.'); return; }
-        if (currentItems.length === 0) { showAlert('입고할 품목이 없습니다.'); return; }
-        const totalAmount = currentItems.reduce((sum, item) => sum + (item.costPrice * item.quantity), 0);
+    const handleSaveBatch = useCallback(async () => {
+        const curSupplier = latestSupplierRef.current;
+        const curItems = latestItemsRef.current;
+        const curDate = latestDateRef.current;
+        const curEditing = editingBatchRef.current;
+
+        if (!curSupplier) { showAlert('거래처를 선택해주세요.'); return; }
+        if (curItems.length === 0) { showAlert('입고할 품목이 없습니다.'); return; }
+        const totalAmount = curItems.reduce((sum, item) => sum + (item.costPrice * item.quantity), 0);
         const batchToSave: ReceivingBatch = {
-            id: editingBatch ? editingBatch.id : Date.now(),
-            date: batchDate, supplier: selectedSupplier, items: currentItems,
-            itemCount: currentItems.length, totalAmount,
-            status: editingBatch ? editingBatch.status : 'draft',
-            sentAt: editingBatch?.sentAt
+            id: curEditing ? curEditing.id : Date.now(),
+            date: curDate, supplier: curSupplier, items: curItems,
+            itemCount: curItems.length, totalAmount,
+            status: curEditing ? curEditing.status : 'draft',
+            sentAt: curEditing?.sentAt
         };
         try {
             await receiveDb.saveOrUpdateBatch(batchToSave);
-            // Firebase 실시간 DB로 브로드캐스트하여 다른 작업자 기기에도 즉시 공유
             try { await addReceivingBatch(batchToSave); } catch (e) {}
-            if (!editingBatch) removeDraft();
+            if (!curEditing) removeDraft();
             showToast('저장되었습니다.', 'success');
             closeEditor();
             await refreshReceivingState();
             setTimeout(() => refreshLocalBatches(true), 50);
         } catch (e: any) { showAlert(`저장에 실패했습니다. (${e.message})`); }
-    };
+    }, [showAlert, removeDraft, showToast, closeEditor, refreshReceivingState, refreshLocalBatches]);
 
     const handleClearForm = () => {
         showAlert("작성 중인 내용을 모두 지우시겠습니까?", () => {
-            setSelectedSupplier(null); setSupplierSearch(''); setCurrentItems([]); removeDraft(); showToast("초기화되었습니다.", 'success');
+            setSelectedSupplier(null);
+            latestSupplierRef.current = null;
+            setSupplierSearch('');
+            setCurrentItems([]);
+            latestItemsRef.current = [];
+            removeDraft();
+            showToast("초기화되었습니다.", 'success');
         }, "초기화", "bg-rose-500 hover:bg-rose-500");
     };
 
@@ -481,15 +509,23 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         isProcessingScanRef.current = true;
 
         try {
-            // searchByBarcode는 '로컬' 설정 시 로컬 우선 조회 후 없을 때만(서버 ON 시) 서버 조회
             let product = await searchByBarcode(code);
             
             if (product) {
                 openItemModal({ isOpen: true, product, source: 'scan' });
             } else {
-                const unregisteredProduct: Product = { barcode: code, name: '', costPrice: 0, sellingPrice: 0, spec: '' };
-                openItemModal({ isOpen: true, product: unregisteredProduct, source: 'scan' });
-                showToast('미등록 상품입니다. 정보를 입력하세요.', 'success');
+                // 미등록 상품 스캔 시 카메라 오인식일 수 있으므로 [재스캔] / [계속(직접입력)] 선택 알림 표시
+                showAlert(
+                    `[${code}]\n미등록 바코드입니다.\n다시 스캔하거나 미등록 상품으로 계속 입력하시겠습니까?`,
+                    () => { isProcessingScanRef.current = false; },
+                    '재스캔',
+                    'bg-indigo-600 hover:bg-indigo-700',
+                    () => {
+                        const unregisteredProduct: Product = { barcode: code, name: '', costPrice: 0, sellingPrice: 0, spec: '' };
+                        openItemModal({ isOpen: true, product: unregisteredProduct, source: 'scan' });
+                    },
+                    '계속 입력'
+                );
             }
         } catch (error) {
             isProcessingScanRef.current = false;
@@ -498,9 +534,13 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         }
     };
 
-    const handleScanButtonClick = () => {
-        openScanner('modal', onScanDetected, { continuous: true });
-    };
+    const handleScanButtonClick = useCallback(() => {
+        openScanner('modal', onScanDetected, {
+            continuous: true,
+            onSaveAndExit: handleSaveBatch,
+            saveAndExitCount: latestItemsRef.current.length
+        });
+    }, [openScanner, handleSaveBatch]);
 
     const currentTotalAmount = currentItems.reduce((sum, i) => sum + (i.costPrice * i.quantity), 0);
     const isUnregisteredBarcode = productSearchResults.length === 0 && /^\d{7,}$/.test(debouncedProductSearch);
@@ -637,6 +677,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                                     value={batchDate} 
                                     onChange={e => { 
                                         setBatchDate(e.target.value); 
+                                        latestDateRef.current = e.target.value;
                                         if(!editingBatchRef.current) saveDraft({ currentDate: e.target.value, selectedSupplier, items: currentItems }); 
                                     }} 
                                     className="h-11 px-2 border border-gray-300 rounded-xl text-sm font-bold text-gray-700 bg-white shadow-sm focus:ring-2 focus:ring-indigo-500 w-[115px]"
@@ -707,7 +748,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                     currentItems={currentItems}
                     onClose={closeItemModal}
                     onAdd={handleAddItem}
-                    onScanNext={addItemModalProps.source === 'scan' ? () => {} : undefined}
+                    onScanNext={addItemModalProps.source === 'scan' ? handleScanButtonClick : undefined}
                     timestamp={addItemModalProps.scanTimestamp}
                 />
             )}

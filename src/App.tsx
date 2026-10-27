@@ -1,8 +1,9 @@
-import React, { useState, lazy, Suspense, useEffect } from 'react';
-import { AppProvider, useModals, useScanner, useSyncState } from './context/AppContext';
+import React, { useState, lazy, Suspense, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { AppProvider, useModals, useScanner, useSyncState, useAlert } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/Header';
-import { SpinnerIcon } from './components/Icons';
+import { SpinnerIcon, CloudArrowDownIcon } from './components/Icons';
 import LoginPage from './pages/LoginPage';
 import AddItemModal from './components/AddItemModal';
 import EditItemModal from './components/EditItemModal';
@@ -67,8 +68,9 @@ const AppContent: React.FC = () => {
         editingOrder
      } = useModals();
     const { isScannerOpen, onScanSuccess, closeScanner, options } = useScanner();
+    const { isAlertOpen } = useAlert();
 
-    const isAnyInputModalOpen = !!addItemModalProps || !!editItemModalProps || !!isClearHistoryModalOpen || !!isDeliveryModalOpen || window.history.state?.modal === 'receiveItem' || window.history.state?.modal === 'auditItem' || window.history.state?.modal === 'continuousEventAdd';
+    const isAnyInputModalOpen = isAlertOpen || !!addItemModalProps || !!editItemModalProps || !!isClearHistoryModalOpen || !!isDeliveryModalOpen || window.history.state?.modal === 'receiveItem' || window.history.state?.modal === 'auditItem' || window.history.state?.modal === 'continuousEventAdd';
     
     return (
         <div className="h-full w-full flex flex-col bg-transparent">
@@ -88,6 +90,8 @@ const AppContent: React.FC = () => {
                       onScanSuccess={onScanSuccess} 
                       continuous={options?.continuous}
                       isPaused={isAnyInputModalOpen}
+                      onSaveAndExit={options?.onSaveAndExit}
+                      saveAndExitCount={options?.saveAndExitCount}
                   />
               )}
               {isClearHistoryModalOpen && <ClearHistoryModal isOpen={isClearHistoryModalOpen} onClose={closeClearHistoryModal} />}
@@ -147,9 +151,34 @@ const AppRouter: React.FC = () => {
 
 const App: React.FC = () => {
     const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
+    const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+    const waitingWorkerRef = useRef<ServiceWorker | null>(null);
+    const deferUpdateToNextForegroundRef = useRef<boolean>(false);
+
+    const promptUserForUpdate = useCallback((worker: ServiceWorker) => {
+        waitingWorkerRef.current = worker;
+        // 이미 '계속 사용'을 눌러 다음 포그라운드 업데이트로 예약한 상태가 아닐 때만 선택창 표시
+        if (!deferUpdateToNextForegroundRef.current) {
+            setIsUpdateModalOpen(true);
+        }
+    }, []);
+
+    const applyUpdateNow = useCallback(() => {
+        setIsUpdateModalOpen(false);
+        deferUpdateToNextForegroundRef.current = false;
+        if (waitingWorkerRef.current) {
+            waitingWorkerRef.current.postMessage({ type: 'SKIP_WAITING' });
+        } else if (registration?.waiting) {
+            registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+    }, [registration]);
+
+    const handleContinueUsing = useCallback(() => {
+        setIsUpdateModalOpen(false);
+        deferUpdateToNextForegroundRef.current = true;
+    }, []);
     
     useEffect(() => {
-        // ZXing 라이브러리 미리 로드 (아이폰/구형기기 폴백용)
         if (!document.querySelector(`script[src="${ZXING_CDN}"]`)) {
             const script = document.createElement('script');
             script.src = ZXING_CDN;
@@ -161,66 +190,93 @@ const App: React.FC = () => {
         if ('serviceWorker' in navigator && !IS_DEVELOPER_MODE && !isPreview) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/service-worker.js').then(reg => {
-                        setRegistration(reg);
-                        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                        reg.addEventListener('updatefound', () => {
-                            const newWorker = reg.installing;
-                            if (newWorker) {
-                                newWorker.addEventListener('statechange', () => {
-                                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                        newWorker.postMessage({ type: 'SKIP_WAITING' });
-                                    }
-                                });
-                            }
-                        });
+                    setRegistration(reg);
+                    if (reg.waiting) {
+                        promptUserForUpdate(reg.waiting);
+                    }
+                    reg.addEventListener('updatefound', () => {
+                        const newWorker = reg.installing;
+                        if (newWorker) {
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    promptUserForUpdate(newWorker);
+                                }
+                            });
+                        }
                     });
+                });
             });
             let refreshing = false;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (!refreshing) { refreshing = true; window.location.reload(); }
+                if (!refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                }
             });
         }
-    }, []);
-
-    // 모바일 크롬 일반 탭에서 실행된 경우에도 첫 터치 시 주소줄이 없는 풀 전체화면으로 자동 전환 시도
-    useEffect(() => {
-        const isStandalone = window.matchMedia('(display-mode: fullscreen)').matches ||
-            window.matchMedia('(display-mode: standalone)').matches ||
-            (window.navigator as any).standalone === true;
-        const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-
-        if (isStandalone || !isTouchDevice || IS_DEVELOPER_MODE) return;
-
-        const tryEnterFullscreenOnFirstTap = (e: MouseEvent) => {
-            const target = e.target as HTMLElement | null;
-            if (target && target.closest('input, textarea, select')) return;
-
-            const docEl = document.documentElement as any;
-            const reqFs = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
-            if (!document.fullscreenElement && reqFs) {
-                Promise.resolve(reqFs.call(docEl, { navigationUI: 'hide' })).catch(() => {});
-            }
-            document.removeEventListener('click', tryEnterFullscreenOnFirstTap);
-        };
-
-        document.addEventListener('click', tryEnterFullscreenOnFirstTap, { passive: true });
-        return () => document.removeEventListener('click', tryEnterFullscreenOnFirstTap);
-    }, []);
+    }, [promptUserForUpdate]);
 
     useEffect(() => {
         const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible' && registration) {
-                registration.update().catch(err => console.warn("SW update check failed", err));
+            if (document.visibilityState === 'visible') {
+                // 사용자가 이전에 '계속 사용'을 선택했고 대기 중인 업데이트가 있다면, 포그라운드 복귀 시 즉시 자동 업데이트
+                if (deferUpdateToNextForegroundRef.current && (waitingWorkerRef.current || registration?.waiting)) {
+                    applyUpdateNow();
+                    return;
+                }
+                if (registration) {
+                    registration.update().catch(err => console.warn("SW update check failed", err));
+                }
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-    }, [registration]);
+    }, [registration, applyUpdateNow]);
 
     return (
         <AuthProvider>
             <AppProvider>
                 <AppRouter />
+                {isUpdateModalOpen && createPortal(
+                    <div
+                        className="fixed inset-0 bg-black/50 z-[350] flex items-center justify-center p-4 animate-fade-in-down"
+                        role="dialog"
+                        aria-modal="true"
+                    >
+                        <div
+                            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-100"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <div className="p-6 text-center space-y-2.5">
+                                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-2">
+                                    <CloudArrowDownIcon className="w-7 h-7" />
+                                </div>
+                                <h3 className="text-lg font-extrabold text-slate-800">새 버전 업데이트 안내</h3>
+                                <p className="text-xs text-slate-600 leading-relaxed">
+                                    앱의 새로운 업데이트가 감지되었습니다.<br />
+                                    작업 중이시라면 <strong>[계속 사용]</strong>을 누르시면 현재 화면을 유지하며, 다음번 앱 전환(포그라운드 복귀) 시 자동으로 업데이트됩니다.
+                                </p>
+                            </div>
+                            <div className="bg-slate-50 p-3 grid grid-cols-2 gap-2.5 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={handleContinueUsing}
+                                    className="py-3 px-4 rounded-xl font-bold text-sm text-slate-700 bg-gray-200 hover:bg-gray-300 active:scale-95 transition-transform"
+                                >
+                                    계속 사용
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={applyUpdateNow}
+                                    className="py-3 px-4 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm active:scale-95 transition-transform"
+                                >
+                                    업데이트
+                                </button>
+                            </div>
+                        </div>
+                    </div>,
+                    document.body
+                )}
             </AppProvider>
         </AuthProvider>
     );

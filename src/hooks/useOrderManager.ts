@@ -60,12 +60,15 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
     const updateItem = useCallback((barcode: string, newValues: Partial<OrderItem>) => {
         setItems(prev => {
             if (newValues.quantity === 0) {
-                return prev.filter(item => item.barcode !== barcode);
+                const filtered = prev.filter(item => item.barcode !== barcode);
+                onItemsChange?.(filtered);
+                return filtered;
             }
-            const updatedItems = prev.map(item => item.barcode === barcode ? { ...item, ...newValues } : item);
-            return normalizeItems(updatedItems);
+            const updatedItems = normalizeItems(prev.map(item => item.barcode === barcode ? { ...item, ...newValues } : item));
+            onItemsChange?.(updatedItems);
+            return updatedItems;
         });
-    }, []);
+    }, [onItemsChange]);
 
     const addOrUpdateItem = useCallback((product: Product, details: { quantity: number; unit: '개' | '박스'; memo?: string; }) => {
         setItems(prevItems => {
@@ -110,7 +113,9 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
                         price: priceToUse,
                     };
                 }
-                return normalizeItems(updatedItems);
+                const normalized = normalizeItems(updatedItems);
+                onItemsChange?.(normalized);
+                return normalized;
             } else {
                 if (details.quantity <= 0) {
                     return prevItems;
@@ -122,33 +127,43 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
                     quantity: details.quantity,
                     unit: details.unit,
                     memo: details.memo || '',
-                    ...snapshot
+                    ...snapshot,
+                    isModified: false
                 };
-                return normalizeItems([...prevItems, newItem]);
+                const normalized = normalizeItems([...prevItems, newItem]);
+                onItemsChange?.(normalized);
+                return normalized;
             }
         });
-    }, []);
+    }, [onItemsChange]);
 
     const removeItem = useCallback((barcode: string) => {
-        setItems(prev => prev.filter(item => item.barcode !== barcode));
-    }, []);
+        setItems(prev => {
+            const filtered = prev.filter(item => item.barcode !== barcode);
+            onItemsChange?.(filtered);
+            return filtered;
+        });
+    }, [onItemsChange]);
 
     const reorderItems = useCallback((startIndex: number, endIndex: number) => {
         setItems(prev => {
             const result = Array.from(prev);
             const [removed] = result.splice(startIndex, 1);
             result.splice(endIndex, 0, removed);
+            onItemsChange?.(result);
             return result;
         });
-    }, []);
+    }, [onItemsChange]);
 
     const totalAmount = useMemo(() => {
         return Math.floor(items.reduce((sum, item) => sum + (item.price * item.quantity), 0));
     }, [items]);
 
     const resetItems = useCallback((newItems: OrderItem[] = []) => {
-        setItems(normalizeItems(newItems));
-    }, []);
+        const normalized = normalizeItems(newItems);
+        onItemsChange?.(normalized);
+        setItems(normalized);
+    }, [onItemsChange]);
 
     return {
         items,
@@ -156,7 +171,7 @@ export const useOrderManager = ({ initialItems = [], onItemsChange }: UseOrderMa
         addOrUpdateItem,
         removeItem,
         reorderItems,
-        resetItems,
         totalAmount,
+        resetItems
     };
 };

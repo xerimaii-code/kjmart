@@ -34,7 +34,6 @@ export interface ModalsActions {
 }
 
 // --- CONTEXTS ---
-// We can use a single context as state and actions are often used together in modal logic.
 const ModalsContext = createContext<(ModalsState & ModalsActions) | undefined>(undefined);
 
 // --- INITIAL STATE ---
@@ -70,7 +69,7 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 if (prev.isDeliveryModalOpen && modalState !== 'delivery') {
                     next.isDeliveryModalOpen = false; next.orderToExport = null;
                 }
-                if (prev.addItemModalProps && !['addItem', 'scanner'].includes(modalState)) { // Keep open if scanner is active
+                if (prev.addItemModalProps && !['addItem', 'scanner'].includes(modalState)) {
                     next.addItemModalProps = null;
                 }
                 if (prev.editItemModalProps && modalState !== 'editItem') {
@@ -88,20 +87,19 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     // --- ACTIONS ---
     const openModalWithHistory = useCallback((modalName: string, stateUpdate: () => void) => {
+        stateUpdate();
         if (navLock.current) return;
-        navLock.current = true;
-        setTimeout(() => { navLock.current = false; }, 300);
         if (window.history.state?.modal !== modalName) {
+            navLock.current = true;
+            setTimeout(() => { navLock.current = false; }, 300);
             window.history.pushState({ modal: modalName }, '', '');
         }
-        stateUpdate();
     }, []);
     
     const closeModalWithHistory = useCallback((modalName: string, stateUpdate: () => void) => {
+        stateUpdate();
         if (window.history.state?.modal === modalName) {
             window.history.back();
-        } else {
-            stateUpdate();
         }
     }, []);
 

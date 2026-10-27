@@ -146,7 +146,7 @@ const OrderDetailModal: React.FC = () => {
     const { updateOrder } = useDataActions();
     const { showAlert, showToast } = useAlert();
     const { editingOrder: activeOrder, closeDetailModal, openAddItemModal, openEditItemModal, closeEditItemModal } = useModals();
-    const { openScanner } = useScanner();
+    const { openScanner, closeScanner } = useScanner();
     const { sqlStatus } = useMiscUI();
     const { dataSourceSettings } = useDeviceSettings();
     
@@ -174,8 +174,14 @@ const OrderDetailModal: React.FC = () => {
 
     const isProcessingScanRef = useRef(false);
     const itemsRef = useRef<OrderItem[]>([]);
+
+    const handleItemsChange = useCallback((newItems: OrderItem[]) => {
+        itemsRef.current = newItems;
+    }, []);
+
     const { items, addOrUpdateItem, updateItem, removeItem, reorderItems, resetItems, totalAmount } = useOrderManager({
         initialItems: activeOrder?.items || [],
+        onItemsChange: handleItemsChange,
     });
 
     useEffect(() => { itemsRef.current = items; }, [items]);
@@ -237,56 +243,18 @@ const OrderDetailModal: React.FC = () => {
         saveDraft(activeOrder.id, { items });
     }, [items, activeOrder, draftLoaded, isCompleted, hasChanges]);
 
-    const handleOpenScanner = useCallback(() => {
-        const onScan = async (barcode: string) => {
-            if (isProcessingScanRef.current) return;
-            isProcessingScanRef.current = true;
-            try {
-                // searchByBarcode를 직접 호출하여 '로컬' / '서버' 설정 및 온라인 폴백 규칙을 정확히 준수
-                const product = await searchByBarcode(barcode);
-                if (product) {
-                    sessionProductsRef.current.set(product.barcode, product);
-                    const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
-                    openAddItemModal({
-                        product, existingItem: existingItem || null, trigger: 'scan',
-                        onAdd: (details) => { addOrUpdateItem(product, details); isProcessingScanRef.current = false; },
-                        onClose: () => { isProcessingScanRef.current = false; }, 
-                        onNextScan: handleOpenScanner,
-                        initialSettings: { unit: existingItem ? existingItem.unit : (isBoxUnitDefault ? '박스' : '개') },
-                        timestamp: Date.now()
-                    });
-                } else {
-                    isProcessingScanRef.current = false;
-                    showAlert("등록되지 않은 상품입니다.");
-                }
-            } catch (e) { isProcessingScanRef.current = false; }
-        };
-        openScanner('modal', onScan, { continuous: true });
-    }, [openScanner, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, showAlert, searchByBarcode]);
-
-    const handleDragStart = (idx: number) => setDraggedIdx(idx);
-    const handleDragEnd = () => { setDraggedIdx(null); setDropIdx(null); };
-    const handleDragOver = (e: React.DragEvent, idx: number) => {
-        e.preventDefault();
-        if (draggedIdx === idx) return;
-        setDropIdx(idx);
-    };
-    const handleDrop = (e: React.DragEvent, targetIdx: number) => {
-        e.preventDefault();
-        if (draggedIdx === null || draggedIdx === targetIdx) return;
-        reorderItems(draggedIdx, targetIdx);
-        handleDragEnd();
-    };
-
-    if (!activeOrder) return null;
-
-    const handleFinalUpdate = async () => {
+    const handleFinalUpdate = useCallback(async () => {
         if (!activeOrder) return;
+        const currentItems = itemsRef.current;
+        if (currentItems.length === 0) {
+            showAlert('발주 품목이 없습니다.');
+            return;
+        }
         setIsSaving(true);
         try {
             const isLocalMode = dataSourceSettings.newOrder === 'offline';
 
-            const itemsWithSnapshot: OrderItem[] = await Promise.all(items.map(async (item) => {
+            const itemsWithSnapshot: OrderItem[] = await Promise.all(currentItems.map(async (item) => {
                 let prod = sessionProductsRef.current.get(item.barcode) || products.find(p => p.barcode === item.barcode);
                 
                 if (!prod && !isLocalMode && sqlStatus === 'connected') {
@@ -341,7 +309,59 @@ const OrderDetailModal: React.FC = () => {
             showToast("수정 내역이 저장되었습니다.", 'success');
             closeDetailModal();
         } catch (err) { showAlert('저장에 실패했습니다.'); } finally { setIsSaving(false); }
+    }, [activeOrder, dataSourceSettings.newOrder, products, sqlStatus, searchByBarcode, updateOrder, showToast, closeDetailModal, showAlert]);
+
+    const handleOpenScanner = useCallback(() => {
+        const onScan = async (barcode: string) => {
+            if (isProcessingScanRef.current) return;
+            isProcessingScanRef.current = true;
+            try {
+                const product = await searchByBarcode(barcode);
+                if (product) {
+                    sessionProductsRef.current.set(product.barcode, product);
+                    const existingItem = itemsRef.current.find(item => item.barcode === product.barcode);
+                    openAddItemModal({
+                        product, existingItem: existingItem || null, trigger: 'scan',
+                        onAdd: (details) => { addOrUpdateItem(product, details); isProcessingScanRef.current = false; },
+                        onClose: () => { isProcessingScanRef.current = false; }, 
+                        onNextScan: handleOpenScanner,
+                        initialSettings: { unit: existingItem ? existingItem.unit : (isBoxUnitDefault ? '박스' : '개') },
+                        timestamp: Date.now()
+                    });
+                } else {
+                    showAlert(
+                        `[${barcode}]\n등록되지 않은 상품입니다.\n다시 스캔하시겠습니까?`,
+                        () => { isProcessingScanRef.current = false; },
+                        '재스캔',
+                        'bg-indigo-600 hover:bg-indigo-700',
+                        () => { isProcessingScanRef.current = false; closeScanner(); },
+                        '취소'
+                    );
+                }
+            } catch (e) { isProcessingScanRef.current = false; }
+        };
+        openScanner('modal', onScan, {
+            continuous: true,
+            onSaveAndExit: handleFinalUpdate,
+            saveAndExitCount: itemsRef.current.length
+        });
+    }, [openScanner, closeScanner, openAddItemModal, addOrUpdateItem, isBoxUnitDefault, showAlert, searchByBarcode, handleFinalUpdate]);
+
+    const handleDragStart = (idx: number) => setDraggedIdx(idx);
+    const handleDragEnd = () => { setDraggedIdx(null); setDropIdx(null); };
+    const handleDragOver = (e: React.DragEvent, idx: number) => {
+        e.preventDefault();
+        if (draggedIdx === idx) return;
+        setDropIdx(idx);
     };
+    const handleDrop = (e: React.DragEvent, targetIdx: number) => {
+        e.preventDefault();
+        if (draggedIdx === null || draggedIdx === targetIdx) return;
+        reorderItems(draggedIdx, targetIdx);
+        handleDragEnd();
+    };
+
+    if (!activeOrder) return null;
 
     const modalFooter = (
         <div className="w-full">

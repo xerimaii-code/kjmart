@@ -1,15 +1,15 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useDeviceSettings, useAlert } from '../context/AppContext';
-import { XCircleIcon, BarcodeScannerIcon, SpinnerIcon, SparklesIcon, BoltIcon } from './Icons';
+import { XCircleIcon, BarcodeScannerIcon, SpinnerIcon, SparklesIcon, BoltIcon, SaveIcon, WarningIcon } from './Icons';
+import { analyzeBarcodeChecksum } from '../pages/ProductEditPage';
 import './ScannerModal.css';
 
 declare const BarcodeDetector: any;
 declare const ZXing: any;
 
 const LONG_PRESS_DURATION = 600; 
-const SCAN_TIMEOUT_DURATION = 8000; // 8s to accommodate slower phases
+const SCAN_TIMEOUT_DURATION = 8000;
 
 const getGlobalAudioCtx = () => {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -20,15 +20,48 @@ const getGlobalAudioCtx = () => {
     return (window as any)._kjAudioCtx as AudioContext;
 };
 
+/**
+ * 카메라 스캔 시 빛 반사/흔들림으로 인해 잘못 읽힌(오인식) 바코드인지 판별합니다.
+ * - 제어문자/특수기호 포함 또는 4자리 미만의 깨진 조각
+ * - 8자리/12자리/13자리 표준 숫자 바코드인데 Modulo-10 체크섬이 틀린 경우 (카메라 오인식의 90% 이상 차지)
+ */
+function checkScannedBarcodeValidity(raw: string): { valid: boolean; reason?: string } {
+    const code = (raw || '').trim();
+    if (!code || code.length < 4) {
+        return { valid: false, reason: '바코드 길이가 너무 짧습니다 (카메라 오인식 의심)' };
+    }
+    if (!/^[0-9A-Za-z-_]+$/.test(code)) {
+        return { valid: false, reason: '유효하지 않은 문자가 포함되어 있습니다' };
+    }
+    const analysis = analyzeBarcodeChecksum(code);
+    if (analysis.status === 'checksum_mismatch') {
+        return {
+            valid: false,
+            reason: `표준(${analysis.standardType}) 체크섬이 일치하지 않습니다 (카메라 오인식 의심)`
+        };
+    }
+    return { valid: true };
+}
+
 interface ScannerModalProps {
     isOpen: boolean;
     onClose: () => void;
     onScanSuccess: (barcode: string) => void;
     continuous?: boolean; 
     isPaused?: boolean;
+    onSaveAndExit?: () => void;
+    saveAndExitCount?: number;
 }
 
-const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSuccess, continuous = false, isPaused = false }) => {
+const ScannerModal: React.FC<ScannerModalProps> = ({
+    isOpen,
+    onClose,
+    onScanSuccess,
+    continuous = false,
+    isPaused = false,
+    onSaveAndExit,
+    saveAndExitCount = 0
+}) => {
     const { scanSettings, selectedCameraId, selectedCameraLabel, setSelectedCameraId } = useDeviceSettings();
     const { showToast } = useAlert();
     
@@ -41,7 +74,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const countdownIntervalRef = useRef<any>(null);
     const longPressTimerRef = useRef<any>(null);
     
-    // Dynamic interval refs
     const scanLoopTimeoutRef = useRef<any>(null);
     const scanSessionStartTimeRef = useRef<number>(0);
     
@@ -51,6 +83,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const isHandlingResult = useRef(false); 
     const isMountedRef = useRef(false);
     const isLongPressRef = useRef(false);
+    // ZXing(소프트웨어 디코더) 사용 시 흔들림에 의한 1프레임 오인식을 막기 위한 이전 프레임 후보 기록
+    const lastCandidateRef = useRef<{ code: string; time: number } | null>(null);
     
     const [engineMode, setEngineMode] = useState<'gpu' | 'zxing' | 'checking'>('checking');
     const [isStreamReady, setIsStreamReady] = useState(false);
@@ -59,9 +93,15 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     const [isProcessingSuccess, setIsProcessingSuccess] = useState(false);
     const [isRendered, setIsRendered] = useState(false);
     const [timeLeft, setTimeLeft] = useState(8);
-    const [currentInterval, setCurrentInterval] = useState<number>(0); // Display current ms
+    const [currentInterval, setCurrentInterval] = useState<number>(0);
 
-    // Sync state to ref (Backup mechanism)
+    // 카메라 오인식/형식 오류 발생 시 스캐너와 충돌하지 않는 전용 미니 확인창 상태
+    const [invalidScanAlert, setInvalidScanAlert] = useState<{
+        isOpen: boolean;
+        barcode: string;
+        reason: string;
+    }>({ isOpen: false, barcode: '', reason: '' });
+
     useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
 
     useEffect(() => {
@@ -72,7 +112,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     const formats = await (BarcodeDetector as any).getSupportedFormats();
                     if (formats.includes('ean_13')) {
                         gpuDetectorRef.current = new BarcodeDetector({ 
-                            formats: ['ean_13', 'ean_8', 'qr_code', 'code_128', 'code_39'] 
+                            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'] 
                         });
                         setEngineMode('gpu');
                         return;
@@ -93,6 +133,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         if (isOpen) {
             setTimeout(() => setIsRendered(true), 10);
             isHandlingResult.current = false;
+            setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
             setScanState('idle'); 
             scanStateRef.current = 'idle'; 
             setIsProcessingSuccess(false);
@@ -100,18 +141,19 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             startCamera();
         } else {
             setIsRendered(false);
+            setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
             stopCamera();
             stopScanningLoop();
         }
     }, [isOpen]);
 
     useEffect(() => {
-        if (isOpen && isStreamReady && !scanSettings.useScannerButton && scanState === 'idle' && !isPaused) {
+        if (isOpen && isStreamReady && !scanSettings.useScannerButton && scanState === 'idle' && !isPaused && !invalidScanAlert.isOpen) {
             startScanningSession();
         }
-    }, [isOpen, isStreamReady, scanSettings.useScannerButton, isPaused]);
+    }, [isOpen, isStreamReady, scanSettings.useScannerButton, isPaused, invalidScanAlert.isOpen]);
 
-    const playBeep = useCallback(() => {
+    const playBeep = useCallback((isError = false) => {
         if (!scanSettings.soundOnScan) return;
         const ctx = getGlobalAudioCtx();
         if (!ctx) return;
@@ -120,14 +162,14 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
                 osc.connect(gain); gain.connect(ctx.destination);
-                osc.type = 'square';
-                const playTime = ctx.currentTime + 0.05;
-                osc.frequency.setValueAtTime(2400, playTime); 
+                osc.type = isError ? 'sawtooth' : 'square';
+                const playTime = ctx.currentTime + 0.02;
+                osc.frequency.setValueAtTime(isError ? 440 : 2400, playTime); 
                 gain.gain.setValueAtTime(0, playTime);
                 gain.gain.linearRampToValueAtTime(0.8, playTime + 0.002);
-                gain.gain.setValueAtTime(0.8, playTime + 0.07);
-                gain.gain.linearRampToValueAtTime(0, playTime + 0.1);
-                osc.start(playTime); osc.stop(playTime + 0.12);
+                gain.gain.setValueAtTime(0.8, playTime + (isError ? 0.14 : 0.07));
+                gain.gain.linearRampToValueAtTime(0, playTime + (isError ? 0.18 : 0.1));
+                osc.start(playTime); osc.stop(playTime + (isError ? 0.2 : 0.12));
             } catch (e) {}
         };
         if (ctx.state !== 'running') ctx.resume().then(doBeep).catch(doBeep);
@@ -150,19 +192,19 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         const res = scanSettings.scanResolution === '480p' ? { w: 854, h: 480 } : { w: 1280, h: 720 };
         const fpsConfig = scanSettings.scanFps === 'auto' ? { ideal: 30 } : { ideal: scanSettings.scanFps };
         
-        const constraintsBase = {
+        // 연속 자동 초점(continuous autofocus) 힌트 추가로 근접 바코드 스캔 정확도 향상
+        const constraintsBase: any = {
             width: { ideal: res.w }, 
             height: { ideal: res.h }, 
-            frameRate: fpsConfig
+            frameRate: fpsConfig,
+            advanced: [{ focusMode: 'continuous' }]
         };
 
         try {
-            // Step 1: Enumerate devices to check for labels.
             let devices = await navigator.mediaDevices.enumerateDevices();
             let videoDevices = devices.filter(d => d.kind === 'videoinput');
             const hasLabels = videoDevices.some(d => d.label);
 
-            // Step 2: If no labels or empty list, request permission to populate labels.
             if (videoDevices.length === 0 || !hasLabels) {
                 try {
                     const tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -170,19 +212,15 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     await new Promise(r => setTimeout(r, 50));
                     devices = await navigator.mediaDevices.enumerateDevices();
                     videoDevices = devices.filter(d => d.kind === 'videoinput');
-                } catch (permErr) {
-                    // Ignore permission error here, will be caught later.
-                }
+                } catch (permErr) {}
             }
 
-            // Step 3: Device ID recovery logic (matches by label if deviceId changed across sessions).
             let deviceIdToUse = selectedCameraId;
             const idExists = deviceIdToUse ? videoDevices.some(d => d.deviceId === deviceIdToUse) : false;
 
             if (!idExists && selectedCameraLabel) {
                 const labelMatch = videoDevices.find(d => d.label === selectedCameraLabel);
                 if (labelMatch) {
-                    console.log(`Recovered camera via label: ${labelMatch.label}`);
                     deviceIdToUse = labelMatch.deviceId;
                     await setSelectedCameraId(labelMatch.deviceId, labelMatch.label);
                 } else {
@@ -190,7 +228,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 }
             }
             
-            // Step 4: Get the final stream with the correct device ID, with automatic environment fallback.
             let stream: MediaStream;
             if (deviceIdToUse) {
                 try {
@@ -198,7 +235,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         video: { ...constraintsBase, deviceId: { exact: deviceIdToUse } }
                     });
                 } catch (ConstraintErr) {
-                    console.warn("Exact camera ID failed, falling back to environment camera:", ConstraintErr);
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: { ...constraintsBase, facingMode: 'environment' }
                     });
@@ -213,6 +249,15 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 stream.getTracks().forEach(t => t.stop());
                 return;
             }
+
+            // 하드웨어 연속 초점(continuous) 및 노출 보정 지원 시 트랙에 직접 적용
+            try {
+                const track = stream.getVideoTracks()[0];
+                const caps = (track as any)?.getCapabilities?.();
+                if (caps?.focusMode?.includes?.('continuous')) {
+                    await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] });
+                }
+            } catch (e) {}
 
             mediaStreamRef.current = stream;
             if (videoRef.current) {
@@ -238,14 +283,10 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         
         setScanState('idle');
         scanStateRef.current = 'idle';
-        setCurrentInterval(0); // Reset display
+        setCurrentInterval(0);
     };
 
-    const handleScanResult = (barcode: string) => {
-        if (isHandlingResult.current) return;
-        isHandlingResult.current = true;
-        stopScanningLoop();
-        playBeep();
+    const acceptValidBarcode = (barcode: string) => {
         setIsProcessingSuccess(true);
         onScanSuccess(barcode);
         
@@ -255,26 +296,101 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             setTimeout(() => {
                 if (isMountedRef.current) {
                     setIsProcessingSuccess(false);
-                    setTimeout(() => { if (isMountedRef.current) isHandlingResult.current = false; }, 800); 
-                    if (!scanSettings.useScannerButton) startScanningSession();
+                    setTimeout(() => { if (isMountedRef.current) isHandlingResult.current = false; }, 650); 
+                    if (!scanSettings.useScannerButton && !invalidScanAlert.isOpen) startScanningSession();
                 }
             }, 100);
         }
     };
 
-    // --- Adaptive Delay Logic (4-step phase) ---
+    const handleScanResult = (rawBarcode: string) => {
+        if (isHandlingResult.current || invalidScanAlert.isOpen) return;
+        const barcode = (rawBarcode || '').trim();
+        if (!barcode) return;
+
+        const validity = checkScannedBarcodeValidity(barcode);
+
+        // 만약 체크섬 불일치이거나 비표준 짧은 코드인데 1프레임만 튀어서 읽힌 경우,
+        // 400ms 이내에 동일 코드가 2번 연속 읽혔는지 확인하여 순간적인 초점 흔들림 오인식을 1차 차단합니다.
+        if (!validity.valid || (engineMode === 'zxing' && barcode.length !== 13 && barcode.length !== 8)) {
+            const now = Date.now();
+            if (!lastCandidateRef.current || lastCandidateRef.current.code !== barcode || now - lastCandidateRef.current.time > 450) {
+                lastCandidateRef.current = { code: barcode, time: now };
+                scheduleNextScan();
+                return;
+            }
+        }
+        lastCandidateRef.current = null;
+
+        isHandlingResult.current = true;
+        stopScanningLoop();
+
+        if (!validity.valid) {
+            // 형식에 어긋나거나 체크섬이 깨진 오인식 바코드일 때 작은 미니 알림창([재스캔] / [계속] / [취소]) 표시
+            playBeep(true);
+            setInvalidScanAlert({
+                isOpen: true,
+                barcode,
+                reason: validity.reason || '바코드 형식이 올바르지 않습니다.'
+            });
+            return;
+        }
+
+        playBeep(false);
+        acceptValidBarcode(barcode);
+    };
+
+    // 미니 알림창에서 [재스캔] 클릭 시: 카메라 스트림을 끄지 않고 즉시 스캔 재개
+    const handleRescanFromAlert = () => {
+        setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
+        isHandlingResult.current = false;
+        setTimeout(() => {
+            if (isMountedRef.current) {
+                startScanningSession();
+            }
+        }, 80);
+    };
+
+    // 미니 알림창에서 [계속(그대로 사용)] 클릭 시: 비표준 자체 코드 등으로 간주하고 작업 계속 진행
+    const handleContinueWithInvalidBarcode = () => {
+        const codeToUse = invalidScanAlert.barcode;
+        setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
+        acceptValidBarcode(codeToUse);
+    };
+
+    // 미니 알림창에서 [취소] 클릭 시: 알림창을 닫고 대기 상태(또는 스캐너 종료)로 복귀
+    const handleCancelFromAlert = () => {
+        setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
+        isHandlingResult.current = false;
+        if (!continuous) {
+            onClose();
+        }
+    };
+
+    // 스캐너 하단 중앙 [저장 & 종료] 버튼 클릭 핸들러
+    const handleSaveAndExitClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        stopScanningLoop();
+        stopCamera();
+        onClose();
+        if (onSaveAndExit) {
+            setTimeout(() => {
+                onSaveAndExit();
+            }, 120);
+        }
+    };
+
     const getAdaptiveDelay = (elapsed: number, resolution: '480p' | '720p') => {
         if (resolution === '480p') {
-            // [Power Saving Mode] 100ms ~ 200ms
-            if (elapsed < 2000) return 100;  // 0~2s: 10fps
-            if (elapsed < 4000) return 150;  // 2~4s: 6.6fps
-            return 200;                      // 4s+: 5fps (Low Heat)
+            if (elapsed < 2000) return 90;
+            if (elapsed < 4000) return 140;
+            return 190;
         } else {
-            // [Quality Priority] 100ms ~ 250ms
-            if (elapsed < 1500) return 100;  // 0~1.5s: 10fps
-            if (elapsed < 3000) return 150;  // 1.5~3s: 6.6fps
-            if (elapsed < 5000) return 200;  // 3~5s: 5fps
-            return 250;                      // 5s+: 4fps
+            if (elapsed < 1800) return 80;
+            if (elapsed < 3500) return 130;
+            if (elapsed < 5500) return 180;
+            return 230;
         }
     };
 
@@ -282,7 +398,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         const video = videoRef.current;
         const guide = guideRef.current;
         
-        if (!video || isPaused || isHandlingResult.current || scanStateRef.current !== 'scanning' || !guide) return;
+        if (!video || isPaused || invalidScanAlert.isOpen || isHandlingResult.current || scanStateRef.current !== 'scanning' || !guide) return;
 
         try {
             const videoWidth = video.videoWidth;
@@ -290,43 +406,45 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
             const vw = video.clientWidth;
             const vh = video.clientHeight;
 
-            const scale = Math.max(vw / videoWidth, vh / videoHeight);
-            const dW = videoWidth * scale;
-            const dH = videoHeight * scale;
-            const offsetX = (dW - vw) / 2;
-            const offsetY = (dH - vh) / 2;
+            if (videoWidth > 0 && videoHeight > 0 && vw > 0 && vh > 0) {
+                const scale = Math.max(vw / videoWidth, vh / videoHeight);
+                const dW = videoWidth * scale;
+                const dH = videoHeight * scale;
+                const offsetX = (dW - vw) / 2;
+                const offsetY = (dH - vh) / 2;
 
-            const rect = guide.getBoundingClientRect();
-            const containerRect = video.parentElement?.getBoundingClientRect() || { left: 0, top: 0 };
-            
-            const gX = rect.left - containerRect.left;
-            const gY = rect.top - containerRect.top;
-            const gW = rect.width;
-            const gH = rect.height;
-
-            const cropX = (gX + offsetX) / scale;
-            const cropY = (gY + offsetY) / scale;
-            const cropW = gW / scale;
-            const cropH = gH / scale;
-
-            const canvas = canvasRef.current;
-            canvas.width = cropW;
-            canvas.height = cropH;
-            const ctx = canvas.getContext('2d', { alpha: false });
-            if (ctx) {
-                ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                const rect = guide.getBoundingClientRect();
+                const containerRect = video.parentElement?.getBoundingClientRect() || { left: 0, top: 0 };
                 
-                if (engineMode === 'gpu' && gpuDetectorRef.current) {
-                    const barcodes = await gpuDetectorRef.current.detect(canvas);
-                    if (barcodes.length > 0) {
-                        handleScanResult(barcodes[0].rawValue);
-                        return;
-                    }
-                } else if (zxingReaderRef.current) {
-                    const result = await zxingReaderRef.current.decodeFromCanvas(canvas);
-                    if (result) {
-                        handleScanResult(result.text);
-                        return;
+                const gX = rect.left - containerRect.left;
+                const gY = rect.top - containerRect.top;
+                const gW = rect.width;
+                const gH = rect.height;
+
+                const cropX = Math.max(0, (gX + offsetX) / scale);
+                const cropY = Math.max(0, (gY + offsetY) / scale);
+                const cropW = Math.min(videoWidth - cropX, gW / scale);
+                const cropH = Math.min(videoHeight - cropY, gH / scale);
+
+                const canvas = canvasRef.current;
+                canvas.width = cropW;
+                canvas.height = cropH;
+                const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+                if (ctx) {
+                    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                    
+                    if (engineMode === 'gpu' && gpuDetectorRef.current) {
+                        const barcodes = await gpuDetectorRef.current.detect(canvas);
+                        if (barcodes.length > 0) {
+                            handleScanResult(barcodes[0].rawValue);
+                            return;
+                        }
+                    } else if (zxingReaderRef.current) {
+                        const result = await zxingReaderRef.current.decodeFromCanvas(canvas);
+                        if (result) {
+                            handleScanResult(result.text);
+                            return;
+                        }
                     }
                 }
             }
@@ -336,13 +454,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     };
 
     const scheduleNextScan = () => {
-        if (scanStateRef.current !== 'scanning' || isHandlingResult.current) return;
+        if (scanStateRef.current !== 'scanning' || isHandlingResult.current || invalidScanAlert.isOpen) return;
 
         const now = Date.now();
         const elapsed = now - scanSessionStartTimeRef.current;
         const delay = getAdaptiveDelay(elapsed, scanSettings.scanResolution);
         
-        // Only update state if delay changes to avoid re-renders
         if (delay !== currentInterval) {
             setCurrentInterval(delay);
         }
@@ -351,7 +468,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
     };
 
     const startScanningSession = () => {
-        if (!isStreamReady || isPaused) return;
+        if (!isStreamReady || isPaused || invalidScanAlert.isOpen) return;
         
         if (autoStopTimerRef.current) clearTimeout(autoStopTimerRef.current); 
         if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
@@ -365,7 +482,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         setTimeLeft(8);
         scanSessionStartTimeRef.current = Date.now();
         
-        // Initial delay set
         const initialDelay = getAdaptiveDelay(0, scanSettings.scanResolution);
         setCurrentInterval(initialDelay);
 
@@ -389,15 +505,12 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         scheduleNextScan();
     };
 
-    // Use onPointerDown for instant manual scan response
     const handlePointerDown = (e: React.PointerEvent) => {
-        if (!scanSettings.useScannerButton) return;
-        e.preventDefault(); // Prevent accidental selection/scrolling
+        if (!scanSettings.useScannerButton || invalidScanAlert.isOpen) return;
+        e.preventDefault();
         e.stopPropagation();
         
         isLongPressRef.current = false;
-        
-        // Start scanning immediately on touch down
         startScanningSession();
 
         longPressTimerRef.current = setTimeout(() => {
@@ -408,10 +521,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
         }, LONG_PRESS_DURATION);
     };
 
-    const handlePointerUp = (e: React.PointerEvent) => {
+    const handlePointerUp = () => {
         if (!scanSettings.useScannerButton) return;
         if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
-        // Do nothing on up, as scanning started on down.
     };
 
     if (!isOpen) return null;
@@ -430,7 +542,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         <span className="text-[10px] font-black text-white uppercase tracking-wider">GPU 가속</span>
                     </div>
                 )}
-                {/* Mode Tip */}
                 <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-lg ${isPowerSaving ? 'bg-indigo-500/80 border-indigo-400' : 'bg-blue-500/80 border-blue-400'}`}>
                     {isPowerSaving ? <BoltIcon className="w-3 h-3 text-white" /> : <SparklesIcon className="w-3 h-3 text-white" />}
                     <span className="text-[10px] font-black text-white uppercase tracking-wider">
@@ -447,7 +558,6 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                 <div className="w-[85%] max-w-[22rem] flex flex-col items-center relative">
                     
                     <div className="w-full flex flex-col items-center absolute bottom-full mb-[10px]">
-                        {/* Current Interval Indicator */}
                         {scanState === 'scanning' && currentInterval > 0 && (
                             <div className="mb-1 text-[10px] font-mono text-white/70 bg-black/20 px-1.5 rounded">
                                 {currentInterval}ms
@@ -459,7 +569,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                         <div ref={guideRef} className={`scanner-guide-hole w-full transition-all duration-300 ${isProcessingSuccess ? 'success' : (scanState === 'scanning' ? 'scanning' : 'idle')}`} />
                     </div>
 
-                    {scanSettings.useScannerButton && !isPaused && (
+                    {scanSettings.useScannerButton && !isPaused && !invalidScanAlert.isOpen && (
                         <div className="w-full h-[75px] pointer-events-auto z-[2100]">
                             <button 
                                 onPointerDown={handlePointerDown}
@@ -487,6 +597,74 @@ const ScannerModal: React.FC<ScannerModalProps> = ({ isOpen, onClose, onScanSucc
                     )}
                 </div>
             </div>
+
+            {/* 화면 하단 중앙: 발주/입고 스캔 작업 중 바로 전표를 저장하고 목록으로 돌아가는 [저장 & 종료] 버튼 */}
+            {onSaveAndExit && !isPaused && !invalidScanAlert.isOpen && (
+                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-[2400] w-[85%] max-w-[20rem] pointer-events-auto safe-area-pb">
+                    <button
+                        type="button"
+                        onClick={handleSaveAndExitClick}
+                        disabled={saveAndExitCount <= 0}
+                        className={`w-full h-13 py-3.5 px-5 rounded-2xl font-extrabold text-base flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 border ${
+                            saveAndExitCount > 0
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-400/50'
+                                : 'bg-black/50 text-white/40 border-white/10 cursor-not-allowed'
+                        }`}
+                    >
+                        <SaveIcon className="w-5 h-5" />
+                        <span>저장 & 종료 {saveAndExitCount > 0 ? `(${saveAndExitCount}건)` : ''}</span>
+                    </button>
+                </div>
+            )}
+
+            {/* 카메라 오인식 / 바코드 형식 오류 시 표시되는 소형 확인창 (카메라와 충돌 없이 재스캔/계속/취소 제어) */}
+            {invalidScanAlert.isOpen && (
+                <div
+                    className="fixed inset-0 bg-black/70 z-[2600] flex items-center justify-center p-4 animate-fade-in-down pointer-events-auto"
+                    onClick={e => e.stopPropagation()}
+                >
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden border border-slate-100 p-4 space-y-3">
+                        <div className="flex items-center gap-2 text-amber-600 justify-center">
+                            <WarningIcon className="w-5 h-5 flex-shrink-0" />
+                            <h4 className="font-extrabold text-slate-800 text-sm">바코드 인식 확인</h4>
+                        </div>
+                        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200 text-center">
+                            <p className="font-mono font-black text-base text-rose-600 tracking-wider break-all">
+                                {invalidScanAlert.barcode}
+                            </p>
+                            <p className="text-[11px] font-semibold text-slate-500 mt-1 leading-snug">
+                                {invalidScanAlert.reason}
+                            </p>
+                        </div>
+                        <div className="flex flex-col gap-1.5 pt-1">
+                            <button
+                                type="button"
+                                onClick={handleRescanFromAlert}
+                                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5"
+                            >
+                                <BarcodeScannerIcon className="w-4 h-4" />
+                                <span>재스캔</span>
+                            </button>
+                            <div className="grid grid-cols-2 gap-1.5">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelFromAlert}
+                                    className="py-2 bg-gray-100 hover:bg-gray-200 text-slate-600 font-bold text-xs rounded-xl active:scale-95 transition-transform"
+                                >
+                                    취소
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleContinueWithInvalidBarcode}
+                                    className="py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl active:scale-95 transition-transform"
+                                >
+                                    계속 작업
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>,
         document.body
     );
