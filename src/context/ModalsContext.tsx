@@ -76,7 +76,7 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 if (prev.editItemModalProps && modalState !== 'editItem') {
                     next.editItemModalProps = null;
                 }
-                if (prev.isScannerOpen && !['scanner', 'addItem', 'receiveItem'].includes(modalState)) {
+                if (prev.isScannerOpen && !['scanner', 'addItem', 'receiveItem', 'auditItem', 'continuousEventAdd'].includes(modalState)) {
                     next.isScannerOpen = false;
                 }
                 return next;
@@ -116,7 +116,10 @@ export const ModalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         openClearHistoryModal: () => setModalsState(p => ({ ...p, isClearHistoryModalOpen: true })),
         closeClearHistoryModal: () => setModalsState(p => ({ ...p, isClearHistoryModalOpen: false })),
         // 스캐너를 열거나 닫을 때 혹시 남아 있을 수 있는 수량 입력창 상태(addItemModalProps)도 함께 정리하여 중복/잔상 팝업 방지
-        openScanner: (context: ScannerContextType, onScan: (b: string) => void, opts: boolean | ScannerOptions) => openModalWithHistory('scanner', () => setModalsState(p => ({ ...p, addItemModalProps: null, isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, options: typeof opts === 'boolean' ? { continuous: opts, useHighPrecision: false } : opts }))),
+        openScanner: (context: ScannerContextType, onScan: (b: string) => void, opts: boolean | ScannerOptions) => {
+            openModalWithHistory('scanner', () => setModalsState(p => ({ ...p, addItemModalProps: null, isScannerOpen: true, scannerContext: context, onScanSuccess: onScan, options: typeof opts === 'boolean' ? { continuous: opts, useHighPrecision: false } : opts })));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('kjmart-scanner-resume')), 0);
+        },
         closeScanner: () => closeModalWithHistory('scanner', () => setModalsState(p => ({ ...p, addItemModalProps: null, isScannerOpen: false }))),
     }), [openModalWithHistory, closeModalWithHistory]);
 

@@ -80,6 +80,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
     const countdownIntervalRef = useRef<any>(null);
     const longPressTimerRef = useRef<any>(null);
     const resumeDelayTimerRef = useRef<any>(null);
+    const postScanFallbackTimerRef = useRef<any>(null);
     
     const scanLoopTimeoutRef = useRef<any>(null);
     const scanSessionStartTimeRef = useRef<number>(0);
@@ -151,6 +152,7 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         return () => {
             isMountedRef.current = false;
             if (resumeDelayTimerRef.current) clearTimeout(resumeDelayTimerRef.current);
+            if (postScanFallbackTimerRef.current) clearTimeout(postScanFallbackTimerRef.current);
             stopScanningLoop();
             stopCamera();
         };
@@ -168,17 +170,64 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
             startCamera();
         } else {
             if (resumeDelayTimerRef.current) clearTimeout(resumeDelayTimerRef.current);
+            if (postScanFallbackTimerRef.current) clearTimeout(postScanFallbackTimerRef.current);
             setInvalidScanAlert({ isOpen: false, barcode: '', reason: '' });
             stopCamera();
             stopScanningLoop();
         }
     }, [isOpen]);
 
-    // 수량 입력창이 뜨면(isPaused=true) 비디오 프레임과 디코딩을 즉시 정지하여 뒤쪽 깜빡임을 원천 차단
+    const resumeCameraFeed = useCallback(() => {
+        if (!isMountedRef.current || !isOpen || isPausedRef.current || invalidScanAlertOpenRef.current) return;
+        if (postScanFallbackTimerRef.current) {
+            clearTimeout(postScanFallbackTimerRef.current);
+            postScanFallbackTimerRef.current = null;
+        }
+        canvasRef.current.width = 0;
+        canvasRef.current.height = 0;
+        lastCandidateRef.current = null;
+        try {
+            if (videoRef.current && videoRef.current.paused) {
+                videoRef.current.play().catch(() => {});
+            }
+        } catch (e) {}
+
+        if (resumeDelayTimerRef.current) {
+            clearTimeout(resumeDelayTimerRef.current);
+        }
+        resumeDelayTimerRef.current = setTimeout(() => {
+            if (!isMountedRef.current || isPausedRef.current || invalidScanAlertOpenRef.current) return;
+            try {
+                if (videoRef.current && videoRef.current.paused) {
+                    videoRef.current.play().catch(() => {});
+                }
+            } catch (e) {}
+            isHandlingResult.current = false;
+            setIsProcessingSuccess(false);
+            if (!scanSettings.useScannerButton && scanStateRef.current === 'idle') {
+                startScanningSession();
+            }
+        }, 150);
+    }, [isOpen, scanSettings.useScannerButton]);
+
+    useEffect(() => {
+        const handleResumeEvent = () => {
+            resumeCameraFeed();
+        };
+        window.addEventListener('kjmart-scanner-resume', handleResumeEvent);
+        return () => window.removeEventListener('kjmart-scanner-resume', handleResumeEvent);
+    }, [resumeCameraFeed]);
+
+    // 수량 입력창이 뜨면(isPaused=true) 비디오 프레임과 디코딩을 즉시 정지하여 뒤쪽 깜빡임을 원천 차단하고,
+    // 수량 입력창이 닫히면(isPaused=false) 즉시 비디오 재생을 재개하여 바코드 조준 화면이 움직이도록 처리
     useEffect(() => {
         if (resumeDelayTimerRef.current) {
             clearTimeout(resumeDelayTimerRef.current);
             resumeDelayTimerRef.current = null;
+        }
+        if (postScanFallbackTimerRef.current) {
+            clearTimeout(postScanFallbackTimerRef.current);
+            postScanFallbackTimerRef.current = null;
         }
 
         if (isPaused) {
@@ -193,25 +242,9 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         }
 
         if (isOpen && isStreamReady && !invalidScanAlert.isOpen) {
-            canvasRef.current.width = 0;
-            canvasRef.current.height = 0;
-            lastCandidateRef.current = null;
-            try {
-                if (videoRef.current && videoRef.current.paused) {
-                    videoRef.current.play().catch(() => {});
-                }
-            } catch (e) {}
-
-            resumeDelayTimerRef.current = setTimeout(() => {
-                if (!isMountedRef.current || isPausedRef.current || invalidScanAlertOpenRef.current) return;
-                isHandlingResult.current = false;
-                setIsProcessingSuccess(false);
-                if (!scanSettings.useScannerButton && scanStateRef.current === 'idle') {
-                    startScanningSession();
-                }
-            }, 300);
+            resumeCameraFeed();
         }
-    }, [isOpen, isStreamReady, isPaused, invalidScanAlert.isOpen, scanSettings.useScannerButton]);
+    }, [isOpen, isStreamReady, isPaused, invalidScanAlert.isOpen, scanSettings.useScannerButton, resumeCameraFeed]);
 
     const playBeep = useCallback((isError = false) => {
         if (!scanSettings.soundOnScan) return;
@@ -355,6 +388,14 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         
         if (!continuous) {
             setTimeout(() => { if (isMountedRef.current) onClose(); }, 80);
+        } else {
+            // 만약 모달이 열리지 않는 경우(예: 토스트만 표시되거나 비동기 조회 후 취소)에도 카메라가 멈추지 않도록 안전 복구
+            if (postScanFallbackTimerRef.current) clearTimeout(postScanFallbackTimerRef.current);
+            postScanFallbackTimerRef.current = setTimeout(() => {
+                if (isMountedRef.current && !isPausedRef.current && !invalidScanAlertOpenRef.current) {
+                    resumeCameraFeed();
+                }
+            }, 600);
         }
     };
 
@@ -419,6 +460,8 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         isHandlingResult.current = false;
         if (!continuous) {
             onClose();
+        } else {
+            resumeCameraFeed();
         }
     };
 

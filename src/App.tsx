@@ -69,11 +69,15 @@ const AppContent: React.FC = () => {
      } = useModals();
     const { isScannerOpen, onScanSuccess, closeScanner, options } = useScanner();
     const { isAlertOpen } = useAlert();
-    const [isReceiveItemOpen, setIsReceiveItemOpen] = useState<boolean>(() => !!(window as any).__isReceiveItemModalOpen);
+    const [isLocalInputModalOpen, setIsLocalInputModalOpen] = useState<boolean>(
+        () => !!((window as any).__isReceiveItemModalOpen || (window as any).__isAuditItemModalOpen || (window as any).__isEventAddModalOpen)
+    );
 
     useEffect(() => {
         const syncModalFlag = () => {
-            setIsReceiveItemOpen(!!(window as any).__isReceiveItemModalOpen);
+            setIsLocalInputModalOpen(
+                !!((window as any).__isReceiveItemModalOpen || (window as any).__isAuditItemModalOpen || (window as any).__isEventAddModalOpen)
+            );
         };
         window.addEventListener('kjmart-modal-change', syncModalFlag);
         window.addEventListener('popstate', syncModalFlag);
@@ -83,7 +87,7 @@ const AppContent: React.FC = () => {
         };
     }, []);
 
-    const isAnyInputModalOpen = isAlertOpen || isReceiveItemOpen || !!addItemModalProps || !!editItemModalProps || !!isClearHistoryModalOpen || !!isDeliveryModalOpen || window.history.state?.modal === 'receiveItem' || window.history.state?.modal === 'auditItem' || window.history.state?.modal === 'continuousEventAdd';
+    const isAnyInputModalOpen = isAlertOpen || isLocalInputModalOpen || !!addItemModalProps || !!editItemModalProps || !!isClearHistoryModalOpen || !!isDeliveryModalOpen || window.history.state?.modal === 'receiveItem' || window.history.state?.modal === 'auditItem' || window.history.state?.modal === 'continuousEventAdd';
     
     return (
         <div className="h-full w-full flex flex-col bg-transparent">

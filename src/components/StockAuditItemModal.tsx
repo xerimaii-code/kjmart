@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Product } from '../types';
@@ -62,8 +61,6 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
     const { uiFeedback } = useDeviceSettings();
     const { closeScanner } = useScanner();
 
-    const [isMounted, setIsMounted] = useState(false);
-    const [isVisible, setIsVisible] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLeftHanded, setIsLeftHanded] = useLocalStorage<boolean>('pos_layout_left_handed', false);
     const [isPositionLocked, setIsPositionLocked] = useLocalStorage<boolean>('pos_modal_locked', false);
@@ -72,26 +69,31 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
 
     useEffect(() => {
         if (isOpen) {
-            setIsMounted(true);
             setIsSubmitting(false);
+            (window as any).__isAuditItemModalOpen = true;
+            window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
             initAudio();
-            const t = setTimeout(() => setIsVisible(true), 10);
-            return () => clearTimeout(t);
+            return () => {
+                (window as any).__isAuditItemModalOpen = false;
+                window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
+                window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
+            };
         } else {
-            setIsVisible(false);
-            const t = setTimeout(() => setIsMounted(false), 150);
-            return () => clearTimeout(t);
+            (window as any).__isAuditItemModalOpen = false;
+            window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
+            window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
         }
     }, [isOpen]);
 
     useEffect(() => {
         if (isOpen && product) {
+            setIsSubmitting(false);
             setQtyStr('1');
             isFirstInputRef.current = true;
         }
     }, [isOpen, product, timestamp]);
 
-    if (!isMounted || !product) return null;
+    if (!isOpen || !product) return null;
 
     const KeypadButton = ({ onClick, className, children }: any) => (
         <button 
@@ -132,11 +134,12 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
         <div className="flex flex-col gap-1 h-full w-full min-w-0">
             <div className="flex flex-col gap-1 flex-shrink-0 mb-1">
                 <div className="grid grid-cols-2 gap-1">
-                    <ActionButton onAction={() => { closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm font-bold">
+                    <ActionButton onAction={() => { setIsSubmitting(true); closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm font-bold">
                         <XCircleIcon className="w-4 h-4 mr-1" />취소
                     </ActionButton>
                     <ActionButton 
                         onAction={() => { 
+                            setIsSubmitting(true);
                             if (onSkip) onSkip(); 
                             else if (trigger === 'scan') onConfirm(Number(qtyStr), true); 
                             else onClose(); 
@@ -147,21 +150,31 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                     </ActionButton>
                 </div>
                 <ActionButton 
-                    onAction={() => onConfirm(Number(qtyStr), false)} 
+                    onAction={() => {
+                        setIsSubmitting(true);
+                        closeScanner();
+                        onConfirm(Number(qtyStr), false);
+                    }} 
                     className="bg-white border-2 border-indigo-100 text-indigo-600 h-12 text-xs sm:text-sm font-black"
                 >
                     <SaveIcon className="w-4 h-4 mr-1.5" />{actionLabel}&종료
                 </ActionButton>
                 {trigger === 'scan' ? (
                     <ActionButton 
-                        onAction={() => onConfirm(Number(qtyStr), true)} 
+                        onAction={() => {
+                            setIsSubmitting(true);
+                            onConfirm(Number(qtyStr), true);
+                        }} 
                         className="bg-indigo-600 text-white h-16 text-base sm:text-xl font-black active:bg-indigo-700"
                     >
                         <BarcodeScannerIcon className="w-5 h-5 sm:w-7 sm:h-7 mr-2" />{actionLabel}후스캔
                     </ActionButton>
                 ) : (
                     <ActionButton 
-                        onAction={() => onConfirm(Number(qtyStr), false)} 
+                        onAction={() => {
+                            setIsSubmitting(true);
+                            onConfirm(Number(qtyStr), false);
+                        }} 
                         className="bg-indigo-600 text-white h-16 text-base sm:text-xl font-black active:bg-indigo-700"
                     >
                         <CheckCircleIcon className="w-5 h-5 sm:w-7 sm:h-7 mr-2" />{isImmediate ? '즉시 적용' : '확인'}
@@ -230,7 +243,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
     const backdropClass = trigger === 'scan' ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center transition-colors duration-200 ${isVisible ? backdropClass : 'bg-transparent'}`} onClick={(e) => { if(e.target === e.currentTarget && !isSubmitting) onClose(); }} role="dialog" aria-modal="true">
+        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`} onClick={(e) => { if(e.target === e.currentTarget && !isSubmitting) onClose(); }} role="dialog" aria-modal="true">
             <KeypadLayout layoutId="audit_keypad_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body

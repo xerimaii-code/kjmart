@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAlert } from '../context/AppContext';
@@ -73,6 +72,22 @@ const EventContinuousAddModal: React.FC<EventContinuousAddModalProps> = ({
     const [isLoading, setIsLoading] = useState(true);
 
     const isDuplicateLocal = useMemo(() => product ? existingBarcodes.includes(product.barcode) : false, [product, existingBarcodes]);
+
+    useEffect(() => {
+        if (isOpen) {
+            (window as any).__isEventAddModalOpen = true;
+            window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
+            return () => {
+                (window as any).__isEventAddModalOpen = false;
+                window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
+                window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
+            };
+        } else {
+            (window as any).__isEventAddModalOpen = false;
+            window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
+            window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
+        }
+    }, [isOpen]);
     
     useEffect(() => {
         if (isOpen) {

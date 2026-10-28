@@ -99,7 +99,7 @@ END CATCH
 const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const { products: localProducts } = useDataState();
     const { showAlert, showToast } = useAlert();
-    const { openScanner } = useScanner();
+    const { openScanner, closeScanner } = useScanner();
     const { sqlStatus, checkSql } = useMiscUI();
 
     const [auditedItems, setAuditedItems] = useState<AuditedItem[]>([]);
@@ -167,7 +167,8 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 stockQuantity: realTimeStock !== null ? realTimeStock : product.stockQuantity
             };
             
-            if (window.history.state?.modal !== 'auditItem') {
+            // 스캔 모드일 때는 이미 'scanner' 히스토리가 열려 있으므로 중복 히스토리 푸시로 인한 popstate 충돌 방지
+            if (trigger !== 'scan' && window.history.state?.modal !== 'auditItem') {
                 window.history.pushState({ modal: 'auditItem' }, '', '');
             }
             
@@ -184,6 +185,7 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             else showAlert(`'${barcode}'는 등록되지 않은 바코드입니다.`);
         };
         openScanner('inventory-audit', onScan, { continuous: true });
+        window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
     }, [localProducts, searchByBarcode, openScanner, showAlert, sqlStatus]);
 
     const handleCloseAuditModal = () => {
@@ -206,6 +208,13 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const handleAddAudit = async (auditQty: number, nextScan: boolean = false) => {
         if (!auditModalProps.product || isSaving) return;
         const p = auditModalProps.product;
+
+        setSearchTerm('');
+        if (nextScan) {
+            handleOpenScanner();
+        } else {
+            closeScanner();
+        }
         
         if (applyMode === 'immediate') {
             if (sqlStatus !== 'connected') {
@@ -240,9 +249,6 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             });
             showToast(`전송 목록에 추가되었습니다.`, 'success');
         }
-        
-        setSearchTerm('');
-        if (nextScan) setTimeout(() => handleOpenScanner(), 300);
     };
 
     const handleRemoveItem = (barcode: string) => {
@@ -435,8 +441,8 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                     trigger={auditModalProps.trigger}
                     prevQty={auditedItems.find(i => i.barcode === auditModalProps.product?.barcode)?.auditQty || 0}
                     onClose={handleCloseAuditModal}
-                    onConfirm={(qty, nextScan) => { handleAddAudit(qty, nextScan); handleCloseAuditModal(); }}
-                    onSkip={() => { handleCloseAuditModal(); if(auditModalProps.trigger === 'scan') setTimeout(handleOpenScanner, 300); }}
+                    onConfirm={(qty, nextScan) => { handleCloseAuditModal(); handleAddAudit(qty, nextScan); }}
+                    onSkip={() => { handleCloseAuditModal(); if(auditModalProps.trigger === 'scan') handleOpenScanner(); }}
                     timestamp={auditModalProps.timestamp}
                 />
             )}
