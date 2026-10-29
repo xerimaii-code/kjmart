@@ -74,7 +74,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const { customers, products } = useDataState();
     const { showAlert, showToast } = useAlert();
     const { sqlStatus, checkSql, refreshReceivingState, receivingUpdateVersion } = useMiscUI();
-    const { openScanner } = useScanner();
+    const { openScanner, closeScanner } = useScanner();
     
     const [isEditorOpen, setIsEditorOpen] = useState(false);
     const [batches, setBatches] = useState<ReceivingBatch[]>([]);
@@ -571,17 +571,26 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             if (product) {
                 openItemModal({ isOpen: true, product, source: 'scan' });
             } else {
-                // 미등록 상품 스캔 시 카메라 오인식일 수 있으므로 [재스캔] / [계속(직접입력)] 선택 알림 표시
+                // 미등록 상품 스캔 시 카메라 오인식 또는 신제품 가능성이 있으므로 [재스캔] / [미등록 계속 입력] / [취소] 3버튼 알림 표시
                 showAlert(
                     `[${code}]\n미등록 바코드입니다.\n다시 스캔하거나 미등록 상품으로 계속 입력하시겠습니까?`,
-                    () => { isProcessingScanRef.current = false; },
+                    () => {
+                        isProcessingScanRef.current = false;
+                        window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
+                    },
                     '재스캔',
                     'bg-indigo-600 hover:bg-indigo-700',
                     () => {
                         const unregisteredProduct: Product = { barcode: code, name: '', costPrice: 0, sellingPrice: 0, spec: '' };
                         openItemModal({ isOpen: true, product: unregisteredProduct, source: 'scan' });
                     },
-                    '계속 입력'
+                    '미등록 계속 입력',
+                    undefined,
+                    () => {
+                        isProcessingScanRef.current = false;
+                        closeScanner();
+                    },
+                    '취소'
                 );
             }
         } catch (error) {

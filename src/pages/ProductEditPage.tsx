@@ -45,12 +45,14 @@ export interface BarcodeChecksumAnalysis {
     standardType?: 'EAN-13' | 'EAN-8' | 'UPC-A';
     expectedDigit?: number;
     actualDigit?: number;
+    isMissingCheckDigit?: boolean;
 }
 
 const PRODUCT_EDIT_DRAFT_KEY = 'kjmart_product_edit_draft_v1';
 
 /**
- * 표준 바코드(EAN-13, EAN-8, UPC-A) 체크섬(Modulo 10) 검증 및 자동 교정 번호 산출 함수.
+ * 한국 마트 환경에 맞춘 바코드(EAN-13/KAN-13, 자체코드 200/240, 수입 49/69 등, EAN-8 단축코드) 체크섬 검증 및
+ * 1자리 덜 입력된 경우(12자리 -> 13자리 EAN-13, 7자리 -> 8자리 EAN-8) 끝자리 체크섬 자동 완성 함수.
  */
 export function analyzeBarcodeChecksum(rawCode: string): BarcodeChecksumAnalysis {
     const code = (rawCode || '').trim();
@@ -58,6 +60,7 @@ export function analyzeBarcodeChecksum(rawCode: string): BarcodeChecksumAnalysis
         return { status: 'empty', original: '', corrected: '' };
     }
 
+    // 1. 13자리 숫자: EAN-13 (한국 880, 매장 자체코드 200/240, 일본 49/45, 중국 69 등 표준 13자리)
     if (/^\d{13}$/.test(code)) {
         const digits = code.split('').map(Number);
         let sum = 0;
@@ -74,9 +77,52 @@ export function analyzeBarcodeChecksum(rawCode: string): BarcodeChecksumAnalysis
             standardType: 'EAN-13',
             expectedDigit: expected,
             actualDigit: actual,
+            isMissingCheckDigit: false,
         };
     }
 
+    // 2. 12자리 숫자:
+    // - 북미 수입품(0 또는 1로 시작) 중 UPC-A 체크섬이 정확히 일치하는 경우에만 UPC-A 정상 처리
+    // - 그 외 모든 12자리(880, 200, 240, 49 등 13자리 EAN-13에서 마지막 체크섬 1자리를 덜 입력한 경우)는
+    //   12자리 전체를 기준으로 13번째 EAN-13 체크섬 숫자를 계산하여 끝에 붙인 13자리 완성 번호를 제시합니다.
+    if (/^\d{12}$/.test(code)) {
+        const digits = code.split('').map(Number);
+        if (/^[01]/.test(code)) {
+            let upcSum = 0;
+            for (let i = 0; i < 11; i++) {
+                upcSum += digits[i] * (i % 2 === 0 ? 3 : 1);
+            }
+            const upcExpected = (10 - (upcSum % 10)) % 10;
+            if (upcExpected === digits[11]) {
+                return {
+                    status: 'valid',
+                    original: code,
+                    corrected: code,
+                    standardType: 'UPC-A',
+                    expectedDigit: upcExpected,
+                    actualDigit: digits[11],
+                    isMissingCheckDigit: false,
+                };
+            }
+        }
+
+        let ean13Sum = 0;
+        for (let i = 0; i < 12; i++) {
+            ean13Sum += digits[i] * (i % 2 === 0 ? 1 : 3);
+        }
+        const expected = (10 - (ean13Sum % 10)) % 10;
+        const corrected = code + String(expected);
+        return {
+            status: 'checksum_mismatch',
+            original: code,
+            corrected,
+            standardType: 'EAN-13',
+            expectedDigit: expected,
+            isMissingCheckDigit: true,
+        };
+    }
+
+    // 3. 8자리 숫자: EAN-8 (담배, 번들 구성품 등 8자리 단축코드)
     if (/^\d{8}$/.test(code)) {
         const digits = code.split('').map(Number);
         let sum = 0;
@@ -93,25 +139,26 @@ export function analyzeBarcodeChecksum(rawCode: string): BarcodeChecksumAnalysis
             standardType: 'EAN-8',
             expectedDigit: expected,
             actualDigit: actual,
+            isMissingCheckDigit: false,
         };
     }
 
-    if (/^\d{12}$/.test(code)) {
+    // 4. 7자리 숫자: 8자리 EAN-8 바코드에서 마지막 체크섬 1자리를 덜 입력한 경우 -> 8번째 체크섬 계산하여 추가 제시
+    if (/^\d{7}$/.test(code)) {
         const digits = code.split('').map(Number);
         let sum = 0;
-        for (let i = 0; i < 11; i++) {
+        for (let i = 0; i < 7; i++) {
             sum += digits[i] * (i % 2 === 0 ? 3 : 1);
         }
         const expected = (10 - (sum % 10)) % 10;
-        const actual = digits[11];
-        const corrected = code.slice(0, 11) + String(expected);
+        const corrected = code + String(expected);
         return {
-            status: expected === actual ? 'valid' : 'checksum_mismatch',
+            status: 'checksum_mismatch',
             original: code,
             corrected,
-            standardType: 'UPC-A',
+            standardType: 'EAN-8',
             expectedDigit: expected,
-            actualDigit: actual,
+            isMissingCheckDigit: true,
         };
     }
 
@@ -172,6 +219,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
     const supplierInputRef = useRef<HTMLInputElement>(null);
     const blurTimeoutRef = useRef<number | null>(null);
+    const searchBlurTimerRef = useRef<number | null>(null);
+    const isSearchingBarcodeRef = useRef(false);
     
     const [stockQty, setStockQty] = useState<number>(0);
     const [isBundle, setIsBundle] = useState(false);
@@ -527,12 +576,18 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     }, [isCategoryFixed, resetForm, showToast]);
 
     const performSearch = useCallback(async (code: string, source: 'scan' | 'input' = 'input') => {
+        if (searchBlurTimerRef.current) {
+            clearTimeout(searchBlurTimerRef.current);
+            searchBlurTimerRef.current = null;
+        }
+        if (isSearchingBarcodeRef.current) return;
         if (sqlStatus !== 'connected') {
             showAlert('오프라인 상태에서는 상품 등록 및 수정을 사용할 수 없습니다.');
             return;
         }
         const trimmed = code.trim();
         if (!trimmed) return;
+        isSearchingBarcodeRef.current = true;
         try {
             const results = await searchProductsForEdit(trimmed);
             if (results && results.length > 0) {
@@ -558,10 +613,11 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                     showToast('검색 결과가 없습니다.', 'error');
                 }
             }
-        } catch (e) { showToast('상품 조회 중 오류가 발생했습니다.', 'error'); }
+        } catch (e) { showToast('상품 조회 중 오류가 발생했습니다.', 'error'); } finally { isSearchingBarcodeRef.current = false; }
     }, [sqlStatus, showAlert, populateProductData, applyNewBarcodeToForm, showToast]);
 
     const handleScan = () => {
+        if (searchBlurTimerRef.current) { clearTimeout(searchBlurTimerRef.current); searchBlurTimerRef.current = null; }
         if (isOffline) {
             showAlert('오프라인 상태에서는 상품 등록 및 수정을 사용할 수 없습니다.');
             return;
@@ -573,6 +629,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     };
 
     const handleReset = () => {
+        if (searchBlurTimerRef.current) { clearTimeout(searchBlurTimerRef.current); searchBlurTimerRef.current = null; }
         setSearchInput('');
         setSearchInputMode('numeric');
         resetForm(true);
@@ -721,6 +778,17 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                 disabled={isOffline}
                                 value={searchInput}
                                 onChange={(e) => setSearchInput(e.target.value)}
+                                onBlur={() => {
+                                    const trimmed = searchInput.trim();
+                                    // 바코드 입력란에 4자리 이상 코드가 입력된 상태에서 다른 칸으로 포커스가 이동하면 자동 검증/조회 실행
+                                    if (!isOffline && trimmed.length >= 4 && /^[0-9A-Za-z-_]+$/.test(trimmed) && trimmed !== barcode) {
+                                        if (searchBlurTimerRef.current) clearTimeout(searchBlurTimerRef.current);
+                                        searchBlurTimerRef.current = window.setTimeout(() => {
+                                            searchBlurTimerRef.current = null;
+                                            performSearch(trimmed, 'input');
+                                        }, 140);
+                                    }
+                                }}
                                 placeholder={searchInputMode === 'numeric' ? '바코드 숫자 입력 (우측 한글 전환)' : '상품명/바코드 한글 입력'}
                                 className="w-full h-9 pl-2 pr-14 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 text-sm disabled:bg-gray-100"
                             />
@@ -730,6 +798,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                 onPointerDown={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
+                                    if (searchBlurTimerRef.current) { clearTimeout(searchBlurTimerRef.current); searchBlurTimerRef.current = null; }
                                     setSearchInputMode(prev => prev === 'numeric' ? 'text' : 'numeric');
                                     setTimeout(() => searchInputRef.current?.focus(), 20);
                                 }}
@@ -767,11 +836,13 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                         onClick={() => {
                                             setBarcode(barcodeAnalysis.corrected);
                                             setSearchInput(barcodeAnalysis.corrected);
-                                            showToast(`체크섬이 교정되었습니다: ${barcodeAnalysis.corrected}`, 'success');
+                                            showToast(`체크섬이 완성/교정되었습니다: ${barcodeAnalysis.corrected}`, 'success');
                                         }}
                                         className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-300 whitespace-nowrap active:scale-95"
                                     >
-                                        체크섬오류 (터치교정:{barcodeAnalysis.expectedDigit})
+                                        {barcodeAnalysis.isMissingCheckDigit
+                                            ? `끝자리누락 (터치완성:+${barcodeAnalysis.expectedDigit})`
+                                            : `체크섬오류 (터치교정:${barcodeAnalysis.expectedDigit})`}
                                     </button>
                                 )}
                                 {barcode && barcodeAnalysis.status === 'non_standard' && (
@@ -879,23 +950,48 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                     <div className="flex items-center justify-center gap-2 text-amber-600">
                                         <WarningIcon className="w-6 h-6 flex-shrink-0" />
                                         <h3 className="text-lg font-extrabold text-slate-800">
-                                            {checksumModal.mode === 'set_barcode' ? '신규 바코드 체크섬 교정' : '바코드 체크섬 확인'}
+                                            {checksumModal.analysis.isMissingCheckDigit
+                                                ? '바코드 끝자리(체크섬) 자동 완성'
+                                                : (checksumModal.mode === 'set_barcode' ? '신규 바코드 체크섬 교정' : '바코드 체크섬 확인')}
                                         </h3>
                                     </div>
                                     <p className="text-xs text-slate-600 text-center leading-relaxed">
-                                        입력한 바코드의 끝자리 체크섬이 표준({checksumModal.analysis.standardType}) 규칙과 다릅니다.<br />
-                                        <strong>체크섬에 맞게 수정된 번호</strong>로 {checksumModal.mode === 'set_barcode' ? '세팅' : '저장'}하시겠습니까?
+                                        {checksumModal.analysis.isMissingCheckDigit ? (
+                                            <>
+                                                {checksumModal.analysis.standardType === 'EAN-13' ? '13자리(EAN-13)' : '8자리(EAN-8)'} 바코드에서 <strong>마지막 체크섬 1자리가 빠진 {checksumModal.analysis.original.length}자리</strong>가 입력되었습니다.<br />
+                                                계산된 끝자리 체크섬(<strong>{checksumModal.analysis.expectedDigit}</strong>)을 붙여 {checksumModal.mode === 'set_barcode' ? '세팅' : '저장'}하시겠습니까?
+                                            </>
+                                        ) : (
+                                            <>
+                                                입력한 바코드의 끝자리 체크섬이 표준({checksumModal.analysis.standardType}) 규칙과 다릅니다.<br />
+                                                <strong>체크섬에 맞게 수정된 번호</strong>로 {checksumModal.mode === 'set_barcode' ? '세팅' : '저장'}하시겠습니까?
+                                            </>
+                                        )}
                                     </p>
                                     <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-2 text-xs">
                                         <div className="flex justify-between items-center">
-                                            <span className="font-bold text-slate-500">입력 번호 (불일치)</span>
+                                            <span className="font-bold text-slate-500">
+                                                {checksumModal.analysis.isMissingCheckDigit
+                                                    ? `입력 번호 (${checksumModal.analysis.original.length}자리)`
+                                                    : '입력 번호 (불일치)'}
+                                            </span>
                                             <span className="font-mono font-bold text-rose-600 text-sm">
-                                                {checksumModal.analysis.original.slice(0, -1)}
-                                                <span className="underline decoration-2">{checksumModal.analysis.original.slice(-1)}</span>
+                                                {checksumModal.analysis.isMissingCheckDigit ? (
+                                                    checksumModal.analysis.original
+                                                ) : (
+                                                    <>
+                                                        {checksumModal.analysis.original.slice(0, -1)}
+                                                        <span className="underline decoration-2">{checksumModal.analysis.original.slice(-1)}</span>
+                                                    </>
+                                                )}
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center pt-1.5 border-t border-slate-200">
-                                            <span className="font-bold text-blue-600">체크섬 교정 번호</span>
+                                            <span className="font-bold text-blue-600">
+                                                {checksumModal.analysis.isMissingCheckDigit
+                                                    ? `자동 완성 번호 (${checksumModal.analysis.corrected.length}자리)`
+                                                    : '체크섬 교정 번호'}
+                                            </span>
                                             <span className="font-mono font-extrabold text-blue-700 text-sm bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
                                                 {checksumModal.analysis.corrected.slice(0, -1)}
                                                 <span className="text-rose-600 underline decoration-2">{checksumModal.analysis.corrected.slice(-1)}</span>
@@ -903,7 +999,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                         </div>
                                     </div>
                                     <p className="text-[11px] text-slate-400 text-center">
-                                        * 체크섬을 쓰지 않는 예외 코드인 경우 [입력값 그대로]를 선택하세요.
+                                        * 자체코드 등 입력한 자리수를 그대로 사용하려면 [계속 입력]을 선택하세요.
                                     </p>
                                 </>
                             ) : checksumModal.analysis.status === 'non_standard' ? (
@@ -959,19 +1055,29 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
                                 <>
                                     <button
                                         type="button"
-                                        onClick={() => {
+                                        onClick={async () => {
+                                            const correctedCode = checksumModal.analysis.corrected;
                                             if (checksumModal.mode === 'set_barcode') {
                                                 setChecksumModal(prev => ({ ...prev, isOpen: false }));
-                                                applyNewBarcodeToForm(checksumModal.analysis.corrected, `체크섬 교정 바코드[${checksumModal.analysis.corrected}]가 세팅되었습니다.`);
+                                                setSearchInput(correctedCode);
+                                                try {
+                                                    const existing = await searchProductsForEdit(correctedCode);
+                                                    if (existing && existing.length > 0) {
+                                                        if (existing.length === 1) populateProductData(existing[0]);
+                                                        else { setSearchResults(existing); setIsSelectionModalOpen(true); }
+                                                        return;
+                                                    }
+                                                } catch (e) {}
+                                                applyNewBarcodeToForm(correctedCode, `체크섬 반영 바코드[${correctedCode}]가 세팅되었습니다.`);
                                             } else {
-                                                executeSaveWithBarcode(checksumModal.analysis.corrected);
+                                                executeSaveWithBarcode(correctedCode);
                                             }
                                         }}
                                         className="w-full py-2.5 px-4 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-700 shadow-sm active:scale-95 transition-transform"
                                     >
                                         {checksumModal.mode === 'set_barcode'
-                                            ? `체크섬 수정하여 세팅 (${checksumModal.analysis.corrected})`
-                                            : `체크섬 수정 후 저장 (${checksumModal.analysis.corrected})`}
+                                            ? `${checksumModal.analysis.isMissingCheckDigit ? '체크섬 완성하여 세팅' : '체크섬 수정하여 세팅'} (${checksumModal.analysis.corrected})`
+                                            : `${checksumModal.analysis.isMissingCheckDigit ? '체크섬 완성 후 저장' : '체크섬 수정 후 저장'} (${checksumModal.analysis.corrected})`}
                                     </button>
                                     <div className="grid grid-cols-3 gap-1.5">
                                         <button

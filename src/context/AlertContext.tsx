@@ -11,11 +11,23 @@ interface AlertState {
     confirmButtonClass?: string;
     cancelText?: string;
     onClose?: () => void;
+    onThirdAction?: () => void;
+    thirdActionText?: string;
 }
 
 interface AlertContextType {
     isAlertOpen: boolean;
-    showAlert: (message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void, cancelText?: string, onClose?: () => void) => void;
+    showAlert: (
+        message: string,
+        onConfirm?: () => void,
+        confirmText?: string,
+        confirmButtonClass?: string,
+        onCancel?: () => void,
+        cancelText?: string,
+        onClose?: () => void,
+        onThirdAction?: () => void,
+        thirdActionText?: string
+    ) => void;
     showToast: (message: string, type?: 'success' | 'error') => void;
 }
 
@@ -25,8 +37,29 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '' });
     const [toastState, setToastState] = useState<ToastState>({ isOpen: false, message: '', type: 'success' });
 
-    const showAlert = useCallback((message: string, onConfirm?: () => void, confirmText?: string, confirmButtonClass?: string, onCancel?: () => void, cancelText?: string, onClose?: () => void) => {
-        setAlertState({ isOpen: true, message, onConfirm, confirmText, confirmButtonClass, onCancel, cancelText, onClose });
+    const showAlert = useCallback((
+        message: string,
+        onConfirm?: () => void,
+        confirmText?: string,
+        confirmButtonClass?: string,
+        onCancel?: () => void,
+        cancelText?: string,
+        onClose?: () => void,
+        onThirdAction?: () => void,
+        thirdActionText?: string
+    ) => {
+        setAlertState({
+            isOpen: true,
+            message,
+            onConfirm,
+            confirmText,
+            confirmButtonClass,
+            onCancel,
+            cancelText,
+            onClose,
+            onThirdAction,
+            thirdActionText
+        });
     }, []);
 
     const closeAlert = useCallback(() => {
@@ -58,6 +91,8 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
                 confirmText={alertState.confirmText}
                 cancelText={alertState.cancelText}
                 confirmButtonClass={alertState.confirmButtonClass}
+                onThirdAction={alertState.onThirdAction}
+                thirdActionText={alertState.thirdActionText}
             />
             <Toast
                 isOpen={toastState.isOpen}

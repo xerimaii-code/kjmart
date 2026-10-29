@@ -9,9 +9,22 @@ interface AlertModalProps {
     confirmText?: string;
     cancelText?: string;
     confirmButtonClass?: string;
+    onThirdAction?: () => void;
+    thirdActionText?: string;
 }
 
-const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, closeHandler, onConfirm, onCancel, confirmText, cancelText, confirmButtonClass }) => {
+const AlertModal: React.FC<AlertModalProps> = ({
+    isOpen,
+    message,
+    closeHandler,
+    onConfirm,
+    onCancel,
+    confirmText,
+    cancelText,
+    confirmButtonClass,
+    onThirdAction,
+    thirdActionText
+}) => {
     const [isRendered, setIsRendered] = useState(false);
     const isActionHandledRef = useRef(false);
 
@@ -56,6 +69,16 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, closeHandler, 
         window.dispatchEvent(new CustomEvent('kjmart-alert-closed'));
     };
 
+    const handleThirdAction = () => {
+        if (isActionHandledRef.current) return;
+        isActionHandledRef.current = true;
+        if (onThirdAction) {
+            onThirdAction();
+        }
+        closeHandler();
+        window.dispatchEvent(new CustomEvent('kjmart-alert-closed'));
+    };
+
     return (
         <div className={`fixed inset-0 bg-black z-[200] flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title" onClick={handleSafeCloseOnly}>
             <div
@@ -65,8 +88,34 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, closeHandler, 
                 <div className="p-8 text-center">
                     <p id="alert-dialog-title" className="text-lg text-slate-800 whitespace-pre-line font-medium leading-relaxed">{message}</p>
                 </div>
-                <div className={`bg-slate-50 p-3 ${onConfirm ? 'grid grid-cols-2 gap-3' : 'text-center'}`}>
-                    {onConfirm ? (
+                <div className={`bg-slate-50 p-3 ${onConfirm && !onThirdAction ? 'grid grid-cols-2 gap-3' : 'flex flex-col gap-2 text-center'}`}>
+                    {onConfirm && onThirdAction ? (
+                        <>
+                            <button
+                                type="button"
+                                onClick={handleConfirm}
+                                className={`w-full py-2.5 px-4 rounded-lg font-bold text-white focus:outline-none focus:ring-2 focus:ring-opacity-75 transition-transform active:scale-95 ${confirmButtonClass || 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'}`}
+                            >
+                                {confirmText || '재스캔'}
+                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleThirdAction}
+                                    className="py-2 px-3 rounded-lg font-bold text-sm text-slate-700 bg-gray-200 hover:bg-gray-300 focus:outline-none transition-transform active:scale-95"
+                                >
+                                    {thirdActionText || '취소'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleCancel}
+                                    className="py-2 px-3 rounded-lg font-bold text-sm text-slate-800 bg-white border border-slate-300 hover:bg-slate-50 focus:outline-none transition-transform active:scale-95"
+                                >
+                                    {cancelText || '미등록 계속 입력'}
+                                </button>
+                            </div>
+                        </>
+                    ) : onConfirm ? (
                         <>
                             <button
                                 type="button"
