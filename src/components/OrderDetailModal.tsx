@@ -9,7 +9,10 @@ import { useProductSearch } from '../hooks/useProductSearch';
 import ActionModal from './ActionModal';
 import ProductSearchBar from './ProductSearchBar';
 import { formatProductDisplayName } from '../utils/mapper';
-import { isGhostClickGuarded } from '../utils/ghostClickGuard';
+const isGhostClickGuarded = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    return !!(window as any).__kjWaitingFingerRelease || Date.now() < (Number((window as any).__kjGhostGuardUntil) || 0);
+};
 
 type ItemStatus = 'new' | 'modified' | 'none';
 

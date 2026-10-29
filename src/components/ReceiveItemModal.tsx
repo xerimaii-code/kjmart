@@ -7,7 +7,12 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useDeviceSettings, useScanner } from '../context/AppContext';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
 import { formatProductDisplayName } from '../utils/mapper';
-import { armGhostClickGuard } from '../utils/ghostClickGuard';
+const armGhostClickGuard = (durationMs = 380) => {
+    if (typeof window !== 'undefined') {
+        (window as any).__kjWaitingFingerRelease = true;
+        (window as any).__kjGhostGuardUntil = Date.now() + durationMs;
+    }
+};
 
 // Global Singleton AudioContext for zero-latency feedback
 let globalAudioCtx: AudioContext | null = null;

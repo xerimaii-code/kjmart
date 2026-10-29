@@ -8,7 +8,6 @@ import LoginPage from './pages/LoginPage';
 import AddItemModal from './components/AddItemModal';
 import EditItemModal from './components/EditItemModal';
 import { IS_DEVELOPER_MODE } from './config';
-import { initGhostClickGuard } from './utils/ghostClickGuard';
 
 // Lazy load pages and heavy modals
 const MainView = lazy(() => import('./pages/MainView')); 
@@ -75,7 +74,30 @@ const AppContent: React.FC = () => {
     );
 
     useEffect(() => {
-        initGhostClickGuard();
+        if (!(window as any).__kjGhostGuardInit) {
+            (window as any).__kjGhostGuardInit = true;
+            const swallowIfGuarded = (e: Event) => {
+                const now = Date.now();
+                const waiting = !!(window as any).__kjWaitingFingerRelease;
+                const until = Number((window as any).__kjGhostGuardUntil) || 0;
+                if (!waiting && now >= until) return;
+                if (e.type === 'touchend' || e.type === 'pointerup' || e.type === 'pointercancel' || e.type === 'touchcancel') {
+                    (window as any).__kjWaitingFingerRelease = false;
+                    (window as any).__kjGhostGuardUntil = Math.max(until, now + 320);
+                }
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                if (typeof (e as any).stopImmediatePropagation === 'function') {
+                    (e as any).stopImmediatePropagation();
+                }
+                if (e.type === 'click' && !(window as any).__kjWaitingFingerRelease) {
+                    (window as any).__kjGhostGuardUntil = Math.min(Number((window as any).__kjGhostGuardUntil) || 0, now + 80);
+                }
+            };
+            ['touchstart', 'touchend', 'touchcancel', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'click'].forEach((type) => {
+                window.addEventListener(type, swallowIfGuarded, { capture: true, passive: false });
+            });
+        }
         const syncModalFlag = () => {
             setIsLocalInputModalOpen(
                 !!((window as any).__isReceiveItemModalOpen || (window as any).__isAuditItemModalOpen || (window as any).__isEventAddModalOpen)

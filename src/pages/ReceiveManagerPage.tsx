@@ -19,7 +19,10 @@ import ActionModal from '../components/ActionModal';
 import { useDraft } from '../hooks/useDraft';
 import ProductSearchBar from '../components/ProductSearchBar';
 import { formatProductDisplayName } from '../utils/mapper';
-import { isGhostClickGuarded } from '../utils/ghostClickGuard';
+const isGhostClickGuarded = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    return !!(window as any).__kjWaitingFingerRelease || Date.now() < (Number((window as any).__kjGhostGuardUntil) || 0);
+};
 
 interface ReceiveManagerPageProps {
     isActive: boolean;

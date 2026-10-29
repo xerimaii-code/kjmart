@@ -5,7 +5,12 @@ import { useDeviceSettings, useScanner } from '../context/AppContext';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
 import { XCircleIcon, SaveIcon, BarcodeScannerIcon, CheckCircleIcon, ChevronRightIcon } from './Icons';
-import { armGhostClickGuard } from '../utils/ghostClickGuard';
+const armGhostClickGuard = (durationMs = 380) => {
+    if (typeof window !== 'undefined') {
+        (window as any).__kjWaitingFingerRelease = true;
+        (window as any).__kjGhostGuardUntil = Date.now() + durationMs;
+    }
+};
 
 // Global Singleton AudioContext for zero-latency feedback
 let globalAudioCtx: AudioContext | null = null;
