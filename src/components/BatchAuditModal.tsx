@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { useAlert, useDataState } from '../context/AppContext';
+import { useAlert, useMiscUI } from '../context/AppContext';
 import { useProductSearch } from '../hooks/useProductSearch';
 import { SpinnerIcon, XCircleIcon, CheckCircleIcon } from './Icons';
 import { Product, AuditedItem } from '../types';
@@ -22,8 +22,8 @@ interface ParsedLine {
 }
 
 const BatchAuditModal: React.FC<BatchAuditModalProps> = ({ isOpen, onClose, onConfirm }) => {
-    const { products: localProducts } = useDataState();
-    const { searchByBarcode } = useProductSearch('productInquiry');
+    const { sqlStatus } = useMiscUI();
+    const { searchByBarcode } = useProductSearch('productInquiry', 50, '상품조회', { forceOnline: true, strictOnline: true });
     const { showAlert, showToast } = useAlert();
 
     const [isRendered, setIsRendered] = useState(false);
@@ -72,15 +72,22 @@ const BatchAuditModal: React.FC<BatchAuditModalProps> = ({ isOpen, onClose, onCo
         setParsedLines(tempLines);
         setStep('result');
 
+        if (sqlStatus !== 'connected') {
+            setIsAnalyzing(false);
+            setStep('input');
+            showAlert("윈포스(SQL 서버)와 연결되어 있지 않아 재고실사 분석을 진행할 수 없습니다.");
+            return;
+        }
         const results: ParsedLine[] = [];
         for (const line of tempLines) {
-            let foundProduct = localProducts.find(p => p.barcode === line.barcode);
-            if (!foundProduct) {
-                try {
-                    foundProduct = (await searchByBarcode(line.barcode)) || null;
-                } catch (e) {
-                    foundProduct = null;
-                }
+            let foundProduct: Product | null = null;
+            try {
+                foundProduct = (await searchByBarcode(line.barcode)) || null;
+            } catch (e) {
+                setIsAnalyzing(false);
+                setStep('input');
+                showAlert("윈포스(SQL 서버) 조회 중 네트워크 오류가 발생하여 일괄 분석을 중단했습니다.");
+                return;
             }
 
             results.push({

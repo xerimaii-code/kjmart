@@ -108,7 +108,7 @@ const EventContinuousAddModal: React.FC<EventContinuousAddModalProps> = ({
                             setOrgPrice(info.PreviousSalePrice || info.Price);
                             if (info.WarningMsg) setOtherEventInfo(info.WarningMsg);
                         }
-                    }).catch(e => showAlert('상품 정보 조회 실패: ' + e.message))
+                    }).catch(e => { showAlert('윈포스(SQL 서버) 상품 정보 조회 실패로 창을 닫습니다: ' + e.message); onClose(); })
                     .finally(() => setIsLoading(false));
             }
         } else {

@@ -259,84 +259,48 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
 
         for (const batch of batchesToSend) {
             let sqlSuccess = true;
-            let sentItemIds = new Set<number>();
             try {
-                // [SQL 최적화] 다건 입고 품목을 10건 단위 배치 트랜잭션으로 묶어 전송하여 네트워크 왕복 시간을 1/10로 단축
-                // (만약 특정 청크에서 오류 발생 시 즉시 단건 전송으로 폴백하여 기존과 동일하게 부분 전송 내역까지 안전하게 보존)
-                const CHUNK_SIZE = 10;
+                // [단일 트랜잭션 원자성 보장] 거래처 전표 단위로 전체 품목을 단일 트랜잭션으로 묶어 전송하며,
+                // 전송 도중 네트워크 오류나 서버 오류 발생 시 해당 전표 전체를 100% 롤백(ROLLBACK TRANSACTION)합니다.
                 const commonTime = `${batch.date} ${unifiedTime}`;
                 const commonComcode = batch.supplier.comcode ? batch.supplier.comcode.substring(0, 5) : '';
                 const commonComname = batch.supplier.name ? batch.supplier.name.substring(0, 6) : '';
 
-                for (let i = 0; i < batch.items.length; i += CHUNK_SIZE) {
-                    const chunk = batch.items.slice(i, i + CHUNK_SIZE);
-                    if (chunk.length === 1) {
-                        const item = chunk[0];
-                        const params = {
-                            time: commonTime,
-                            dtcomcode: commonComcode,
-                            comname: commonComname,
-                            barcode: item.barcode ? item.barcode.substring(0, 14) : '',
-                            qty: Number(item.quantity),
-                            cost: Number(item.costPrice),
-                            price: Number(item.sellingPrice),
-                            item_name: item.name ? item.name.substring(0, 15) : ''
-                        };
-                        await executeUserQuery('입고등록_Direct', params, insertQuery);
-                        sentItemIds.add(item.uniqueId);
-                        continue;
-                    }
-
-                    const batchParams: Record<string, any> = {
-                        time: commonTime,
-                        dtcomcode: commonComcode,
-                        comname: commonComname,
-                    };
-                    const statements: string[] = ['SET NOCOUNT ON; SET XACT_ABORT ON; BEGIN TRANSACTION;'];
-                    chunk.forEach((item, idx) => {
-                        batchParams[`barcode_${idx}`] = item.barcode ? item.barcode.substring(0, 14) : '';
-                        batchParams[`qty_${idx}`] = Number(item.quantity);
-                        batchParams[`cost_${idx}`] = Number(item.costPrice);
-                        batchParams[`price_${idx}`] = Number(item.sellingPrice);
-                        batchParams[`item_name_${idx}`] = item.name ? item.name.substring(0, 15) : '';
-                        statements.push(
-                            `INSERT INTO dbo.dt900_ipgo (day1, dtcomcode, comcode, comname, barcode, descr, money0vat, money1, itemcount, gubun, lstmoney0vat) ` +
-                            `SELECT @time, @dtcomcode, @dtcomcode, LEFT(@comname, 10), @barcode_${idx}, LEFT(ISNULL(@item_name_${idx}, ''), 30), @cost_${idx}, @price_${idx}, @qty_${idx}, CASE WHEN CAST(@qty_${idx} AS INT) >= 0 THEN 'I' ELSE 'B' END, ISNULL(p.money0vat, 0) ` +
-                            `FROM (SELECT 1 AS dummy) AS t LEFT JOIN dbo.parts AS p WITH (NOLOCK) ON p.barcode = @barcode_${idx};`
-                        );
-                    });
-                    statements.push('COMMIT TRANSACTION;');
-                    const chunkSql = statements.join('\n');
-
-                    try {
-                        await executeUserQuery('입고등록_Batch', batchParams, chunkSql);
-                        chunk.forEach(item => sentItemIds.add(item.uniqueId));
-                    } catch (chunkErr) {
-                        for (const item of chunk) {
-                            const params = {
-                                time: commonTime,
-                                dtcomcode: commonComcode,
-                                comname: commonComname,
-                                barcode: item.barcode ? item.barcode.substring(0, 14) : '',
-                                qty: Number(item.quantity),
-                                cost: Number(item.costPrice),
-                                price: Number(item.sellingPrice),
-                                item_name: item.name ? item.name.substring(0, 15) : ''
-                            };
-                            try {
-                                await executeUserQuery('입고등록_Direct', params, insertQuery);
-                                sentItemIds.add(item.uniqueId);
-                            } catch (itemErr: any) {
-                                console.error(`Item send failed: ${item.name}`, itemErr);
-                                sqlSuccess = false;
-                                break;
-                            }
-                        }
-                        if (!sqlSuccess) break;
-                    }
-                }
+                const batchParams: Record<string, any> = {
+                    time: commonTime,
+                    dtcomcode: commonComcode,
+                    comname: commonComname,
+                };
+                const statements: string[] = [
+                    'SET NOCOUNT ON; SET XACT_ABORT ON;',
+                    'BEGIN TRY',
+                    '    BEGIN TRANSACTION;'
+                ];
+                batch.items.forEach((item, idx) => {
+                    batchParams[`barcode_${idx}`] = item.barcode ? item.barcode.substring(0, 14) : '';
+                    batchParams[`qty_${idx}`] = Number(item.quantity);
+                    batchParams[`cost_${idx}`] = Number(item.costPrice);
+                    batchParams[`price_${idx}`] = Number(item.sellingPrice);
+                    batchParams[`item_name_${idx}`] = item.name ? item.name.substring(0, 15) : '';
+                    statements.push(
+                        `    INSERT INTO dbo.dt900_ipgo (day1, dtcomcode, comcode, comname, barcode, descr, money0vat, money1, itemcount, gubun, lstmoney0vat) ` +
+                        `SELECT @time, @dtcomcode, @dtcomcode, LEFT(@comname, 10), @barcode_${idx}, LEFT(ISNULL(@item_name_${idx}, ''), 30), @cost_${idx}, @price_${idx}, @qty_${idx}, CASE WHEN CAST(@qty_${idx} AS INT) >= 0 THEN 'I' ELSE 'B' END, ISNULL(p.money0vat, 0) ` +
+                        `FROM (SELECT 1 AS dummy) AS t LEFT JOIN dbo.parts AS p WITH (NOLOCK) ON p.barcode = @barcode_${idx};`
+                    );
+                });
+                statements.push(
+                    '    COMMIT TRANSACTION;',
+                    'END TRY',
+                    'BEGIN CATCH',
+                    '    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;',
+                    '    DECLARE @ErrMsg NVARCHAR(MAX) = ERROR_MESSAGE();',
+                    '    RAISERROR(@ErrMsg, 16, 1);',
+                    'END CATCH'
+                );
+                const atomicBatchSql = statements.join('\n');
+                await executeUserQuery('입고등록_Batch', batchParams, atomicBatchSql);
             } catch (err: any) { 
-                console.error(`Batch send failed: ${batch.supplier.name}`, err);
+                console.error(`Batch send failed and rolled back: ${batch.supplier.name}`, err);
                 sqlSuccess = false; 
             }
 
@@ -350,13 +314,6 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                     console.warn('Firebase backup failed after SQL success', fbErr);
                 }
             } else {
-                if (sentItemIds.size > 0) {
-                    const remainingItems = batch.items.filter(item => !sentItemIds.has(item.uniqueId));
-                    if (remainingItems.length < batch.items.length) {
-                        const updatedBatch = { ...batch, items: remainingItems, itemCount: remainingItems.length };
-                        await receiveDb.saveOrUpdateBatch(updatedBatch);
-                    }
-                }
                 results.fail++;
             }
         }

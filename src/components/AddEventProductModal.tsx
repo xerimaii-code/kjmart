@@ -105,7 +105,7 @@ const AddEventProductModal: React.FC<AddEventProductModalProps> = ({
     const [orgPrice, setOrgPrice] = useState(0);
     const [warning, setWarning] = useState<string | null>(null);
     
-    const { searchTerm, setSearchTerm, results, isSearching, search, searchByBarcode } = useProductSearch('newOrder', 50, '상품조회_행사용');
+    const { searchTerm, setSearchTerm, results, isSearching, search, searchByBarcode } = useProductSearch('productInquiry', 50, '상품조회_행사용', { forceOnline: true, strictOnline: true });
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
     useEffect(() => {
