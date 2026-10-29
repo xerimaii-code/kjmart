@@ -19,6 +19,7 @@ import ActionModal from '../components/ActionModal';
 import { useDraft } from '../hooks/useDraft';
 import ProductSearchBar from '../components/ProductSearchBar';
 import { formatProductDisplayName } from '../utils/mapper';
+import { isGhostClickGuarded } from '../utils/ghostClickGuard';
 
 interface ReceiveManagerPageProps {
     isActive: boolean;
@@ -58,7 +59,7 @@ const ReceiveListItem = memo(({ item, index, onRemove, product }: { item: Receiv
                     <span className={`font-bold ${item.quantity < 0 ? 'text-rose-600' : 'text-gray-800'}`}>{(item.costPrice * item.quantity).toLocaleString()}원</span>
                 </div>
             </div>
-            <button onClick={() => onRemove(item.uniqueId)} className="text-gray-400 hover:text-rose-500 p-2.5 rounded-full hover:bg-rose-50 transition-colors ml-1 flex-shrink-0">
+            <button onClick={(e) => { e.stopPropagation(); if (isGhostClickGuarded()) return; onRemove(item.uniqueId); }} className="text-gray-400 hover:text-rose-500 p-2.5 rounded-full hover:bg-rose-50 transition-colors ml-1 flex-shrink-0">
                 <TrashIcon className="w-5 h-5" />
             </button>
         </div>
@@ -771,7 +772,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                         <div className={`transition-all duration-300 ease-in-out ${selectedSupplier ? 'max-h-24 opacity-100 mt-3' : 'max-h-0 opacity-0 mt-0'}`}>
                             <div className="flex gap-2">
                                 <div className="relative flex-grow z-40">
-                                    <ProductSearchBar id="receive-manager-search" searchTerm={productSearch} onSearchTermChange={setProductSearch} isSearching={isSearchingProducts} results={productSearchResults} onSelectProduct={(p) => { openItemModal({ isOpen: true, product: p, source: 'search' }); }} onScan={handleScanButtonClick} isBoxUnit={false} onBoxUnitChange={() => {}} placeholder="품목 검색 (상품조회)" showBoxToggle={false} />
+                                    <ProductSearchBar id="receive-manager-search" searchTerm={productSearch} onSearchTermChange={setProductSearch} isSearching={isSearchingProducts} results={productSearchResults} onSelectProduct={(p) => { setProductSearch(''); openItemModal({ isOpen: true, product: p, source: 'search' }); }} onScan={handleScanButtonClick} isBoxUnit={false} onBoxUnitChange={() => {}} placeholder="품목 검색 (상품조회)" showBoxToggle={false} />
                                     {isUnregisteredBarcode && <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-rose-200 rounded-lg shadow-lg z-50"><div onMouseDown={(e) => { e.preventDefault(); const unregisteredProduct: Product = { barcode: debouncedProductSearch, name: '', costPrice: 0, sellingPrice: 0, spec: '', }; openItemModal({ isOpen: true, product: unregisteredProduct, source: 'search' }); }} className="p-4 hover:bg-rose-50 cursor-pointer flex items-center justify-center gap-2 group"><div className="bg-rose-100 p-1.5 rounded-full"><BarcodeScannerIcon className="w-5 h-5 text-rose-600" /></div><div className="text-left"><p className="text-sm font-bold text-rose-600">'{debouncedProductSearch}' 미등록 입고</p><p className="text-xs text-rose-400">터치하여 상품 정보 입력 후 입고</p></div></div></div>}
                                 </div>
                             </div>

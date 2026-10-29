@@ -7,6 +7,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useDeviceSettings, useScanner } from '../context/AppContext';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
 import { formatProductDisplayName } from '../utils/mapper';
+import { armGhostClickGuard } from '../utils/ghostClickGuard';
 
 // Global Singleton AudioContext for zero-latency feedback
 let globalAudioCtx: AudioContext | null = null;
@@ -59,7 +60,7 @@ type ActiveField = 'quantity' | 'cost' | 'selling';
 
 const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, onClose, onAdd, currentItems = [], onScanNext, timestamp }) => {
     const { uiFeedback } = useDeviceSettings();
-    const { closeScanner, isScannerOpen } = useScanner();
+    const { closeScanner } = useScanner();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLeftHanded, setIsLeftHanded] = useLocalStorage<boolean>('pos_layout_left_handed', false);
     const [isPositionLocked, setIsPositionLocked] = useLocalStorage<boolean>('pos_modal_locked', false);
@@ -69,6 +70,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const [customName, setCustomName] = useState('');
     const [activeField, setActiveField] = useState<ActiveField>('quantity');
     const isFirstInputRef = useRef(true);
+    const closeTimerRef = useRef<any>(null);
 
     const totalExistingQty = useMemo(() => {
         if (!product) return 0;
@@ -80,6 +82,12 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const saleActive = useMemo(() => 
         product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false
     , [product]);
+
+    useEffect(() => {
+        return () => {
+            if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        };
+    }, []);
 
     useEffect(() => {
         if (isOpen) {
@@ -99,6 +107,10 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
 
     useEffect(() => {
         if (isOpen && product) {
+            if (closeTimerRef.current) {
+                clearTimeout(closeTimerRef.current);
+                closeTimerRef.current = null;
+            }
             setIsSubmitting(false);
             setQuantity(1); setCostPrice(product.costPrice || 0); setSellingPrice(product.sellingPrice || 0);
             setCustomName(formatProductDisplayName(product.name, product.spec) || ''); setActiveField('quantity');
@@ -112,23 +124,39 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const isUnregistered = !product.name || product.name === '미등록 상품' || product.name === '';
     const displayName = isUnregistered ? (customName || '미등록 상품') : formatProductDisplayName(product.name, product.spec);
 
+    const closeModalSafely = (afterClose?: () => void) => {
+        armGhostClickGuard();
+        if (onScanNext) {
+            onClose();
+            if (afterClose) afterClose();
+        } else {
+            // 상품 검색으로 입력 시 손가락을 뗄 때(touchend/click) 아래쪽 목록이 터치되지 않도록 오버레이가 이벤트를 흡수한 뒤 닫힘
+            closeTimerRef.current = setTimeout(() => {
+                onClose();
+                if (afterClose) afterClose();
+            }, 120);
+        }
+    };
+
     const handleSafeClose = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
         if (onScanNext) closeScanner();
-        onClose();
+        closeModalSafely();
     };
 
     const handleSafeSkip = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
-        onClose();
-        if (onScanNext) onScanNext();
+        closeModalSafely(() => {
+            if (onScanNext) onScanNext();
+        });
     };
 
     const handleAddItemAction = (isReturn: boolean, shouldScanNext: boolean) => {
         if (isSubmitting || !isQuantityValid) return;
         setIsSubmitting(true);
+        armGhostClickGuard();
 
         const qty = isReturn ? -Math.abs(Number(quantity)) : Number(quantity);
         onAdd({ barcode: product.barcode, name: displayName, costPrice: Number(costPrice), sellingPrice: Number(sellingPrice), quantity: qty, isNew: true });
@@ -138,7 +166,7 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
             onScanNext();
         } else { 
             if (onScanNext) closeScanner(); 
-            onClose(); 
+            closeModalSafely(); 
         }
     };
 
@@ -151,6 +179,14 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
                 e.stopPropagation();
                 playBeep(!!uiFeedback?.soundOnPress);
                 onClick();
+            }}
+            onTouchEnd={(e) => {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+            }}
+            onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
             }}
             disabled={disabled || isSubmitting}
             className={`active:bg-gray-200 flex items-center justify-center font-bold rounded-lg touch-none select-none ${className} ${disabled || isSubmitting ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
@@ -288,7 +324,21 @@ const ReceiveItemModal: React.FC<ReceiveItemModalProps> = ({ isOpen, product, on
     const backdropClass = onScanNext ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`} onClick={(e) => { if(e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
+        <div
+            className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`}
+            onTouchEnd={(e) => {
+                if (isSubmitting) {
+                    if (e.cancelable) e.preventDefault();
+                    e.stopPropagation();
+                }
+            }}
+            onClick={(e) => {
+                e.stopPropagation();
+                if (e.target === e.currentTarget && !isSubmitting) handleSafeClose();
+            }}
+            role="dialog"
+            aria-modal="true"
+        >
             <KeypadLayout layoutId="receive_modal_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body

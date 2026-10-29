@@ -5,6 +5,7 @@ import { useDeviceSettings, useScanner } from '../context/AppContext';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
 import { XCircleIcon, SaveIcon, BarcodeScannerIcon, CheckCircleIcon, ChevronRightIcon } from './Icons';
+import { armGhostClickGuard } from '../utils/ghostClickGuard';
 
 // Global Singleton AudioContext for zero-latency feedback
 let globalAudioCtx: AudioContext | null = null;
@@ -66,9 +67,20 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
     const [isPositionLocked, setIsPositionLocked] = useLocalStorage<boolean>('pos_modal_locked', false);
     const [qtyStr, setQtyStr] = useState('1');
     const isFirstInputRef = useRef(true);
+    const closeTimerRef = useRef<any>(null);
+
+    useEffect(() => {
+        return () => {
+            if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        };
+    }, []);
 
     useEffect(() => {
         if (isOpen) {
+            if (closeTimerRef.current) {
+                clearTimeout(closeTimerRef.current);
+                closeTimerRef.current = null;
+            }
             setIsSubmitting(false);
             (window as any).__isAuditItemModalOpen = true;
             window.dispatchEvent(new CustomEvent('kjmart-modal-change'));
@@ -104,6 +116,14 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                 playBeep(!!uiFeedback?.soundOnPress); 
                 onClick(); 
             }}
+            onTouchEnd={(e) => {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+            }}
+            onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }}
             disabled={isSubmitting}
             className={`active:bg-gray-200 flex items-center justify-center font-bold rounded-lg touch-none select-none ${className} ${isSubmitting ? 'opacity-50 pointer-events-none' : ''}`}
         >
@@ -120,6 +140,14 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                 playBeep(!!uiFeedback?.soundOnPress); 
                 onAction(); 
             }}
+            onTouchEnd={(e) => {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+            }}
+            onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }}
             disabled={disabled || isSubmitting}
             className={`active:bg-gray-200 flex items-center justify-center font-bold rounded-lg whitespace-nowrap touch-none select-none ${className} ${disabled || isSubmitting ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
         >
@@ -130,19 +158,32 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
     const isImmediate = applyMode === 'immediate';
     const actionLabel = isImmediate ? '적용' : '저장';
 
+    const runActionSafely = (fn: () => void) => {
+        armGhostClickGuard();
+        if (trigger === 'scan') {
+            fn();
+        } else {
+            closeTimerRef.current = setTimeout(() => {
+                fn();
+            }, 120);
+        }
+    };
+
     const ControllerSection = (
         <div className="flex flex-col gap-1 h-full w-full min-w-0">
             <div className="flex flex-col gap-1 flex-shrink-0 mb-1">
                 <div className="grid grid-cols-2 gap-1">
-                    <ActionButton onAction={() => { setIsSubmitting(true); closeScanner(); onClose(); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm font-bold">
+                    <ActionButton onAction={() => { setIsSubmitting(true); closeScanner(); runActionSafely(() => onClose()); }} className="bg-gray-100 text-gray-500 border border-gray-200 h-11 text-xs sm:text-sm font-bold">
                         <XCircleIcon className="w-4 h-4 mr-1" />취소
                     </ActionButton>
                     <ActionButton 
                         onAction={() => { 
                             setIsSubmitting(true);
-                            if (onSkip) onSkip(); 
-                            else if (trigger === 'scan') onConfirm(Number(qtyStr), true); 
-                            else onClose(); 
+                            runActionSafely(() => {
+                                if (onSkip) onSkip(); 
+                                else if (trigger === 'scan') onConfirm(Number(qtyStr), true); 
+                                else onClose();
+                            });
                         }} 
                         className="bg-white border border-gray-300 text-gray-500 h-11 text-xs sm:text-sm font-bold"
                     >
@@ -153,7 +194,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                     onAction={() => {
                         setIsSubmitting(true);
                         closeScanner();
-                        onConfirm(Number(qtyStr), false);
+                        runActionSafely(() => onConfirm(Number(qtyStr), false));
                     }} 
                     className="bg-white border-2 border-indigo-100 text-indigo-600 h-12 text-xs sm:text-sm font-black"
                 >
@@ -163,6 +204,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                     <ActionButton 
                         onAction={() => {
                             setIsSubmitting(true);
+                            armGhostClickGuard();
                             onConfirm(Number(qtyStr), true);
                         }} 
                         className="bg-indigo-600 text-white h-16 text-base sm:text-xl font-black active:bg-indigo-700"
@@ -173,7 +215,7 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
                     <ActionButton 
                         onAction={() => {
                             setIsSubmitting(true);
-                            onConfirm(Number(qtyStr), false);
+                            runActionSafely(() => onConfirm(Number(qtyStr), false));
                         }} 
                         className="bg-indigo-600 text-white h-16 text-base sm:text-xl font-black active:bg-indigo-700"
                     >
@@ -243,11 +285,32 @@ const StockAuditItemModal: React.FC<StockAuditItemModalProps> = ({
     const backdropClass = trigger === 'scan' ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`} onClick={(e) => { if(e.target === e.currentTarget && !isSubmitting) onClose(); }} role="dialog" aria-modal="true">
+        <div
+            className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`}
+            onTouchEnd={(e) => {
+                if (isSubmitting) {
+                    if (e.cancelable) e.preventDefault();
+                    e.stopPropagation();
+                }
+            }}
+            onClick={(e) => {
+                e.stopPropagation();
+                if (e.target === e.currentTarget && !isSubmitting) handleSafeClose();
+            }}
+            role="dialog"
+            aria-modal="true"
+        >
             <KeypadLayout layoutId="audit_keypad_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body
     );
+
+    function handleSafeClose() {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        closeScanner();
+        runActionSafely(() => onClose());
+    }
 };
 
 export default StockAuditItemModal;

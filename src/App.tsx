@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage';
 import AddItemModal from './components/AddItemModal';
 import EditItemModal from './components/EditItemModal';
 import { IS_DEVELOPER_MODE } from './config';
+import { initGhostClickGuard } from './utils/ghostClickGuard';
 
 // Lazy load pages and heavy modals
 const MainView = lazy(() => import('./pages/MainView')); 
@@ -74,6 +75,7 @@ const AppContent: React.FC = () => {
     );
 
     useEffect(() => {
+        initGhostClickGuard();
         const syncModalFlag = () => {
             setIsLocalInputModalOpen(
                 !!((window as any).__isReceiveItemModalOpen || (window as any).__isAuditItemModalOpen || (window as any).__isEventAddModalOpen)

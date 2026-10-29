@@ -9,6 +9,7 @@ import { useProductSearch } from '../hooks/useProductSearch';
 import { useSortedCustomers } from '../hooks/useSortedCustomers';
 import ProductSearchBar from '../components/ProductSearchBar';
 import { formatProductDisplayName } from '../utils/mapper';
+import { isGhostClickGuarded } from '../utils/ghostClickGuard';
 
 const DRAFT_KEY = 'new-order-draft';
 
@@ -37,7 +38,7 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index, isDragging,
             onDragOver={onDragOver}
             onDrop={onDrop}
             className={`relative flex items-center p-3 space-x-3 bg-white border-b border-gray-100 last:border-0 transition-all duration-200 cursor-pointer ${isDragging ? 'opacity-40 bg-indigo-50 scale-95 z-50' : 'active:bg-gray-50 opacity-100'}`}
-            onClick={() => onEdit(item, product)}
+            onClick={(e) => { if (isGhostClickGuarded()) { e.preventDefault(); e.stopPropagation(); return; } onEdit(item, product); }}
         >
             <div className="flex-shrink-0 text-gray-300">
                 <DragHandleIcon className="w-5 h-5" />
@@ -100,7 +101,7 @@ const OrderItemRow = memo(({ item, product, onEdit, onRemove, index, isDragging,
                     <span className="font-bold text-lg leading-none text-gray-800">{item.quantity}</span>
                     <span className="text-gray-500 font-medium text-[10px]">{item.unit}</span>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); onRemove(item); }} className="text-gray-300 hover:text-rose-500 p-2.5 rounded-full transition-colors">
+                <button onClick={(e) => { e.stopPropagation(); if (isGhostClickGuarded()) return; onRemove(item); }} className="text-gray-300 hover:text-rose-500 p-2.5 rounded-full transition-colors">
                     <RemoveIcon className="w-5 h-5"/>
                 </button>
             </div>

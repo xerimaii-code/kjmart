@@ -9,6 +9,7 @@ import { useProductSearch } from '../hooks/useProductSearch';
 import ActionModal from './ActionModal';
 import ProductSearchBar from './ProductSearchBar';
 import { formatProductDisplayName } from '../utils/mapper';
+import { isGhostClickGuarded } from '../utils/ghostClickGuard';
 
 type ItemStatus = 'new' | 'modified' | 'none';
 
@@ -72,7 +73,7 @@ const EditedItemRow = memo(({
             onDragOver={onDragOver}
             onDrop={onDrop}
             className={`relative flex items-center p-3 space-x-3 bg-white border-b border-gray-100 last:border-0 transition-all duration-200 ${!isCompleted ? 'cursor-pointer active:bg-gray-50' : ''} ${isDragging ? 'opacity-40 bg-indigo-50 scale-95 z-50' : 'opacity-100'} ${isCompleted ? 'opacity-90' : ''}`}
-            onClick={() => !isCompleted && onEdit(item, product)}
+            onClick={(e) => { if (isGhostClickGuarded()) { e.preventDefault(); e.stopPropagation(); return; } if (!isCompleted) onEdit(item, product); }}
         >
             {!isCompleted && (
                 <div className="flex-shrink-0 text-gray-300">
@@ -400,6 +401,7 @@ const OrderDetailModal: React.FC = () => {
                             results={productSearchResults} 
                             onSelectProduct={(p) => {
                                 sessionProductsRef.current.set(p.barcode, p);
+                                setProductSearch('');
                                 openAddItemModal({ 
                                     product: p, 
                                     existingItem: itemsRef.current.find(i => i.barcode === p.barcode) || null, 

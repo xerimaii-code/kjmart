@@ -7,6 +7,7 @@ import { useDeviceSettings, useScanner } from '../context/AppContext';
 import { BarcodeScannerIcon, XCircleIcon, SaveIcon, ChevronRightIcon, ChatBubbleLeftIcon } from './Icons';
 import KeypadLayout, { KeypadHeaderControls } from './KeypadLayout';
 import { formatProductDisplayName } from '../utils/mapper';
+import { armGhostClickGuard } from '../utils/ghostClickGuard';
 
 // Global Singleton AudioContext for zero-latency feedback
 let globalAudioCtx: AudioContext | null = null;
@@ -64,7 +65,7 @@ interface AddItemModalProps {
 
 const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingItem, onClose, onAdd, onNextScan, trigger, initialSettings, timestamp }) => {
     const { uiFeedback } = useDeviceSettings();
-    const { closeScanner, isScannerOpen } = useScanner(); 
+    const { closeScanner } = useScanner(); 
     
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLeftHanded, setIsLeftHanded] = useLocalStorage<boolean>('pos_layout_left_handed', false);
@@ -74,13 +75,24 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const [memo, setMemo] = useState('');
     
     const isFirstInputRef = useRef(true);
+    const closeTimerRef = useRef<any>(null);
 
     const saleActive = useMemo(() => 
         product ? isSaleActive(product.saleStartDate, product.saleEndDate) : false
     , [product]);
 
     useEffect(() => {
+        return () => {
+            if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        };
+    }, []);
+
+    useEffect(() => {
         if (isOpen && product) {
+            if (closeTimerRef.current) {
+                clearTimeout(closeTimerRef.current);
+                closeTimerRef.current = null;
+            }
             setIsSubmitting(false);
             setQuantityStr('1');
             setMemo(existingItem?.memo || '');
@@ -95,27 +107,44 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const isQuantityValid = quantityStr !== '' && !isNaN(Number(quantityStr)) && Number(quantityStr) !== 0;
     const displayName = formatProductDisplayName(product.name, product.spec);
 
+    const closeModalSafely = (afterClose?: () => void) => {
+        armGhostClickGuard();
+        if (trigger === 'scan') {
+            onClose();
+            if (afterClose) afterClose();
+        } else {
+            // 상품 검색 입력 시에는 손가락을 뗄 때(touchend/click) 아래쪽 목록이 터치되지 않도록 오버레이가 이벤트를 흡수한 뒤 닫힘
+            closeTimerRef.current = setTimeout(() => {
+                onClose();
+                if (afterClose) afterClose();
+            }, 120);
+        }
+    };
+
     const handleSafeClose = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
         if (trigger === 'scan') closeScanner();
-        onClose();
+        closeModalSafely();
     };
 
     const handleSafeSkip = () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
-        onClose();
-        if (onNextScan) onNextScan();
+        closeModalSafely(() => {
+            if (onNextScan) onNextScan();
+        });
     };
 
     const handleConfirmAdd = (shouldCloseScanner: boolean, shouldScanNext: boolean) => {
         if (isSubmitting || !isQuantityValid) return;
         setIsSubmitting(true);
+        armGhostClickGuard();
         onAdd({ quantity: Number(quantityStr), unit, memo: memo.trim() });
         if (shouldCloseScanner) closeScanner();
-        onClose();
-        if (shouldScanNext && onNextScan) onNextScan();
+        closeModalSafely(() => {
+            if (shouldScanNext && onNextScan) onNextScan();
+        });
     };
 
     const KeypadButton = ({ onClick, className, children, disabled }: any) => (
@@ -127,6 +156,14 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
                 e.stopPropagation();
                 playBeep(!!uiFeedback?.soundOnPress);
                 onClick();
+            }}
+            onTouchEnd={(e) => {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+            }}
+            onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
             }}
             disabled={disabled || isSubmitting}
             className={`flex items-center justify-center font-bold rounded-lg active:bg-gray-200 touch-none select-none ${className} ${disabled || isSubmitting ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
@@ -270,7 +307,21 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, product, existingIt
     const backdropClass = trigger === 'scan' ? 'bg-black/95' : 'bg-black/50';
 
     return createPortal(
-        <div className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`} onClick={(e) => { if (e.target === e.currentTarget) handleSafeClose(); }} role="dialog" aria-modal="true">
+        <div
+            className={`fixed inset-0 z-[140] flex items-center justify-center ${backdropClass}`}
+            onTouchEnd={(e) => {
+                if (isSubmitting) {
+                    if (e.cancelable) e.preventDefault();
+                    e.stopPropagation();
+                }
+            }}
+            onClick={(e) => {
+                e.stopPropagation();
+                if (e.target === e.currentTarget && !isSubmitting) handleSafeClose();
+            }}
+            role="dialog"
+            aria-modal="true"
+        >
             <KeypadLayout layoutId="add_item_modal_layout" isLeftHanded={!!isLeftHanded} onToggleHandedness={() => setIsLeftHanded(!isLeftHanded)} leftContent={InfoSection} rightContent={ControllerSection} />
         </div>,
         document.body
