@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface AlertModalProps {
     isOpen: boolean;
@@ -14,34 +13,51 @@ interface AlertModalProps {
 
 const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, closeHandler, onConfirm, onCancel, confirmText, cancelText, confirmButtonClass }) => {
     const [isRendered, setIsRendered] = useState(false);
+    const isActionHandledRef = useRef(false);
 
     useEffect(() => {
         if (isOpen) {
+            isActionHandledRef.current = false;
             const timer = setTimeout(() => setIsRendered(true), 10);
             return () => clearTimeout(timer);
         } else {
+            isActionHandledRef.current = false;
             setIsRendered(false);
+            window.dispatchEvent(new CustomEvent('kjmart-alert-closed'));
         }
     }, [isOpen]);
     
     if (!isOpen) return null;
 
+    const handleSafeCloseOnly = () => {
+        if (isActionHandledRef.current) return;
+        isActionHandledRef.current = true;
+        closeHandler();
+        window.dispatchEvent(new CustomEvent('kjmart-alert-closed'));
+    };
+
     const handleConfirm = () => {
+        if (isActionHandledRef.current) return;
+        isActionHandledRef.current = true;
         if (onConfirm) {
             onConfirm();
         }
         closeHandler();
+        window.dispatchEvent(new CustomEvent('kjmart-alert-closed'));
     };
     
     const handleCancel = () => {
+        if (isActionHandledRef.current) return;
+        isActionHandledRef.current = true;
         if (onCancel) {
             onCancel();
         }
         closeHandler();
+        window.dispatchEvent(new CustomEvent('kjmart-alert-closed'));
     };
 
     return (
-        <div className={`fixed inset-0 bg-black z-[200] flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title" onClick={closeHandler}>
+        <div className={`fixed inset-0 bg-black z-[200] flex items-center justify-center p-4 transition-opacity duration-300 ${isRendered ? 'bg-opacity-50' : 'bg-opacity-0'}`} role="dialog" aria-modal="true" aria-labelledby="alert-dialog-title" onClick={handleSafeCloseOnly}>
             <div
                 className={`bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden transition-[opacity,transform] duration-300 will-change-[opacity,transform] ${isRendered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
                 onClick={e => e.stopPropagation()}
@@ -53,12 +69,14 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, closeHandler, 
                     {onConfirm ? (
                         <>
                             <button
+                                type="button"
                                 onClick={handleCancel}
                                 className="px-6 py-2 rounded-lg font-bold text-slate-700 bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-75 transition-transform active:scale-95"
                             >
                                 {cancelText || '취소'}
                             </button>
                             <button
+                                type="button"
                                 onClick={handleConfirm}
                                 className={`text-white px-6 py-2 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-opacity-75 transition-transform active:scale-95 ${confirmButtonClass || 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'}`}
                             >
@@ -67,7 +85,8 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, message, closeHandler, 
                         </>
                     ) : (
                         <button
-                            onClick={closeHandler}
+                            type="button"
+                            onClick={handleSafeCloseOnly}
                             className="bg-blue-500 text-white w-full px-6 py-2 rounded-lg font-bold hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-transform active:scale-95"
                         >
                             확인

@@ -5,16 +5,17 @@ import { DbSchema } from './schemaService';
 const API_ENDPOINT = 'https://kjmart.vercel.app/api/sql'; 
 const DEFAULT_TIMEOUT_MS = 30000;
 
-async function fetchApi(body: object, signal?: AbortSignal) {
+async function fetchApi(body: object, signal?: AbortSignal, customTimeoutMs?: number) {
     let timeoutId: any = null;
     let effectiveSignal = signal;
 
     if (!effectiveSignal) {
         const controller = new AbortController();
         effectiveSignal = controller.signal;
+        const effectiveTimeout = customTimeoutMs || DEFAULT_TIMEOUT_MS;
         timeoutId = setTimeout(() => {
-            controller.abort(new Error('서버 응답 시간이 초과되었습니다 (30초).'));
-        }, DEFAULT_TIMEOUT_MS);
+            controller.abort(new Error(`서버 응답 시간이 초과되었습니다 (${Math.round(effectiveTimeout / 1000)}초).`));
+        }, effectiveTimeout);
     }
 
     try {
@@ -187,7 +188,7 @@ export async function syncCategoriesFromDb(): Promise<{ gubun1: any[], gubun2: a
 }
 
 export async function searchProductsOnline(searchTerm: string, limit: number = 100): Promise<any[]> {
-    const result = await fetchApi({ type: 'searchProductsOnline', searchTerm, limit });
+    const result = await fetchApi({ type: 'searchProductsOnline', searchTerm, limit }, undefined, 8000);
     return result?.recordset || [];
 }
 
@@ -201,6 +202,7 @@ export async function executeUserQuery(name: string, params: Record<string, any>
     const activeParams = optimizedQuery ? extractParamsForQuery(optimizedQuery, params) : params;
     const body: { [key: string]: any } = { type: 'executeUserQuery', name, params: activeParams };
     if (optimizedQuery) body.userQuery = optimizedQuery;
-    const result = await fetchApi(body);
+    const isQuickLookup = name === '실시간재고확인' || name.includes('상품조회');
+    const result = await fetchApi(body, undefined, isQuickLookup ? 8000 : DEFAULT_TIMEOUT_MS);
     return result?.recordset || [];
 }

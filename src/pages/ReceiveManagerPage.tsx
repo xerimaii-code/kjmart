@@ -81,6 +81,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const [selectedBatches, setSelectedBatches] = useState<Set<number>>(new Set());
     const [expandedBatches, setExpandedBatches] = useState<Set<number>>(new Set());
     const [isSending, setIsSending] = useState(false);
+    const [isSavingBatch, setIsSavingBatch] = useState(false);
     const [loading, setLoading] = useState(false);
 
     const [editingBatch, setEditingBatch] = useState<ReceivingBatch | null>(null);
@@ -105,6 +106,14 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const editingBatchRef = useRef(editingBatch);
     
     const isProcessingScanRef = useRef(false);
+    useEffect(() => {
+        const unlockScan = () => { isProcessingScanRef.current = false; };
+        window.addEventListener('kjmart-alert-closed', unlockScan);
+        return () => window.removeEventListener('kjmart-alert-closed', unlockScan);
+    }, []);
+    const isSavingBatchRef = useRef(false);
+    const isSendingBatchRef = useRef(false);
+    const draftBatchIdRef = useRef<number | null>(null);
     const navLock = useRef(false);
 
     useEffect(() => {
@@ -236,6 +245,8 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     };
 
     const executeBatchSend = async () => {
+        if (isSendingBatchRef.current) return;
+        isSendingBatchRef.current = true;
         const batchesToSend = batches.filter(b => selectedBatches.has(b.id));
         setIsSending(true);
         const results = { success: 0, fail: 0 };
@@ -358,6 +369,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
             return next; 
         });
         setIsSending(false);
+        isSendingBatchRef.current = false;
         await refreshReceivingState();
         refreshLocalBatches(true);
         
@@ -404,6 +416,9 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const setupNewBatchState = () => {
         setEditingBatch(null);
         editingBatchRef.current = null;
+        draftBatchIdRef.current = Date.now();
+        isSavingBatchRef.current = false;
+        setIsSavingBatch(false);
         setSelectedSupplier(null);
         latestSupplierRef.current = null;
         setSupplierSearch('');
@@ -418,6 +433,9 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         if (!draft) return;
         setEditingBatch(null);
         editingBatchRef.current = null;
+        draftBatchIdRef.current = Date.now();
+        isSavingBatchRef.current = false;
+        setIsSavingBatch(false);
         setSelectedSupplier(draft.selectedSupplier);
         latestSupplierRef.current = draft.selectedSupplier;
         setSupplierSearch(draft.selectedSupplier ? draft.selectedSupplier.name : '');
@@ -435,6 +453,9 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     const editBatch = (batch: ReceivingBatch) => {
         setEditingBatch(batch);
         editingBatchRef.current = batch;
+        draftBatchIdRef.current = batch.id;
+        isSavingBatchRef.current = false;
+        setIsSavingBatch(false);
         setSelectedSupplier(batch.supplier);
         latestSupplierRef.current = batch.supplier;
         setSupplierSearch(batch.supplier.name);
@@ -530,6 +551,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
     }, [saveDraft]);
 
     const handleSaveBatch = useCallback(async () => {
+        if (isSavingBatchRef.current) return;
         const curSupplier = latestSupplierRef.current;
         const curItems = latestItemsRef.current;
         const curDate = latestDateRef.current;
@@ -537,9 +559,16 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
 
         if (!curSupplier) { showAlert('거래처를 선택해주세요.'); return; }
         if (curItems.length === 0) { showAlert('입고할 품목이 없습니다.'); return; }
+
+        isSavingBatchRef.current = true;
+        setIsSavingBatch(true);
+
+        const batchId = curEditing ? curEditing.id : (draftBatchIdRef.current || Date.now());
+        draftBatchIdRef.current = batchId;
+
         const totalAmount = curItems.reduce((sum, item) => sum + (item.costPrice * item.quantity), 0);
         const batchToSave: ReceivingBatch = {
-            id: curEditing ? curEditing.id : Date.now(),
+            id: batchId,
             date: curDate, supplier: curSupplier, items: curItems,
             itemCount: curItems.length, totalAmount,
             status: curEditing ? curEditing.status : 'draft',
@@ -547,13 +576,20 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
         };
         try {
             await receiveDb.saveOrUpdateBatch(batchToSave);
-            try { await addReceivingBatch(batchToSave); } catch (e) {}
             if (!curEditing) removeDraft();
+            draftBatchIdRef.current = null;
             showToast('저장되었습니다.', 'success');
             closeEditor();
+            // 네트워크 불안정 시 UI가 멈추지 않도록 온라인 DB(Firebase) 백업은 백그라운드로 비동기 처리(중복 방지 ID 고정)
+            addReceivingBatch(batchToSave).catch((e) => console.warn('Background Firebase batch sync deferred:', e));
             await refreshReceivingState();
             setTimeout(() => refreshLocalBatches(true), 50);
-        } catch (e: any) { showAlert(`저장에 실패했습니다. (${e.message})`); }
+        } catch (e: any) {
+            showAlert(`저장에 실패했습니다. (${e.message})`);
+        } finally {
+            isSavingBatchRef.current = false;
+            setIsSavingBatch(false);
+        }
     }, [showAlert, removeDraft, showToast, closeEditor, refreshReceivingState, refreshLocalBatches]);
 
     const handleClearForm = () => {
@@ -801,7 +837,7 @@ const ReceiveManagerPage: React.FC<ReceiveManagerPageProps> = ({ isActive, onClo
                             <span className="text-sm font-bold text-gray-500">총 {currentItems.length}건</span>
                             <div className="flex items-end gap-1"><span className={`text-lg font-bold tracking-tight ${currentTotalAmount < 0 ? 'text-rose-600' : 'text-indigo-600'}`}>{currentTotalAmount.toLocaleString()}</span><span className="text-sm font-bold text-gray-600 mb-0.5">원</span></div>
                         </div>
-                        <button onClick={handleSaveBatch} className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-bold text-lg shadow-lg active:scale-95 hover:bg-indigo-700 transition-colors">저장하기</button>
+                        <button onClick={handleSaveBatch} disabled={isSavingBatch} className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-bold text-lg shadow-lg active:scale-95 hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2">{isSavingBatch ? <><SpinnerIcon className="w-5 h-5 animate-spin" /> 저장 중...</> : '저장하기'}</button>
                     </div>
                 </div>
             </ActionModal>

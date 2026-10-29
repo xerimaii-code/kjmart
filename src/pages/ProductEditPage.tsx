@@ -191,6 +191,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
 
     const [isEditMode, setIsEditMode] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const isSavingRef = useRef(false);
     
     const [searchInput, setSearchInput] = useState('');
     // 처음 검색칸 활성화 시 숫자 키패드가 기본으로 뜨도록 numeric 기본 설정 (우측 버튼으로 한글 전환 가능)
@@ -596,6 +597,8 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
     }, [isOpen, initialBarcode, sqlStatus, performSearch]);
 
     const executeSaveWithBarcode = async (targetBarcode: string) => {
+        if (isSavingRef.current) return;
+        isSavingRef.current = true;
         setChecksumModal(prev => ({ ...prev, isOpen: false }));
         setBarcode(targetBarcode);
         setSearchInput(targetBarcode);
@@ -631,7 +634,7 @@ export default function ProductEditPage({ isOpen, onClose, initialBarcode }: Pro
             try { sessionStorage.removeItem(PRODUCT_EDIT_DRAFT_KEY); } catch (e) {}
             recordUsage(comcode);
 
-        } catch (e: any) { showAlert(`저장 오류: ${e.message}`); } finally { setIsSaving(false); }
+        } catch (e: any) { showAlert(`저장 오류: ${e.message}`); } finally { isSavingRef.current = false; setIsSaving(false); }
     };
 
     const handleSave = () => {

@@ -155,6 +155,7 @@ const OrderDetailModal: React.FC = () => {
     const { dataSourceSettings } = useDeviceSettings();
     
     const [isSaving, setIsSaving] = useState(false);
+    const isSavingDetailRef = useRef(false);
     const [draftLoaded, setDraftLoaded] = useState(false);
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     
@@ -177,6 +178,11 @@ const OrderDetailModal: React.FC = () => {
     }, [productSearchResults]);
 
     const isProcessingScanRef = useRef(false);
+    useEffect(() => {
+        const unlockScan = () => { isProcessingScanRef.current = false; };
+        window.addEventListener('kjmart-alert-closed', unlockScan);
+        return () => window.removeEventListener('kjmart-alert-closed', unlockScan);
+    }, []);
     const itemsRef = useRef<OrderItem[]>([]);
 
     const handleItemsChange = useCallback((newItems: OrderItem[]) => {
@@ -314,7 +320,7 @@ const OrderDetailModal: React.FC = () => {
             await deleteDraft(activeOrder.id);
             showToast("수정 내역이 저장되었습니다.", 'success');
             closeDetailModal();
-        } catch (err) { showAlert('저장에 실패했습니다.'); } finally { setIsSaving(false); }
+        } catch (err) { showAlert('저장에 실패했습니다.'); } finally { isSavingDetailRef.current = false; setIsSaving(false); }
     }, [activeOrder, dataSourceSettings.newOrder, products, sqlStatus, searchByBarcode, updateOrder, showToast, closeDetailModal, showAlert]);
 
     const handleOpenScanner = useCallback(() => {

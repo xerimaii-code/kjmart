@@ -313,6 +313,7 @@ const EventRegistrationPage: React.FC<EventRegistrationPageProps> = ({ isActive,
     const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
     const [eventName, setEventName] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const isSavingRef = useRef(false);
     const [junno, setJunno] = useState('');
     const [addedItems, setAddedItems] = useState<any[]>([]);
     const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
@@ -374,7 +375,9 @@ const EventRegistrationPage: React.FC<EventRegistrationPageProps> = ({ isActive,
     }, [addedItems, eventName, startDate, endDate, step, junno, isActive, saveDraft]);
 
     const handleCreateMaster = async () => {
+        if (isSavingRef.current) return;
         if (!eventName.trim()) { showAlert('행사명을 입력해주세요.'); return; }
+        isSavingRef.current = true;
         setIsSaving(true);
         try {
             const params = { SaleName: eventName, StartDay: startDate, EndDay: endDate };
@@ -390,7 +393,7 @@ const EventRegistrationPage: React.FC<EventRegistrationPageProps> = ({ isActive,
             }
         } catch (error: any) { 
             showAlert(`오류: ${error.message}`); 
-        } finally { setIsSaving(false); }
+        } finally { isSavingRef.current = false; setIsSaving(false); }
     };
 
     const handleSaveItem = async (itemData: any) => {
@@ -427,13 +430,16 @@ const EventRegistrationPage: React.FC<EventRegistrationPageProps> = ({ isActive,
     const handleSaveAndApply = async () => {
         if (addedItems.length === 0) { showAlert('등록된 상품이 없습니다.'); return; }
         
-        const today = new Date().toISOString().slice(0, 10);
+        const nowD = new Date();
+        const today = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-${String(nowD.getDate()).padStart(2, '0')}`;
         const isImmediate = startDate <= today;
         const msg = isImmediate 
             ? `행사 시작일이 오늘이거나 이전입니다.\n최종 확정 시 모든 품목이 '즉시 적용'됩니다. 진행하시겠습니까?`
             : `행사 시작일이 미래(${startDate})입니다.\n최종 확정 시 '예약' 처리됩니다. 진행하시겠습니까?`;
 
         showAlert(msg, async () => {
+            if (isSavingRef.current) return;
+            isSavingRef.current = true;
             setIsSaving(true);
             try {
                 const res = await executeUserQuery('행사등록_최종확정', { 
@@ -451,6 +457,7 @@ const EventRegistrationPage: React.FC<EventRegistrationPageProps> = ({ isActive,
             } catch (e: any) { 
                 showAlert(`저장 오류: ${e.message}`); 
             } finally { 
+                isSavingRef.current = false;
                 setIsSaving(false); 
             }
         }, '최종 확정', 'bg-indigo-600');
@@ -487,10 +494,12 @@ const EventRegistrationPage: React.FC<EventRegistrationPageProps> = ({ isActive,
             } else {
                 showToast("미등록 상품입니다.", "error");
                 isProcessingScanRef.current = false;
+                window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
             }
         } catch (e) {
             showToast("상품 조회 오류", 'error');
             isProcessingScanRef.current = false;
+            window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
         }
     }, [searchByBarcode, showToast]);
 

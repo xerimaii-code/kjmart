@@ -105,6 +105,7 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const [auditedItems, setAuditedItems] = useState<AuditedItem[]>([]);
     const [applyMode, setApplyMode] = useState<'immediate' | 'batch'>('immediate');
     const [isSaving, setIsSaving] = useState(false);
+    const isSavingRef = useRef(false);
     const [isFetchingStock, setIsFetchingStock] = useState(false);
     
     const inputRef = useRef<HTMLInputElement>(null);
@@ -206,7 +207,7 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     }, [auditModalProps.isOpen]);
 
     const handleAddAudit = async (auditQty: number, nextScan: boolean = false) => {
-        if (!auditModalProps.product || isSaving) return;
+        if (!auditModalProps.product || isSaving || isSavingRef.current) return;
         const p = auditModalProps.product;
 
         setSearchTerm('');
@@ -221,6 +222,7 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 showAlert('현재 오프라인 상태이므로 즉시 적용할 수 없습니다.\n[일괄 적용] 모드로 변경하여 목록에 저장한 뒤 온라인 연결 시 전송해주세요.');
                 return;
             }
+            isSavingRef.current = true;
             setIsSaving(true);
             try {
                 const params = { Barcode: p.barcode, RealQty: auditQty };
@@ -231,8 +233,8 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
                 } else throw new Error(res?.[0]?.MSG || '서버 처리 오류');
             } catch (e: any) {
                 showAlert(`즉시 반영 실패: ${e.message}`);
-                setIsSaving(false); return;
-            } finally { setIsSaving(false); }
+                return;
+            } finally { isSavingRef.current = false; setIsSaving(false); }
         } else {
             setAuditedItems(prev => {
                 const existing = prev.find(i => i.barcode === p.barcode);
@@ -262,24 +264,41 @@ const InventoryAuditPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
 
     const handleBatchSave = async () => {
-        if (auditedItems.length === 0 || isSaving) return;
+        if (auditedItems.length === 0 || isSaving || isSavingRef.current) return;
         if (sqlStatus !== 'connected') {
             const connected = await checkSql();
             if (!connected) { showAlert("SQL 서버에 연결되어 있지 않습니다."); return; }
         }
 
         showAlert(`총 ${auditedItems.length}건의 실사를 일괄 전송하시겠습니까?`, async () => {
+            if (isSavingRef.current) return;
+            isSavingRef.current = true;
             setIsSaving(true);
-            let successCount = 0;
+            const succeededBarcodes = new Set<string>();
             try {
                 for (const item of auditedItems) {
                     const params = { Barcode: item.barcode, RealQty: item.auditQty };
                     const res = await executeUserQuery('재고실사_즉시저장', params, IMMEDIATE_AUDIT_SQL);
-                    if (res?.[0]?.RESULT === 'SUCCESS') successCount++;
+                    if (res?.[0]?.RESULT === 'SUCCESS') {
+                        succeededBarcodes.add(item.barcode);
+                    } else {
+                        throw new Error(res?.[0]?.MSG || `${item.name} 반영 실패`);
+                    }
                 }
-                showToast(`${successCount}건의 실사가 저장되었습니다.`, 'success');
-                setAuditedItems([]); removeDraft();
-            } catch (e: any) { showAlert(`저장 중 오류 발생: ${e.message}`); } finally { setIsSaving(false); }
+                showToast(`${succeededBarcodes.size}건의 실사가 저장되었습니다.`, 'success');
+                setAuditedItems([]);
+                removeDraft();
+            } catch (e: any) {
+                if (succeededBarcodes.size > 0) {
+                    setAuditedItems(prev => prev.filter(i => !succeededBarcodes.has(i.barcode)));
+                    showAlert(`${succeededBarcodes.size}건 반영 후 오류가 발생했습니다. 미전송 품목만 목록에 남겼습니다.\n(${e.message})`);
+                } else {
+                    showAlert(`저장 중 오류 발생: ${e.message}`);
+                }
+            } finally {
+                isSavingRef.current = false;
+                setIsSaving(false);
+            }
         });
     };
 

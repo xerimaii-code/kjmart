@@ -714,7 +714,8 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         // ... (동일) ...
         if (!selectedEvent) return;
     
-        const today = new Date().toISOString().slice(0, 10);
+        const nowD = new Date();
+        const today = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-${String(nowD.getDate()).padStart(2, '0')}`;
         const oldStatus = selectedEvent.isappl;
         const newStatus = (editableStartDate <= today && editableEndDate >= today) ? '1' : (editableStartDate > today ? '0' : '2');
     
@@ -764,10 +765,12 @@ const EventManagementPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             } else {
                 showToast("미등록 상품입니다.", "error");
                 isProcessingScanRef.current = false;
+                window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
             }
         } catch (e) {
             showToast("상품 조회 오류", 'error');
             isProcessingScanRef.current = false;
+            window.dispatchEvent(new CustomEvent('kjmart-scanner-resume'));
         }
     }, [searchByBarcode, showToast]);
 

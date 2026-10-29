@@ -214,9 +214,27 @@ const ScannerModal: React.FC<ScannerModalProps> = ({
         const handleResumeEvent = () => {
             resumeCameraFeed();
         };
+        const handleVisibilityOrFocus = () => {
+            if (document.visibilityState !== 'visible' || !isMountedRef.current || !isOpen) return;
+            const stream = mediaStreamRef.current;
+            const track = stream?.getVideoTracks()?.[0];
+            if (!stream || !stream.active || !track || track.readyState === 'ended') {
+                startCamera();
+            } else if (!isPausedRef.current && !invalidScanAlertOpenRef.current) {
+                resumeCameraFeed();
+            }
+        };
         window.addEventListener('kjmart-scanner-resume', handleResumeEvent);
-        return () => window.removeEventListener('kjmart-scanner-resume', handleResumeEvent);
-    }, [resumeCameraFeed]);
+        window.addEventListener('kjmart-alert-closed', handleResumeEvent);
+        document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+        window.addEventListener('focus', handleVisibilityOrFocus);
+        return () => {
+            window.removeEventListener('kjmart-scanner-resume', handleResumeEvent);
+            window.removeEventListener('kjmart-alert-closed', handleResumeEvent);
+            document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+            window.removeEventListener('focus', handleVisibilityOrFocus);
+        };
+    }, [resumeCameraFeed, isOpen]);
 
     // 수량 입력창이 뜨면(isPaused=true) 비디오 프레임과 디코딩을 즉시 정지하여 뒤쪽 깜빡임을 원천 차단하고,
     // 수량 입력창이 닫히면(isPaused=false) 즉시 비디오 재생을 재개하여 바코드 조준 화면이 움직이도록 처리

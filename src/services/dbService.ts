@@ -65,6 +65,55 @@ const cleanForFirebase = <T>(obj: T): T => {
     return JSON.parse(JSON.stringify(obj));
 };
 
+/**
+ * 네트워크 불안정 시 Firebase Realtime Database의 set/update Promise가 서버 ACK를 기다리며
+ * 무한 대기(UI 먹통)하는 현상을 방지하기 위한 타임아웃 래퍼.
+ * Firebase SDK는 set/update 호출 즉시 내부 전송 큐에 작업을 등록하므로,
+ * 일정 시간(timeoutMs) 내 ACK가 오지 않더라도 UI 블로킹을 해제하고 연결 복구 시 자동 반영되도록 처리합니다.
+ */
+const withFirebaseWriteTimeout = <T>(promise: Promise<T>, timeoutMs: number = 2500, fallbackValue?: T): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                resolve(fallbackValue as T);
+            }
+        }, timeoutMs);
+
+        promise.then((res) => {
+            if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                resolve(res);
+            }
+        }).catch((err) => {
+            if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                reject(err);
+            } else {
+                console.warn("Deferred Firebase write error after timeout:", err);
+            }
+        });
+    });
+};
+
+// 중복 저장 방지를 위한 최근 전송 지문(Fingerprint) 캐시
+const recentOrderFingerprints = new Map<string, { id: number; timestamp: number }>();
+const recentReceivingFingerprints = new Map<string, { id: number; timestamp: number }>();
+const DEDUP_WINDOW_MS = 20000; // 20초 내 동일 데이터 중복 생성 원천 차단
+
+const buildOrderFingerprint = (customerComcode: string, total: number, items: OrderItem[]): string => {
+    const itemsKey = items.map(i => `${i.barcode}:${i.quantity}:${i.unit}:${i.memo || ''}`).join(',');
+    return `${customerComcode}|${total}|${itemsKey}`;
+};
+
+const buildReceivingFingerprint = (batch: ReceivingBatch): string => {
+    const itemsKey = (batch.items || []).map(i => `${i.barcode}:${i.quantity}:${i.costPrice}`).join(',');
+    return `${batch.supplier?.comcode || ''}|${batch.date || ''}|${batch.status || 'draft'}|${batch.totalAmount}|${itemsKey}`;
+};
+
 // --- Settings ---
 export const getCommonSettings = async (): Promise<Partial<DeviceSettings & { sqlPassword?: string }>> => {
     if (!db) return {};
@@ -82,12 +131,12 @@ export const getDeviceSettings = async (deviceId: string): Promise<Partial<Devic
 
 export const setDeviceSettings = async (deviceId: string, settings: DeviceSettings): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
-    await set(ref(db, `settings/devices/${deviceId}`), cleanForFirebase(settings));
+    await withFirebaseWriteTimeout(set(ref(db, `settings/devices/${deviceId}`), cleanForFirebase(settings)), 2500);
 };
 
 export const setDeviceSetting = async (deviceId: string, key: keyof DeviceSettings, value: any): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
-    await set(ref(db, `settings/devices/${deviceId}/${key}`), value === undefined ? null : value);
+    await withFirebaseWriteTimeout(set(ref(db, `settings/devices/${deviceId}/${key}`), value === undefined ? null : value), 2500);
 };
 
 // --- Listener functions for realtime updates (Optimized for multi-user broadcast without N-item re-render lag) ---
@@ -224,7 +273,7 @@ export const cleanupOldReceivingBatches = async (daysToKeep: number = 2): Promis
             });
             
             if (Object.keys(updates).length > 0) {
-                await update(batchRef, updates);
+                await withFirebaseWriteTimeout(update(batchRef, updates), 2500);
                 console.log(`Cleaned up ${count} old sent receiving batches from Server.`);
             }
         }
@@ -286,11 +335,11 @@ export const getSyncLogs = async (storeName: 'customers' | 'products', limit: nu
 
 export const getOrderItems = async (orderId: number): Promise<OrderItem[]> => {
     if (!db) return [];
-    let snapshot = await get(ref(db, `order-items/${orderId}`));
-    let data = snapshot.val();
+    let snapshot = await withFirebaseWriteTimeout(get(ref(db, `order-items/${orderId}`)), 4000, null as any);
+    let data = snapshot?.val?.();
     if (!data) {
-        snapshot = await get(ref(db, `orders/${orderId}/items`));
-        data = snapshot.val();
+        snapshot = await withFirebaseWriteTimeout(get(ref(db, `orders/${orderId}/items`)), 4000, null as any);
+        data = snapshot?.val?.();
     }
     if (!data) return [];
     
@@ -338,7 +387,23 @@ export const addOrder = async (
     items: OrderItem[]
 ): Promise<number> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
-    const newOrderId = Date.now();
+
+    const nowTs = Date.now();
+    const fp = buildOrderFingerprint(orderData.customer?.comcode || '', orderData.total, items);
+    const existing = recentOrderFingerprints.get(fp);
+
+    // 20초 내 동일한 발주 데이터가 다시 요청된 경우 새 ID를 만들지 않고 기존 ID를 재사용(멱등성 보장)
+    const newOrderId = (existing && (nowTs - existing.timestamp) < DEDUP_WINDOW_MS)
+        ? existing.id
+        : ((orderData as any).id || nowTs);
+
+    recentOrderFingerprints.set(fp, { id: newOrderId, timestamp: nowTs });
+    if (recentOrderFingerprints.size > 50) {
+        for (const [k, v] of recentOrderFingerprints.entries()) {
+            if (nowTs - v.timestamp > DEDUP_WINDOW_MS) recentOrderFingerprints.delete(k);
+        }
+    }
+
     const now = new Date().toISOString();
     
     const newOrder: any = {
@@ -350,7 +415,7 @@ export const addOrder = async (
     const updates: { [key: string]: any } = {};
     updates[`/orders/${newOrderId}`] = cleanForFirebase(newOrder);
     updates[`/order-items/${newOrderId}`] = cleanForFirebase(items);
-    await update(ref(db), updates);
+    await withFirebaseWriteTimeout(update(ref(db), updates), 3000);
     return newOrderId;
 };
 
@@ -362,7 +427,7 @@ export const updateOrder = (order: Order, items: OrderItem[]): Promise<void> => 
     const updates: { [key: string]: any } = {};
     updates[`/orders/${order.id}`] = cleanForFirebase(updatedOrderData);
     updates[`/order-items/${order.id}`] = cleanForFirebase(items);
-    return update(ref(db), updates);
+    return withFirebaseWriteTimeout(update(ref(db), updates), 3000);
 };
 
 export const updateOrderStatus = (
@@ -377,7 +442,7 @@ export const updateOrderStatus = (
         [`/orders/${orderId}/completionDetails`]: cleanForFirebase(completionDetails),
         [`/orders/${orderId}/updatedAt`]: now,
     };
-    return update(ref(db), updates);
+    return withFirebaseWriteTimeout(update(ref(db), updates), 2500);
 };
 
 export const deleteOrder = (orderId: number): Promise<void> => {
@@ -385,13 +450,13 @@ export const deleteOrder = (orderId: number): Promise<void> => {
     const updates: { [key: string]: null } = {};
     updates[`/orders/${orderId}`] = null;
     updates[`/order-items/${orderId}`] = null;
-    return update(ref(db), updates);
+    return withFirebaseWriteTimeout(update(ref(db), updates), 2500);
 };
 
 export const clearOrders = async (): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
     const updates: { [key: string]: null } = { '/orders': null, '/order-items': null };
-    await update(ref(db), updates);
+    await withFirebaseWriteTimeout(update(ref(db), updates), 3000);
 };
 
 export const clearOrdersBeforeDate = async (isoDateString: string): Promise<number> => {
@@ -410,13 +475,13 @@ export const clearOrdersBeforeDate = async (isoDateString: string): Promise<numb
             deletedCount++;
         }
     });
-    if (Object.keys(updates).length > 0) await update(ref(db), updates);
+    if (Object.keys(updates).length > 0) await withFirebaseWriteTimeout(update(ref(db), updates), 3000);
     return deletedCount;
 };
 
 export const setValue = async (path: string, value: any): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
-    await set(ref(db, path), cleanForFirebase(value));
+    await withFirebaseWriteTimeout(set(ref(db, path), cleanForFirebase(value)), 2500);
 };
 
 export const subscribeToUserQueries = (callback: (queries: UserQuery[]) => void): (() => void) => {
@@ -437,31 +502,48 @@ export const addUserQuery = async (queryData: Omit<UserQuery, 'id'>): Promise<st
     if (!db) throw DB_UNAVAILABLE_ERROR;
     const queriesRef = ref(db, 'saved-queries');
     const newQueryRef = push(queriesRef);
-    await set(newQueryRef, cleanForFirebase(queryData));
+    await withFirebaseWriteTimeout(set(newQueryRef, cleanForFirebase(queryData)), 2500);
     return newQueryRef.key!;
 };
 
 export const updateUserQuery = async (id: string, updates: Partial<UserQuery>): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
     const queryRef = ref(db, `saved-queries/${id}`);
-    await update(queryRef, cleanForFirebase(updates));
+    await withFirebaseWriteTimeout(update(queryRef, cleanForFirebase(updates)), 2500);
 };
 
 export const deleteUserQuery = async (id: string): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
     const queryRef = ref(db, `saved-queries/${id}`);
-    await set(queryRef, null);
+    await withFirebaseWriteTimeout(set(queryRef, null), 2500);
 };
 
 export const addReceivingBatch = async (batch: ReceivingBatch): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
-    const cleanBatch = cleanForFirebase(batch);
-    await set(ref(db, `receiving-batches/${batch.id}`), cleanBatch);
+
+    const nowTs = Date.now();
+    const fp = buildReceivingFingerprint(batch);
+    const existing = recentReceivingFingerprints.get(fp);
+
+    // 20초 내 동일한 입고 데이터가 중복 요청된 경우 기존 ID를 그대로 사용하여 중복 레코드 생성 차단
+    const targetId = (existing && (nowTs - existing.timestamp) < DEDUP_WINDOW_MS)
+        ? existing.id
+        : batch.id;
+
+    recentReceivingFingerprints.set(fp, { id: targetId, timestamp: nowTs });
+    if (recentReceivingFingerprints.size > 50) {
+        for (const [k, v] of recentReceivingFingerprints.entries()) {
+            if (nowTs - v.timestamp > DEDUP_WINDOW_MS) recentReceivingFingerprints.delete(k);
+        }
+    }
+
+    const cleanBatch = cleanForFirebase({ ...batch, id: targetId });
+    await withFirebaseWriteTimeout(set(ref(db, `receiving-batches/${targetId}`), cleanBatch), 2000);
 };
 
 export const deleteReceivingBatch = async (batchId: number): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
-    await set(ref(db, `receiving-batches/${batchId}`), null);
+    await withFirebaseWriteTimeout(set(ref(db, `receiving-batches/${batchId}`), null), 2000);
 };
 
 export const getReceivingBatchesByDateRange = async (startDate: string, endDate: string): Promise<ReceivingBatch[]> => {
@@ -485,8 +567,8 @@ export const getReceivingBatchesByDateRange = async (startDate: string, endDate:
             endAt(String(endTs))
         );
         
-        const snapshot = await get(batchesQuery);
-        if (!snapshot.exists()) return [];
+        const snapshot = await withFirebaseWriteTimeout(get(batchesQuery), 5000, null as any);
+        if (!snapshot || !snapshot.exists()) return [];
 
         const batches: ReceivingBatch[] = [];
         snapshot.forEach((child) => {
@@ -503,7 +585,7 @@ export const getReceivingBatchesByDateRange = async (startDate: string, endDate:
 export const clearSyncLogs = async (): Promise<void> => {
     if (!db) throw DB_UNAVAILABLE_ERROR;
     const logsRef = ref(db, 'sync-logs');
-    await set(logsRef, null);
+    await withFirebaseWriteTimeout(set(logsRef, null), 2500);
 };
 
 // --- Learning Context ---
@@ -524,18 +606,18 @@ export const addLearningItem = async (item: Omit<LearningItem, 'id'>): Promise<s
   if (!db) throw DB_UNAVAILABLE_ERROR;
   const learningRef = ref(db, 'learning/sqlContext');
   const newItemRef = push(learningRef);
-  await set(newItemRef, cleanForFirebase(item));
+  await withFirebaseWriteTimeout(set(newItemRef, cleanForFirebase(item)), 2500);
   return newItemRef.key!;
 };
 
 export const updateLearningItem = async (id: string, updates: Partial<Omit<LearningItem, 'id'>>): Promise<void> => {
   if (!db) throw DB_UNAVAILABLE_ERROR;
   const itemRef = ref(db, `learning/sqlContext/${id}`);
-  await update(itemRef, cleanForFirebase(updates));
+  await withFirebaseWriteTimeout(update(itemRef, cleanForFirebase(updates)), 2500);
 };
 
 export const deleteLearningItem = async (id: string): Promise<void> => {
   if (!db) throw DB_UNAVAILABLE_ERROR;
   const itemRef = ref(db, `learning/sqlContext/${id}`);
-  await set(itemRef, null);
+  await withFirebaseWriteTimeout(set(itemRef, null), 2500);
 };

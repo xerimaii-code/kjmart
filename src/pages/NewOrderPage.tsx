@@ -165,11 +165,18 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     const isCustomerSelected = !!selectedCustomer; 
     const [isBoxUnitDefault, setIsBoxUnitDefault] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const isSavingOrderRef = useRef(false);
+    const draftOrderIdRef = useRef<number | null>(null);
     
     const customerSearchInputRef = useRef<HTMLInputElement>(null);
     const scrollableContainerRef = useRef<HTMLDivElement | null>(null);
     const customerSearchBlurTimeout = useRef<number | null>(null);
     const isProcessingScanRef = useRef(false);
+    useEffect(() => {
+        const unlockScan = () => { isProcessingScanRef.current = false; };
+        window.addEventListener('kjmart-alert-closed', unlockScan);
+        return () => window.removeEventListener('kjmart-alert-closed', unlockScan);
+    }, []);
 
     const { sortedCustomers, recordUsage } = useSortedCustomers(customers);
 
@@ -260,12 +267,17 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
     };
     
     const handleSaveOrder = useCallback(async () => {
+        if (isSavingOrderRef.current) return;
         const currentCustomer = selectedCustomerRef.current;
         const currentItemsList = itemsRef.current;
         if (!currentCustomer) { showAlert("거래처를 선택해주세요."); return; }
         if (currentItemsList.length === 0) { showAlert("발주할 품목이 없습니다."); return; }
 
+        isSavingOrderRef.current = true;
         setIsSaving(true);
+        if (!draftOrderIdRef.current) {
+            draftOrderIdRef.current = Date.now();
+        }
         try {
             const isLocalMode = dataSourceSettings.newOrder === 'offline';
 
@@ -299,10 +311,12 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
             const finalTotal = Math.floor(itemsWithSnapshot.reduce((sum, item) => sum + (item.price * item.quantity), 0));
             
             const newOrderId = await addOrder({ 
+                id: draftOrderIdRef.current,
                 customer: currentCustomer, 
                 items: itemsWithSnapshot, 
                 total: finalTotal 
-            });
+            } as any);
+            draftOrderIdRef.current = null;
             
             setLastModifiedOrderId(newOrderId);
             removeDraftData();
@@ -318,6 +332,7 @@ const NewOrderPage: React.FC<{ isActive: boolean }> = ({ isActive }) => {
         } catch (error) {
             showAlert("발주 저장에 실패했습니다.");
         } finally {
+            isSavingOrderRef.current = false;
             setIsSaving(false);
         }
     }, [addOrder, setLastModifiedOrderId, showAlert, removeDraftData, showToast, resetItems, setProductSearch, products, searchByBarcode, dataSourceSettings.newOrder, sqlStatus]);
